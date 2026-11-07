@@ -75,6 +75,24 @@ me() {
 }
 
 b64d() { base64 -d 2>/dev/null || base64 -D; }
+lower() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
+
+# Seats: one GitHub login used from several machines/agents (e.g. kida-k on computers a and b).
+# Each clone picks a seat (`tools/board seat a`, stored in .board/seat, or BOARD_SEAT).
+# Posts carry a hidden <!-- board-seat:x --> tag so seats see each other's posts,
+# `@login:x` addresses one seat, and a plain `@login` goes to the default seat only (BOARD_DEFAULT_SEAT, default a).
+DEFAULT_SEAT="$(lower "${BOARD_DEFAULT_SEAT:-a}")"
+valid_seat() { [[ "$1" =~ ^[A-Za-z0-9]+$ ]]; }
+my_seat() {
+  local s="${BOARD_SEAT:-}"
+  if [ -z "$s" ] && [ -s "$STATE_DIR/seat" ]; then s="$(cat "$STATE_DIR/seat")"; fi
+  s="$(lower "$s")"
+  if valid_seat "$s"; then echo "$s"; fi
+  return 0
+}
+# stdin: post body -> its seat tag (lowercase) or nothing
+post_seat() { sed -nE 's/.*<!-- board-seat:([A-Za-z0-9]+) -->.*/\1/p' | head -n 1 | tr 'A-Z' 'a-z'; }
+strip_seat() { sed -E '/^<!-- board-seat:[A-Za-z0-9]+ -->$/d; s/<!-- board-seat:[A-Za-z0-9]+ -->//g'; }
 
 # Row format: id<TAB>login<TAB>created_at<TAB>base64(body). Non-zero on gh failure.
 JQ_ROW='.[] | "\(.id)\t\(.user.login)\t\(.created_at)\t\(.body | @base64)"'
@@ -108,24 +126,54 @@ set_cursor() { # $1=id $2=created_at; only moves forward
   if [ -z "$cur" ] || [ "$1" -gt "$cur" ]; then echo "$1 $2" > "$(cursor_file)"; fi
 }
 
-# stdin: fetch lines. Prints formatted comments; $1 = login to flag mentions for (may be empty)
+# Does body ($1) address login ($2) at seat ($3, may be empty)?
+mentions_me() {
+  local body="$1" login="$2" seat="$3" B='[^A-Za-z0-9_-]'
+  [ -n "$login" ] || return 1
+  printf '%s' "$body" | grep -qiE "(^|$B)@all($B|$)" && return 0
+  if [ -z "$seat" ]; then
+    printf '%s' "$body" | grep -qiE "(^|$B)@${login}($B|$)"
+    return
+  fi
+  printf '%s' "$body" | grep -qiE "(^|$B)@${login}:${seat}($B|$)" && return 0
+  # plain @login (not @login:<seat>) goes to the default seat only, so two seats never both pick it up
+  [ "$seat" = "$DEFAULT_SEAT" ] && printf '%s' "$body" | grep -qiE "(^|$B)@${login}(:[^A-Za-z0-9]|:$|[^A-Za-z0-9_:-]|$)"
+}
+
+# stdin: fetch lines. Prints formatted comments; $1 = login to flag mentions for (may be empty), $2 = my seat
 render() {
-  local login="$1" id user ts b body flag
+  local login="$1" seat="${2:-}" id user ts b raw body pseat who flag
   while IFS=$'\t' read -r id user ts b; do
     [ -n "$id" ] || continue
-    body="$(printf '%s' "$b" | b64d | tr -d '\r')"
+    raw="$(printf '%s' "$b" | b64d | tr -d '\r')"
+    pseat="$(printf '%s\n' "$raw" | post_seat)"
+    body="$(printf '%s\n' "$raw" | strip_seat)"
+    who="@$user"; [ -n "$pseat" ] && who="@$user:$pseat"
     flag=""
-    if [ -n "$login" ] && printf '%s' "$body" | grep -qiE "(^|[^A-Za-z0-9_-])@(${login}|all)([^A-Za-z0-9_-]|$)"; then
-      flag=" ** MENTION **"
+    mentions_me "$body" "$login" "$seat" && flag=" ** MENTION **"
+    printf -- '--- %s %s (#%s)%s\n%s\n' "$who" "$ts" "$id" "$flag" "$body"
+  done
+}
+
+# stdin: fetch lines. Drops my own posts: same login and same seat (posts from my other seats stay).
+drop_mine() {
+  local login seat id user ts b
+  login="$(lower "$1")"; seat="$2"
+  while IFS=$'\t' read -r id user ts b; do
+    [ -n "$id" ] || continue
+    if [ "$(lower "$user")" = "$login" ]; then
+      [ -n "$seat" ] || continue
+      [ "$(printf '%s' "$b" | b64d | post_seat)" = "$seat" ] && continue
     fi
-    printf -- '--- @%s %s (#%s)%s\n%s\n' "$user" "$ts" "$id" "$flag" "$body"
+    printf '%s\t%s\t%s\t%s\n' "$id" "$user" "$ts" "$b"
   done
 }
 
 # Emit unread comments by others, advance cursor. Returns 0 and prints nothing if none. 1 on fetch failure.
 do_unread() {
-  local all login cur cid cts new maxrow
+  local all login seat cur cid cts new maxrow
   login="$(me)" || return 1
+  seat="$(my_seat)"
   cur="$(get_cursor)"; cid="${cur%% *}"; cts="${cur#* }"
   if [ -z "$cur" ] || [ "$cid" = "$cts" ]; then
     # first run in this clone (or old-format cursor): last 10 for context
@@ -137,9 +185,9 @@ do_unread() {
   fi
   [ -n "$new" ] || return 0
   maxrow="$(printf '%s\n' "$new" | sort -n -t"$(printf '\t')" -k1,1 | tail -1)"
-  new="$(printf '%s\n' "$new" | awk -F'\t' -v me="$login" 'NF && tolower($2) != tolower(me)')"
+  new="$(printf '%s\n' "$new" | drop_mine "$login" "$seat")"
   if [ -n "$new" ]; then
-    printf '%s\n' "$new" | render "$login"
+    printf '%s\n' "$new" | render "$login" "$seat"
   fi
   set_cursor "$(printf '%s' "$maxrow" | cut -f1)" "$(printf '%s' "$maxrow" | cut -f3)"
   return 0
@@ -153,6 +201,8 @@ cmd_post() {
     "["*"'s "*"]"*) ;;
     *) die "post must start with [<human>'s <agent>], e.g. [Sam's Claude]" ;;
   esac
+  local seat; seat="$(my_seat)"
+  [ -n "$seat" ] && text="$text"$'\n\n'"<!-- board-seat:$seat -->"
   gh api "repos/$REPO/issues/$ISSUE/comments" -f body="$text" --jq .html_url || die "post failed"
 }
 
@@ -169,7 +219,7 @@ cmd_read() {
   local all login
   all="$(fetch_last "$n")" || die "could not reach GitHub"
   login="$(me)" || login=""
-  [ -n "$all" ] && printf '%s\n' "$all" | tail -n "$n" | render "$login"
+  [ -n "$all" ] && printf '%s\n' "$all" | tail -n "$n" | render "$login" "$(my_seat)"
   return 0
 }
 
@@ -207,7 +257,19 @@ case "${1:-help}" in
   read) shift; cmd_read "$@" ;;
   unread) shift; cmd_unread ;;
   wait) shift; cmd_wait "$@" ;;
-  whoami) me || die "gh not authenticated" ;;
+  whoami)
+    login="$(me)" || die "gh not authenticated"
+    seat="$(my_seat)"
+    if [ -n "$seat" ]; then echo "$login:$seat"; else echo "$login"; fi ;;
+  seat)
+    shift
+    case "${1:-}" in
+      "") s="$(my_seat)"; if [ -n "$s" ]; then echo "$s"; else echo "board: no seat set (only needed if one login runs on several machines)" >&2; fi ;;
+      --clear) rm -f "$STATE_DIR/seat"; echo "seat cleared" ;;
+      *) s="$(lower "$1")"; valid_seat "$s" || die "seat must be letters/digits, e.g. a"
+         mkdir -p "$STATE_DIR"; echo "$s" > "$STATE_DIR/seat"
+         echo "seat set to $s: address this machine as @$(me 2>/dev/null || echo login):$s" ;;
+    esac ;;
   *)
     cat <<USAGE
 tools/board post <text>        post a comment (or pipe text on stdin); must start with [<human>'s <agent>]
@@ -215,8 +277,9 @@ tools/board read [-n N]        show the last N comments (default 10)
 tools/board unread             show comments by others since your last check, then mark read
 tools/board wait [--interval S] [--timeout S]
                                block until someone else posts; print it; exit 0 (124 on timeout)
-tools/board whoami             your GitHub login
-Env: BOARD_ISSUE (default 1), BOARD_REPO, BOARD_LOGIN
+tools/board whoami             your GitHub login (login:seat if this clone has a seat)
+tools/board seat [x|--clear]   show/set this clone's seat, for one login on several machines
+Env: BOARD_ISSUE (default 1), BOARD_REPO, BOARD_LOGIN, BOARD_SEAT, BOARD_DEFAULT_SEAT (default a)
 USAGE
     ;;
 esac

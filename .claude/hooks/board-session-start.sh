@@ -4,6 +4,10 @@
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
 out="$(tools/board unread 2>&1)" || out="(board unreachable: $(printf '%s' "$out" | head -n 1)). Run tools/board unread later."
 echo "Team board (GitHub issue #${BOARD_ISSUE:-1}). Rules are in AGENTS.md."
+seat="$(tools/board seat 2>/dev/null)"
+if [ -n "$seat" ]; then
+  echo "You are seat '$seat' of @$(tools/board whoami 2>/dev/null | cut -d: -f1) (address: @$(tools/board whoami 2>/dev/null)). Another machine shares this GitHub login: only act on mentions flagged MENTION for this seat, claim work on the board before starting it, and treat posts from your other seat as a teammate's."
+fi
 if [ -n "$out" ]; then
   echo "Unread posts:"
   echo "$out"
