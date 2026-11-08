@@ -15,17 +15,20 @@ def _run(rows, now=100.0, **kw):
 
 
 def test_single_station_is_uniform_and_latest_reading_wins():
-    r = _run([("st1", 10.0, 100.0, 100.0, 3.0, None, None), ("st1", 90.0, 100.0, 100.0, 5.0, None, None)])
+    r = _run(
+        [("st1", 10.0, 100.0, 100.0, 3.0, None, None), ("st1", 90.0, 100.0, 100.0, 5.0, None, None)],
+        baseline="zero",
+    )
     np.testing.assert_allclose(r.layer, 5.0)
     assert r.extras["n_points"] == 1
 
 
 def test_idw_leans_to_nearer_station_and_clips_negative():
     rows = [("a", 90.0, 12.5, 12.5, 10.0, None, None), ("b", 90.0, 487.5, 487.5, 0.0, None, None)]
-    r = _run(rows)
+    r = _run(rows, baseline="zero")
     assert r.layer[0, 0] > 9.0 and r.layer[19, 19] < 1.0
     assert 4.0 < r.layer[10, 10] < 6.0
-    neg = _run([("a", 90.0, 100.0, 100.0, -4.0, None, None)])
+    neg = _run([("a", 90.0, 100.0, 100.0, -4.0, None, None)], baseline="zero")
     assert not neg.layer.any()
 
 
@@ -141,3 +144,38 @@ def test_unset_diffusion_defaults_to_half_a_cell_of_spread():
     assert np.sqrt(2 * d * 200.0) == pytest.approx(GRID.cell_m / 2)  # sigma scales with cell_m
     sharp = _run(rows, vector_speed_field="speed", vector_dir_field="dir", shift_layer="x.y", diffusion_m2_s=0.0)
     assert sharp.extras["shift"]["args"]["diffusion_m2_s"] == 0.0
+
+
+# -- #194: contrast baseline (default) ------------------------------------------------------
+
+
+def test_single_point_field_contributes_nothing_by_default():
+    r = _run([("st1", 90.0, 250.0, 250.0, 25.0, None, None)])
+    assert not r.layer.any()  # uniform: no spatial information
+    assert r.extras["baseline"] == pytest.approx(25.0) and r.extras["n_points"] == 1
+
+
+def test_smooth_multi_point_field_keeps_only_its_contrast():
+    rows = [("a", 90.0, 12.5, 12.5, 20.0, None, None), ("b", 90.0, 487.5, 487.5, 23.0, None, None)]
+    rel = _run(rows)
+    absolute = _run(rows, baseline="zero")
+    np.testing.assert_allclose(rel.layer, absolute.layer - absolute.layer.min(), atol=1e-9)
+    assert rel.layer[0, 0] == 0.0  # the lower (20) point's corner is the baseline
+    assert rel.layer[-1, -1] == pytest.approx(rel.layer.max())  # the higher (23) point's corner
+    assert rel.layer.max() < 3.0  # at most the stations' spread
+
+
+def test_single_point_field_next_to_a_point_layer_does_not_flood_the_grid():
+    from app.engine.combine import combine
+    from app.engine.operators.density import DensityParams, density
+
+    field_layer = _run([("st1", 90.0, 250.0, 250.0, 25.0, None, None)]).layer
+    absolute = _run([("st1", 90.0, 250.0, 250.0, 25.0, None, None)], baseline="zero").layer
+    pts = [(f"u{k}", 100.0, 100.0 + k, 100.0) for k in range(8)]
+    dens = density(events_from_xy(GRID, pts), DensityParams(), None, FixedClock(100.0), GRID).layer
+    fixed = combine([dens, field_layer], [3.0, 1.0], [0.6, 0.8]).score
+    flooded = combine([dens, absolute], [3.0, 1.0], [0.6, 0.8]).score
+    assert (flooded >= 0.5).mean() == 1.0  # the old behaviour: one grid-wide hotspot
+    assert 0.0 < (fixed >= 0.5).mean() < 0.05  # now only around the points
+    i, j = np.unravel_index(np.argmax(fixed), fixed.shape)
+    assert abs(i - 4) <= 1 and abs(j - 4) <= 1  # the point cluster near (100, 100)
