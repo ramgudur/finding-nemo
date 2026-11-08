@@ -1,7 +1,10 @@
 import type {
+  ActivateResponse,
+  AppSpec,
   Change,
   ClockControl,
   ClockState,
+  CompileRequest,
   ErrorSeries,
   HotspotsResponse,
   MapResponse,
@@ -25,7 +28,16 @@ async function request<T>(method: "GET" | "POST", path: string, authorityKey?: s
   if (authorityKey) headers["X-Authority-Key"] = authorityKey;
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const r = await fetch(`/v1${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-  if (!r.ok) throw new ApiError(r.status, `${r.status} ${r.statusText} for ${path}`);
+  if (!r.ok) {
+    let detail = "";
+    try {
+      const body = (await r.json()) as { detail?: unknown };
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      // not JSON
+    }
+    throw new ApiError(r.status, detail || `${r.status} ${r.statusText} for ${path}`);
+  }
   return (await r.json()) as T;
 }
 
@@ -35,6 +47,9 @@ const app = (appId: string) => `/apps/${encodeURIComponent(appId)}`;
 export const api = {
   map: (appId: string, key?: string) => get<MapResponse>(`${app(appId)}/map?format=geojson`, key),
   hotspots: (appId: string, key?: string) => get<HotspotsResponse>(`${app(appId)}/hotspots`, key),
+  // builder (the console has no login; the authority key is issued at activation)
+  compile: (appId: string, body: CompileRequest) => request<AppSpec>("POST", `${app(appId)}/compile`, undefined, body),
+  activate: (appId: string) => request<ActivateResponse>("POST", `${app(appId)}/activate`),
   // authority only (api/trace.py)
   trace: (appId: string, key: string) => get<TraceEntry[]>(`${app(appId)}/trace?limit=50`, key),
   changes: (appId: string, key: string) => get<Change[]>(`${app(appId)}/changes`, key),
