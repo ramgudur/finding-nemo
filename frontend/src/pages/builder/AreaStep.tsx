@@ -12,20 +12,23 @@ export function AreaStep() {
   const draft = useDraft();
   const s = useBuilderStore.getState();
   const problems = areaProblems(draft);
+  const cellManual = useBuilderStore((st) => st.cellMManual === true);
 
   return (
     <>
       <StepIntro
         step={2}
         title="Where does it work?"
-        lead="Frame the area your app covers on the map. Everything it scores, and every route it gives, stays inside this box."
+        lead="Frame the area your app covers on the map, or draw a box around it. Everything it scores, and every route it gives, stays inside this box."
       />
 
       <AreaPicker
         bbox={draft.bbox}
         onBbox={s.setBbox}
         cellM={draft.cellM}
+        cellManual={cellManual}
         onCellM={s.setCellM}
+        onCellAuto={s.setCellAuto}
         points={draft.destinationPoints}
         onAddPoint={s.addDestinationPoint}
         onUpdatePoint={s.updateDestinationPoint}

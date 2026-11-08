@@ -4,6 +4,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type { ActivateResponse, AppSpec, BBox, CompileInput, DestinationPoint } from "../api/types";
+import { autoCellSize, cellSizeForArea } from "../components/sources/sourceUtils";
 
 export type AppStatus = "idle" | "compiling" | "proposed" | "activating" | "active";
 
@@ -16,6 +17,8 @@ interface BuilderState {
   intent: string;
   bbox: BBox | null;
   cellM: number;
+  /** True once the dev picked the cell size by hand; a new area then keeps it while it still fits. Older drafts lack it (auto). */
+  cellMManual: boolean;
   destinationPoints: DestinationPoint[];
   sources: CompileInput[];
   /** Sample webhook payloads the dev pasted, by source id (only for the client-side preview; never sent). */
@@ -36,8 +39,12 @@ interface BuilderState {
   setAppId: (id: string) => void;
   setAppIdCustom: (custom: boolean) => void;
   setIntent: (text: string) => void;
+  /** Sets the area, and re-picks the cell size unless a hand-picked size still fits it. */
   setBbox: (b: BBox) => void;
+  /** A size the dev chose by hand (marks it manual). */
   setCellM: (m: number) => void;
+  /** Back to the automatic size for the current area. */
+  setCellAuto: () => void;
   addDestinationPoint: (p: DestinationPoint) => void;
   updateDestinationPoint: (index: number, patch: Partial<DestinationPoint>) => void;
   removeDestinationPoint: (index: number) => void;
@@ -67,6 +74,7 @@ const initialDraft = {
   intent: "",
   bbox: null as BBox | null,
   cellM: 25,
+  cellMManual: false,
   destinationPoints: [] as DestinationPoint[],
   sources: [] as CompileInput[],
   webhookSamples: {} as Record<string, string>,
@@ -102,8 +110,14 @@ export const useBuilderStore = create<BuilderState>()(
       setAppId: (id) => set({ appId: id }),
       setAppIdCustom: (custom) => set({ appIdCustom: custom }),
       setIntent: (text) => set({ intent: text }),
-      setBbox: (b) => set({ bbox: b }),
-      setCellM: (m) => set({ cellM: m }),
+      setBbox: (b) =>
+        set((s) => {
+          const next = cellSizeForArea(b, s.cellM, s.cellMManual === true);
+          return { bbox: b, cellM: next.cellM, cellMManual: next.manual };
+        }),
+      setCellM: (m) => set({ cellM: m, cellMManual: true }),
+      setCellAuto: () =>
+        set((s) => (s.bbox ? { cellM: autoCellSize(s.bbox) ?? s.cellM, cellMManual: false } : { cellMManual: false })),
       addDestinationPoint: (p) => set((s) => ({ destinationPoints: [...s.destinationPoints, p] })),
       updateDestinationPoint: (index, patch) =>
         set((s) => ({ destinationPoints: s.destinationPoints.map((p, i) => (i === index ? { ...p, ...patch } : p)) })),
@@ -150,6 +164,7 @@ export const useBuilderStore = create<BuilderState>()(
         intent: s.intent,
         bbox: s.bbox,
         cellM: s.cellM,
+        cellMManual: s.cellMManual,
         destinationPoints: s.destinationPoints,
         sources: s.sources,
         webhookSamples: s.webhookSamples,

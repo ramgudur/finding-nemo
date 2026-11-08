@@ -30,6 +30,54 @@ export function gridCells(b: BBox, cellM: number): [number, number] {
 
 export const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
 
+// --- Cell size: an automatic default that fits the area (MAX_GRID_CELLS is the server's hard cap) ---
+
+/** Round cell sizes the builder offers, smallest first (metres per side). */
+export const CELL_SIZES = [5, 10, 25, 50, 100, 250, 500, 1000] as const;
+export const LARGEST_CELL_SIZE = 1000;
+
+/**
+ * The automatic size aims for at most this many cells. The cap (MAX_GRID_CELLS) is what the server accepts,
+ * but every 2 s engine tick and the backtest layer cache scale with the cell count, so a comfortable default
+ * stays well under it. A size chosen by hand may go up to the cap.
+ */
+export const AUTO_CELL_TARGET = 40_000;
+
+/** rows x cols for a bbox at cellM (same maths as GridSpec.shape()). */
+export function cellCount(b: BBox, cellM: number): number {
+  const [h, w] = gridCells(b, cellM);
+  return h * w;
+}
+
+/** True when the server would accept this cell size for this bbox. */
+export function cellSizeFits(b: BBox, cellM: number): boolean {
+  return Number.isFinite(cellM) && cellM > 0 && cellCount(b, cellM) <= MAX_GRID_CELLS;
+}
+
+/**
+ * The automatic cell size for a bbox: the smallest round size with at most AUTO_CELL_TARGET cells; failing
+ * that, the largest round size (fewest cells) while it is under the cap; null when even that is over the cap
+ * (area too large).
+ */
+export function autoCellSize(b: BBox): number | null {
+  for (const m of CELL_SIZES) if (cellCount(b, m) <= AUTO_CELL_TARGET) return m;
+  return cellCount(b, LARGEST_CELL_SIZE) <= MAX_GRID_CELLS ? LARGEST_CELL_SIZE : null;
+}
+
+/** True when even the largest round cell size is over the cap: only a smaller area helps. */
+export function areaTooLarge(b: BBox): boolean {
+  return autoCellSize(b) === null;
+}
+
+/**
+ * Cell size after the area changes. A size the dev chose by hand stays while it still fits the new area;
+ * otherwise (or when it was automatic) the automatic size takes over and the manual flag resets.
+ */
+export function cellSizeForArea(b: BBox, cellM: number, manual: boolean): { cellM: number; manual: boolean } {
+  if (manual && cellSizeFits(b, cellM)) return { cellM, manual: true };
+  return { cellM: autoCellSize(b) ?? LARGEST_CELL_SIZE, manual: false };
+}
+
 export const OPTION_KIND: Record<SourceOptionType, InputKind> = {
   post_api: "push",
   webhook: "push",
@@ -240,9 +288,14 @@ export function areaProblems(d: SourcesDraft): string[] {
   const dims = d.bbox && d.cellM > 0 ? gridCells(d.bbox, d.cellM) : null;
   const b = d.bbox;
   return [
-    !b && "Frame the area on the map, then choose \u201cUse this view\u201d.",
+    !b && "Frame the area on the map and choose \u201cUse this view\u201d, or draw a box with \u201cDraw area\u201d.",
     !(d.cellM > 0) && "Cell size must be a positive number of metres.",
+    b &&
+      areaTooLarge(b) &&
+      `Area too large: shrink it. Even ${LARGEST_CELL_SIZE} m cells would give ${cellCount(b, LARGEST_CELL_SIZE).toLocaleString()} cells; the limit is ${MAX_GRID_CELLS.toLocaleString()}.`,
     dims &&
+      b &&
+      !areaTooLarge(b) &&
       dims[0] * dims[1] > MAX_GRID_CELLS &&
       `The grid would be ${(dims[0] * dims[1]).toLocaleString()} cells; the limit is ${MAX_GRID_CELLS.toLocaleString()}. Use a smaller area or bigger cells.`,
     d.destinationPoints.some((p) => !p.label.trim()) && "Every destination needs a label.",
