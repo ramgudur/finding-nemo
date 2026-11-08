@@ -51,7 +51,7 @@ export function DemoTools({ appId, authorityKey }: { appId: string; authorityKey
 
   if (!demo || !clock) return null;
   return (
-    <section style={{ display: "grid", gap: 12, borderTop: "1px solid #eee", paddingTop: 12 }}>
+    <section className="grid gap-4">
       <SimControls appId={appId} authorityKey={authorityKey} clock={clock} onChange={setClock} />
       <ErrorChart data={errors} />
     </section>

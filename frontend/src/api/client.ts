@@ -4,6 +4,7 @@ import type {
   Change,
   ClockControl,
   ClockState,
+  CompileStatus,
   CompileRequest,
   ErrorSeries,
   Event,
@@ -111,4 +112,13 @@ export const api = {
   controlClock: (appId: string, key: string, body: ClockControl) =>
     request<ClockState>("POST", `/debug${app(appId)}/clock`, key, body),
   errorSeries: (appId: string, key: string) => get<ErrorSeries>(`/debug${app(appId)}/error`, key),
+};
+
+// --- Architecture page additions (fe-arch-shell) ---
+
+export const archApi = {
+  /** Full spec; `key` may be empty (no header). The server answers 401 without the authority key. */
+  getAppMaybeKey: (appId: string, key: string) => get<AppSpec>(`${app(appId)}`, key || undefined),
+  /** Public: 200 while the app is not active, 404 ("no compile for this app") once it is active. */
+  compileStatus: (appId: string) => get<CompileStatus>(`${app(appId)}/compile/status`),
 };
