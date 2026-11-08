@@ -66,13 +66,14 @@ The lead assigned areas up front (table below). Within your area, claim tasks as
 
 ### Areas
 
-Assigned by the lead on 2026-11-07. **Since 2026-11-08 (about 01:40 CST): all new tasks go to Allen (`@AllenZheng-05`). Kida A, Kida B and Navmi take no new tasks (usage limits); their open issues moved to Allen. The table below records who built what; Allen may edit any of these areas, posting on the board as usual.** Paths are under `backend/app/` unless they start with `backend/`, `frontend/`, `sim/` or `specs/`. New areas get added here by the lead.
+Assigned by the lead on 2026-11-07. **Since 2026-11-08 (about 01:40 CST): all new tasks go to Allen (`@AllenZheng-05`). Exception: `frontend/` is Navmi's alone (see the table); don't tag her. Kida A, Kida B and Navmi take no new tasks (usage limits); their open issues moved to Allen. The table below records who built what; Allen may edit any of these areas, posting on the board as usual.** Paths are under `backend/app/` unless they start with `backend/`, `frontend/`, `sim/` or `specs/`. New areas get added here by the lead.
 
 | Area | Owner | Folders | Notes |
 |---|---|---|---|
 | Lead: scope, routing, contracts | `@ramgudur` | `CLAUDE.md`, `AGENTS.md`; approves every change to `core/models.py`, `frontend/src/api/types.ts`, `specs/*.json` | Routes issues and checks PR scope. |
 | Scoring model (physics-informed / physics-based ML) | `@kida-k:b` | `engine/operators/` (incl. `flow_source.py`), `engine/combine.py`, `engine/layer_cache.py`, `engine/verification.py`, `engine/backtest.py`, `engine/trust.py`, `reference/` | |
-| Frontend, sim, specs, fixtures, end-user path | `@AllenZheng-05` | `frontend/`, `sim/`, `specs/`, `backend/tests/fixtures/`, `api/instructions.py`, `api/debug.py`, `api/trace.py` | Back 2026-11-08. Issues #107 (instructions API + end-user page), #108 (step-7 live path). `specs/` changes still need lead approval. |
+| Frontend | `@Navmi-Srithaj` (2026-11-08, solo) | `frontend/` (incl. `src/api/types.ts`) | Navmi builds the frontend on her own. Nobody else edits `frontend/`, and agents don't tag her on the board. She mirrors new contracts from CLAUDE.md's Core contracts. |
+| Sim, specs, fixtures, end-user API | `@AllenZheng-05` | `sim/`, `specs/`, `backend/tests/fixtures/`, `api/instructions.py`, `api/debug.py`, `api/trace.py` | Back 2026-11-08. |
 | Engine runtime + tool layer | `@kida-k:a`; `tools/compiler_tools.py`: `@kida-k:b` | `engine/tick.py`, `engine/grid.py`, `engine/tiers.py`, `core/clock.py`, `tools/` (incl. `guards.py`, `message_guard.py`, `poi_tools.py`) | If seat a is unavailable, seat b reviews tick.py changes. |
 | Routing, GPU path check | `@kida-k:a` | `engine/routing.py` | Issues #94, #95 (done); #86 (CuPy batch check, moved from seat b; touches `engine/backtest.py` only to fix GPU bugs, coordinate with seat b). |
 | Candidate generators, POI Labeler | `@kida-k:b` | `engine/candidates/`, `agents/poi_labeler.py` + its prompt | Issues #102, #106. |
