@@ -23,6 +23,7 @@ from app.api import instructions as instructions_api
 from app.api import labels as labels_api
 from app.api import outputs as outputs_api
 from app.api import scout as scout_api
+from app.api import simulate as simulate_api
 from app.api import trace as trace_api
 from app.api import webhooks as webhooks_api
 from app.api import ws as ws_api
@@ -154,6 +155,7 @@ def create_app(
     fastapi_app.include_router(labels_api.router)  # authority-only label proposals (accept/dismiss)
     fastapi_app.include_router(webhooks_api.router)  # real webhook receiver (#222)
     fastapi_app.include_router(catalog_api.router)  # public operator catalogue
+    fastapi_app.include_router(simulate_api.router)  # dev-requested simulated events (authority only, #268)
     if get_settings().demo_mode:  # /v1/debug/* exists only in demo mode; it alone reads sim ground truth (rule 9)
         debug_api.install(fastapi_app, engine)
 
