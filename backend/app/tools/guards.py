@@ -14,6 +14,7 @@ A failed check raises ``GuardError`` with reasons meant for the trace.
 
 from __future__ import annotations
 
+import math
 import uuid
 from collections.abc import Mapping, Sequence
 
@@ -82,8 +83,12 @@ def check_weights(
     *,
     methods_with_data: int,
     authority_evidence: bool,
+    dev_revert: bool = False,
 ) -> dict[str, float]:
-    """Tier rules on a proposed update. Returns the final (renormalized) weights or raises."""
+    """Tier rules on a proposed update. Returns the final (renormalized) weights or raises.
+    ``dev_revert`` (dev only, never set by an agent tool) lifts the anti-drift gates; see tiers.slot_bounds."""
+    if dev_revert:
+        require_dev(ctx, "the dev-revert exemption")
     res = tiers.check_update(
         weight_slots(ctx),
         proposed,
@@ -91,6 +96,7 @@ def check_weights(
         now=ctx.now(),
         authority_evidence=authority_evidence,
         methods_with_data=methods_with_data,
+        dev_revert=dev_revert,
     )
     if not res.ok:
         raise GuardError(res.reasons)
@@ -132,8 +138,16 @@ def live_trust_map(ctx: ToolContext) -> dict[str, float]:
     return dict(ctx.engine.trust(ctx.app_id)) if ctx.engine.trust else {}
 
 
-def apply_weights(ctx: ToolContext, new: Mapping[str, float], *, reason: str, backtest_id: str | None) -> list[Change]:
-    """Write the change everywhere: live engine, weights history, Change log. Returns the Changes."""
+def apply_weights(
+    ctx: ToolContext,
+    new: Mapping[str, float],
+    *,
+    reason: str,
+    backtest_id: str | None,
+    reverts: Mapping[str, str] | None = None,
+) -> list[Change]:
+    """Write the change everywhere: live engine, weights history, Change log. Returns the Changes.
+    ``reverts`` maps layer_id -> the Change id each new Change reverts (dev reverts only)."""
     rt = ctx.runtime
     tier_of = layer_tiers(ctx)
     now, now_dt = ctx.now(), ctx.now_dt()
@@ -156,6 +170,7 @@ def apply_weights(ctx: ToolContext, new: Mapping[str, float], *, reason: str, ba
             backtest_id=backtest_id,
             actor=ctx.actor,
             t=now_dt,
+            reverts=(reverts or {}).get(layer_id),
         )
         ctx.db.add_change(c)
         changes.append(c)
@@ -165,8 +180,24 @@ def apply_weights(ctx: ToolContext, new: Mapping[str, float], *, reason: str, ba
 # -- trust -----------------------------------------------------------------------
 
 
-def check_trust(before: float, after: float, last_increase_at: float | None, now: float, reason: str) -> None:
-    """Lowering is free (with a reason). Increases: engine/trust.py bounds (+0.1, one per 5 min of Clock time)."""
+def check_trust(
+    before: float,
+    after: float,
+    last_increase_at: float | None,
+    now: float,
+    reason: str,
+    *,
+    dev_revert: bool = False,
+) -> None:
+    """Lowering is free (with a reason). Increases: engine/trust.py bounds (+0.1, one per 5 min of Clock time).
+    ``dev_revert``: a dev undoing a recorded change skips the increase rate cap (it exists to stop agent
+    drift); trust must still be in [0, 1]."""
+    if dev_revert:
+        if not math.isfinite(after) or not 0.0 <= after <= 1.0:
+            raise GuardError(f"trust must be in [0, 1], got {after}")
+        if not reason.strip():
+            raise GuardError("a reason is required")
+        return
     res = trust_mod.check_trust_change(before, after, now=now, last_increase_at=last_increase_at, reason=reason)
     if not res.ok:
         raise GuardError(res.reason)
@@ -186,9 +217,20 @@ def current_trust(ctx: ToolContext, user_id: str) -> tuple[float, float | None]:
     return score, max(increases, default=None)
 
 
-def apply_trust(ctx: ToolContext, user_id: str, after: float, *, reason: str, backtest_id: str | None) -> Change:
+def apply_trust(
+    ctx: ToolContext,
+    user_id: str,
+    after: float,
+    *,
+    reason: str,
+    backtest_id: str | None,
+    reverts: str | None = None,
+    dev_revert: bool = False,
+) -> Change:
+    if dev_revert:
+        require_dev(ctx, "the dev-revert exemption")
     before, last_inc = current_trust(ctx, user_id)
-    check_trust(before, after, last_inc, ctx.now(), reason)
+    check_trust(before, after, last_inc, ctx.now(), reason, dev_revert=dev_revert)
     ctx.db.set_trust(ctx.app_id, user_id, after, ctx.now())
     c = Change(
         id=new_change_id(),
@@ -201,6 +243,7 @@ def apply_trust(ctx: ToolContext, user_id: str, after: float, *, reason: str, ba
         backtest_id=backtest_id,
         actor=ctx.actor,
         t=ctx.now_dt(),
+        reverts=reverts,
     )
     ctx.db.add_change(c)
     return c

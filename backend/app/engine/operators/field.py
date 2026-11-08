@@ -2,7 +2,10 @@
 
 Sampling: the latest reading per sample point (user_id, else rounded location) within `max_age_s`
 is interpolated onto cell centers by inverse-distance weighting; the layer is
-max(scale · value, 0).
+max(scale · value − baseline, 0). With `baseline="min"` (default) the baseline is the field's own
+spatial minimum: a broad field adds only its contrast, and a uniform or single-point field adds
+nothing, so it can't lift the whole grid into one hotspot. `noise_floor` (in the field's units)
+is the contrast that counts as full scale. `baseline="zero"` keeps absolute values.
 
 Vector field (optional): with `vector_speed_field` (magnitude, m/s) and `vector_dir_field`
 (compass degrees), the operator also interpolates the vector (u east, v north) onto the grid as
@@ -34,8 +37,11 @@ from .base import ClockLike, Events, GridLike, OperatorParams, OperatorResult, g
 
 
 class FieldParams(OperatorParams):
-    noise_floor: float = Field(default=1.0, gt=0)
+    noise_floor: float = Field(default=1.0, gt=0)  # contrast (field units) that counts as full scale
     value_field: str = "value"
+    # "min": subtract the field's own spatial minimum, so the layer carries only where the value is
+    # higher than elsewhere (a uniform or single-point field contributes 0); "zero": absolute values.
+    baseline: Literal["min", "zero"] = "min"
     scale: float = 1.0
     max_age_s: float = Field(default=3600.0, gt=0)
     idw_power: float = Field(default=2.0, gt=0)
@@ -166,8 +172,11 @@ def field(
 
     values = ev.column(params.value_field, np.nan)
     ok = np.isfinite(values)
-    layer = np.maximum(params.scale * idw(sx[ok], sy[ok], values[ok], grid, params.idw_power), 0.0)
-    extras: dict = {"n_points": int(ok.sum())}
+    raw = params.scale * idw(sx[ok], sy[ok], values[ok], grid, params.idw_power)
+    base = float(raw.min()) if params.baseline == "min" and ok.any() else 0.0
+    layer = np.maximum(raw - base, 0.0)
+    layer[layer <= 1e-9 * max(float(np.abs(raw).max()) if raw.size else 0.0, 1.0)] = 0.0  # interpolation residue
+    extras: dict = {"n_points": int(ok.sum()), "baseline": base}
 
     if params.vector_speed_field and params.vector_dir_field:
         spd = ev.column(params.vector_speed_field, np.nan)

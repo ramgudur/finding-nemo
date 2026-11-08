@@ -465,6 +465,9 @@ class Change(Model):
     backtest_id: str | None = None
     actor: Actor
     t: UtcDatetime
+    reverts: str | None = Field(
+        default=None, description="Id of the Change this one reverts (POST /changes/{id}/revert); None otherwise."
+    )
 
 
 # --- End-user instructions -------------------------------------------------------

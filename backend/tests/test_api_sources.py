@@ -143,3 +143,66 @@ def test_catalogue_has_no_html_scraper_and_every_preset_from_the_connector_catal
     opts = catalogue()
     assert {o.type for o in opts} == {"post_api", "webhook", "rss", "json_api"}
     assert {o.config["preset"] for o in opts if o.config and "preset" in o.config} == set(PRESETS)
+
+
+# -- harmless slips seen in live runs (#164 follow-on): fixed in code, no repair call ----------
+
+
+def test_prose_style_type_and_junk_presets_are_cleaned_without_a_repair():
+    slipped = json.dumps(
+        {
+            "kind": "pull",
+            "shape": "field",
+            "options": [
+                {"type": "json_api preset=open_meteo", "why": "a weather preset"},
+                {"type": "rss", "why": "a feed", "config": {"preset": "rss", "format": "xml"}},
+                {"type": "post_api", "why": "wrong kind, dropped"},
+            ],
+        }
+    )
+    r, fake, db = _post(_script(slipped), "current conditions over the area from a public service")
+    assert r.status_code == 200, r.text
+    assert len(fake.calls) == 1  # no repair call
+    types = _types(r.json())
+    assert types[0] == ("json_api", "open_meteo") and types[1] == ("rss", None)
+    assert all(o["type"] in ("rss", "json_api") for o in r.json()["options"])
+    assert any(t.why == "validated" for t in db.list_trace("some-app"))
+
+
+def test_push_options_lose_any_config():
+    slipped = json.dumps(
+        {
+            "kind": "push",
+            "shape": "point",
+            "options": [{"type": "post_api", "why": "x", "config": {"preset": "post_api"}}],
+        }
+    )
+    r, fake, _ = _post(_script(slipped), PUSH_DESC)
+    assert len(fake.calls) == 1 and r.json()["options"][0] == {**r.json()["options"][0], "config": None}
+
+
+def test_a_url_the_dev_gave_is_never_replaced_by_a_preset():
+    desc = "hourly readings published as JSON at https://data.example.org/readings.json."
+    picked_preset = json.dumps(
+        {
+            "kind": "pull",
+            "shape": "field",
+            "options": [{"type": "json_api", "why": "x", "config": {"preset": "open_meteo"}}],
+        }
+    )
+    r, _, _ = _post(_script(picked_preset), desc)
+    first = r.json()["options"][0]
+    assert first["type"] == "json_api" and first["config"] == {"url": "https://data.example.org/readings.json"}
+    # a feed the model chose without the URL gets the dev's URL
+    feed = "a public feed at https://feeds.example.org/area.xml"
+    no_url = json.dumps({"kind": "pull", "shape": "document", "options": [{"type": "rss", "why": "x"}]})
+    r2, _, _ = _post(_script(no_url), feed)
+    assert r2.json()["options"][0]["config"] == {"url": "https://feeds.example.org/area.xml"}
+
+
+def test_task_prompt_shows_each_option_as_the_json_to_return():
+    from app.agents.source_suggester import task_prompt
+
+    text = task_prompt(INTENT, PUSH_DESC)
+    assert '{"type": "json_api", "config": {"preset": "open_meteo"}}' in text
+    assert "type=" not in text

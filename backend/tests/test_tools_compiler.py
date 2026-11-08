@@ -65,11 +65,45 @@ def test_validate_spec_accepts_a_good_spec(ctx):
                 "plausibility": {"max_speed_mps": 12},
             }
         ],
+        "verification": [{"method": "predictive_check", "priority": 1}],
     }
     r = _call(ctx, "validate_spec", {"spec": spec})
     assert r["result"]["valid"] is True
     assert r["result"]["errors"] == []
     assert r["result"]["warnings"] == []
+
+
+def test_validate_spec_warns_when_verification_leaves_out_a_method_the_inputs_can_feed(ctx):
+    """The Critic tunes flexible weights only once two methods have data (cold start), so a
+    proposal with one method on an app that could feed three would never let it act."""
+
+    def inp(id_, tier="flexible", op="density"):
+        return {
+            "id": id_,
+            "kind": "push",
+            "shape": "point",
+            "tier": tier,
+            "meaning": "a report",
+            "operators": [{"op": op, "weight": 1.0}],
+            "plausibility": {"max_speed_mps": 12},
+        }
+
+    base = {**_draft().model_dump(mode="json"), "inputs": [inp("a"), inp("b"), inp("c", "locked", "override")]}
+    one = {**base, "verification": [{"method": "predictive_check", "priority": 1}]}
+    w = _call(ctx, "validate_spec", {"spec": one})["result"]["warnings"]
+    assert any("cross_input_agreement" in x and "authority_confirmation" in x for x in w)
+    full = {
+        **base,
+        "verification": [
+            {"method": "authority_confirmation", "priority": 1},
+            {"method": "predictive_check", "priority": 2},
+            {"method": "cross_input_agreement", "priority": 3},
+        ],
+    }
+    assert not any("leaves out" in x for x in _call(ctx, "validate_spec", {"spec": full})["result"]["warnings"])
+    # one weighted input: cross_input_agreement can't have data, so it isn't asked for
+    single = {**base, "inputs": [inp("a")], "verification": [{"method": "predictive_check", "priority": 1}]}
+    assert _call(ctx, "validate_spec", {"spec": single})["result"]["warnings"] == []
 
 
 def test_validate_spec_warns_on_missing_plausibility_for_flexible_track_or_point(ctx):
@@ -617,3 +651,54 @@ def test_finalize_app_refuses_an_unsafe_dev_connector_url(ctx, monkeypatch):
     r = _call(ctx, "finalize_app", {"spec": _pull_spec_dict()})
     assert r["ok"] is False and "connector URL refused" in r["error"]
     assert ctx.db.get_app("draft-app").status == "draft"
+
+
+# -- the dev's declarations are pinned at finalize (#164) -----------------------------------------
+
+
+def _pinned_ctx(ctx):
+    ctx.extra["dev_inputs"] = [
+        {"id": "pings", "kind": "push", "shape": "point", "meaning": "the dev's own words", "fields": []}
+    ]
+    ctx.extra["dev_intent"] = "the dev's intent"
+    ctx.extra["dev_grid"] = {"cell_m": 10, "bbox": BBOX}
+    return ctx
+
+
+def _proposal(**over):
+    inp = {
+        "id": "pings",
+        "kind": "push",
+        "shape": "track",  # the model changed the shape
+        "tier": "flexible",
+        "meaning": "a reworded meaning",
+        "operators": [{"op": "density", "weight": 1.0}],
+        "plausibility": {"max_speed_mps": 12},
+    }
+    spec = {
+        **_draft().model_dump(mode="json"),
+        "intent": "a reworded intent",
+        "inputs": [inp],
+        "verification": [{"method": "predictive_check", "priority": 1}],
+    }
+    return {**spec, **over}
+
+
+def test_finalize_pins_the_devs_inputs_intent_and_grid(ctx):
+    r = _call(_pinned_ctx(ctx), "finalize_app", {"spec": _proposal()})
+    assert r["ok"], r
+    saved = ctx.db.get_app("draft-app")
+    (inp,) = saved.inputs
+    assert (inp.meaning, inp.shape, inp.kind) == ("the dev's own words", "point", "push")
+    assert saved.intent == "the dev's intent"
+    assert inp.operators[0].op == "density" and inp.tier == "flexible"  # the model's choices stay
+
+
+def test_finalize_rejects_inputs_the_dev_did_not_declare_or_dropped(ctx):
+    _pinned_ctx(ctx)
+    extra = _proposal()
+    extra["inputs"] = [*extra["inputs"], {**extra["inputs"][0], "id": "invented"}]
+    r = _call(ctx, "finalize_app", {"spec": extra})
+    assert not r["ok"] and "not declared by the dev" in r["error"] and "invented" in r["error"]
+    r2 = _call(ctx, "finalize_app", {"spec": _proposal(inputs=[])})
+    assert not r2["ok"] and "missing" in r2["error"] and "pings" in r2["error"]

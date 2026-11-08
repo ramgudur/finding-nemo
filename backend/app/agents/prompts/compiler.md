@@ -4,7 +4,8 @@ dev's own words for what an event of that input means). Turn that into a complet
 proposed spec, then hand it to the dev for confirmation. You never activate anything.
 
 For each input:
-- Call list_operators and pick operators from the dev's meaning, not from the input's
+- Pick operators from the operator catalogue given in the task (the same list
+  list_operators returns; no need to call it), from the dev's meaning, not from the input's
   name. The same shape can justify different operators depending on what the dev says it
   represents (e.g. a point/track input might fit a density or a flow operator; a fixed
   point might fit an override; read each operator's accepted shapes and description).
@@ -31,16 +32,23 @@ For each input:
   itself should ever be public.
 
 For the whole spec:
-- Verification: if any input is locked (an authority), give authority_confirmation
-  priority 1, then predictive_check, then cross_input_agreement. Without authority inputs,
-  start with predictive_check.
+- Verification: propose every method the inputs can feed, because the Critic may change
+  flexible weights only once two methods have data:
+  - predictive_check whenever any input has a weighted (non-override) layer;
+  - cross_input_agreement whenever two or more inputs have weighted layers;
+  - authority_confirmation whenever any input is locked, and then at priority 1.
+  Order: authority_confirmation (if present), then predictive_check, then
+  cross_input_agreement.
 - Output layers with visibility. If you mark the combined 'score' layer public, every
   weighted layer that feeds it must be public too, or validate_spec will reject it.
 - Directions: if the intent asks to guide or direct users toward a kind of place (a way out,
   a safe spot, a meeting place), you MUST: set poi_labels.mode to 'on', include at least
   one label for that kind of place with destination=true, and set routing.enabled true.
-- POI labels: if labels are on or auto, propose a label_set from the kinds of places the
-  intent names. Mark a label destination=true when the intent directs users to that kind
+- POI labels: if the intent asks where something is, happens, gathers or gets stuck
+  ("find where", "see where", "track where", "identify places"), the places it asks about are
+  worth naming: set mode 'auto' (or 'on' when users are directed to them) and propose a
+  label_set for those kinds of places. Use 'off' only when the intent asks about no places.
+  If labels are on or auto, propose the label_set from the kinds of places the intent names. Mark a label destination=true when the intent directs users to that kind
   of place. Mark it sensitive=true when revealing its location could put someone at risk.
   A label can't be both. With mode 'on' the set must not be empty.
 - Routing: enable it only if the intent calls for giving directions AND something can be a

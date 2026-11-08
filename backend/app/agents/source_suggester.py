@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +124,55 @@ class _ModelSuggestion(BaseModel):
         return self
 
 
+_TYPE_WITH_PRESET = re.compile(r"\s*([a-z_]+)(?:\s+preset\s*=\s*(\S+))?\s*")
+_URL = re.compile(r"https?://[^\s<>\"']+")
+
+
+def sanitize(content: str) -> str:
+    """Fix harmless slips in the model's JSON before validating, so they don't cost a repair call:
+    a `type` written like the catalogue's prose ("json_api preset=x") is split into type and preset;
+    a preset on a non-json_api option, any config on a push option, and keys other than preset/url
+    are dropped; options that don't fit the answer's `kind` are dropped. Anything still wrong (an
+    unknown type or preset, a missing field, no options left) fails validation as before."""
+    try:
+        data = json.loads(content)
+    except ValueError:
+        return content
+    if not isinstance(data, dict) or not isinstance(data.get("options"), list):
+        return content
+    kind = data.get("kind")
+    clean = []
+    for o in data["options"]:
+        if not isinstance(o, dict):
+            continue
+        o = dict(o)
+        cfg = o.get("config")
+        cfg = dict(cfg) if isinstance(cfg, dict) else cfg
+        t = o.get("type")
+        m = _TYPE_WITH_PRESET.fullmatch(t) if isinstance(t, str) else None
+        if m and m.group(1) in OPTION_KIND:
+            t = o["type"] = m.group(1)
+            if m.group(2):
+                cfg = {**(cfg if isinstance(cfg, dict) else {}), "preset": m.group(2)}
+        if t in OPTION_KIND and (cfg is None or isinstance(cfg, dict)):
+            cfg = {k: v for k, v in (cfg or {}).items() if k in ("preset", "url")}
+            if t != "json_api":
+                cfg.pop("preset", None)
+            if OPTION_KIND[t] == "push":
+                cfg = {}
+            o["config"] = cfg or None
+            if kind in ("push", "pull") and OPTION_KIND[t] != kind:
+                continue
+        clean.append(o)
+    data["options"] = clean
+    return json.dumps(data)
+
+
+def _devs_url(description: str) -> str | None:
+    m = _URL.search(description)
+    return m.group(0).rstrip(".,;:)]}") if m else None
+
+
 def fallback(description: str) -> SourceSuggestion:
     """The full catalogue, unranked (both kinds), with the neutral default kind/shape."""
     return SourceSuggestion(kind=FALLBACK_KIND, shape=FALLBACK_SHAPE, options=catalogue(), meaning=description)
@@ -148,6 +198,23 @@ def build_suggestion(raw: _ModelSuggestion, description: str) -> SourceSuggestio
                 cfg["url"] = url
             config = cfg or None
         options.append(SourceOption(type=o.type, label=base.label, why=o.why, config=config))
+    url = _devs_url(description) if raw.kind == "pull" else None
+    if url and not any((o.config or {}).get("url") == url for o in options):
+        rss = next((i for i, o in enumerate(options) if o.type == "rss"), None)
+        custom_i = next(
+            (i for i, o in enumerate(options) if o.type == "json_api" and not (o.config or {}).get("preset")), None
+        )
+        if rss is not None:  # the model chose a feed but didn't carry the URL
+            options[rss] = options[rss].model_copy(update={"config": {"url": url}})
+        elif custom_i is not None:  # the model chose a custom endpoint: it's the dev's, and goes first
+            chosen = options.pop(custom_i)
+            options.insert(0, chosen.model_copy(update={"config": {"url": url}}))
+        else:  # only a preset was chosen: the dev's own endpoint goes first
+            custom = by_key[("json_api", None)]
+            options.insert(
+                0, custom.model_copy(update={"why": "Polls the JSON endpoint you gave.", "config": {"url": url}})
+            )
+            seen.add(("json_api", None))
     for k, base in by_key.items():
         if k not in seen and OPTION_KIND[base.type] == raw.kind:
             options.append(base)
@@ -155,15 +222,16 @@ def build_suggestion(raw: _ModelSuggestion, description: str) -> SourceSuggestio
 
 
 def task_prompt(intent: str, description: str) -> str:
-    lines = [
-        f"- type={o.type}"
-        + (f" preset={o.config['preset']}" if o.config and "preset" in o.config else "")
-        + f" (kind {OPTION_KIND[o.type]}): {o.label}. {o.why}"
-        for o in catalogue()
-    ]
-    return f"App intent: {intent}\n\nSource, in the developer's words:\n{description}\n\nCatalogue:\n" + "\n".join(
-        lines
-    )
+    """Each catalogue entry is shown as the exact option JSON to return, so the model copies a
+    valid `type`/`config` instead of rebuilding it from prose."""
+    lines = []
+    for o in catalogue():
+        shown: dict[str, Any] = {"type": o.type}
+        if o.config:
+            shown["config"] = o.config
+        lines.append(f"- {json.dumps(shown)}  (kind {OPTION_KIND[o.type]}): {o.label}. {o.why}")
+    catalogue_text = "\n".join(lines)
+    return f"App intent: {intent}\n\nSource, in the developer's words:\n{description}\n\nCatalogue:\n{catalogue_text}"
 
 
 def _trace(ctx: ToolContext, **fields: Any) -> None:
@@ -193,7 +261,7 @@ async def suggest_source(ctx: ToolContext, intent: str, description: str, llm: L
     content = resp.choices[0].message.content or ""
     why = "validated"
     try:
-        raw: _ModelSuggestion | None = _ModelSuggestion.model_validate_json(content)
+        raw: _ModelSuggestion | None = _ModelSuggestion.model_validate_json(sanitize(content))
     except ValidationError as e:
         raw = await _repair(ctx, llm, AGENT, _ModelSuggestion, content, str(e))
         why = "validated after repair"

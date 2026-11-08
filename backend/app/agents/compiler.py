@@ -26,6 +26,7 @@ from typing import Any
 from app.agents.llm import LlmRouter
 from app.agents.loop import run_agent
 from app.core.models import AppSpec, TraceEntry
+from app.engine.operators import registry as operator_registry
 from app.tools.context import ToolContext
 from app.tools.registry import call_tool
 
@@ -85,10 +86,13 @@ def _task_prompt(
             "routing.destination_points as given (you can't add, move or drop them), so they "
             "count as destinations when you decide on routing."
         )
+    # The catalogue is in the task, so the model doesn't spend a round trip on list_operators.
+    catalogue = json.dumps(operator_registry.list_operators(), separators=(",", ":"))
     return (
         "Compile this into a complete proposed AppSpec, exactly as given below plus your "
         "own choices of tier, operators, plausibility, verification, outputs and routing "
-        f"for the inputs:\n{json.dumps(given, indent=2)}{note}"
+        f"for the inputs:\n{json.dumps(given, indent=2)}{note}\n\n"
+        f"Operator catalogue (what list_operators returns):\n{catalogue}"
     )
 
 
@@ -109,9 +113,16 @@ async def run_compiler(
 
     `destination_points` are the dev's own words, like `meaning`: `finalize_app` writes them
     into `routing.destination_points` verbatim, whatever the model proposed. So is each pull
-    input's `connector` when the dev gave one: `finalize_app` copies it onto that input."""
+    input's `connector` when the dev gave one: `finalize_app` copies it onto that input. The
+    inputs themselves (ids, kind, shape, meaning, fields), the intent and the grid are pinned the
+    same way: the model can't add, drop or reword them."""
     cache = COMPILER_CACHE if cache is None else cache
     destinations = list(destination_points or [])
+    ctx.extra["dev_inputs"] = [
+        {k: i[k] for k in ("id", "kind", "shape", "meaning", "fields") if k in i} for i in inputs
+    ]
+    ctx.extra["dev_intent"] = intent
+    ctx.extra["dev_grid"] = grid
     ctx.extra["dev_destination_points"] = destinations
     ctx.extra["dev_connectors"] = {i["id"]: i["connector"] for i in inputs if i.get("connector")}
     cached = cache.get(intent, inputs, destinations)
