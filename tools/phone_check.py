@@ -45,7 +45,8 @@ def shoot(exe: str, url: str, out: Path, width: int, height: int, wait_ms: int) 
         frame = Path(tmp) / "frame.html"
         frame.write_text(
             '<!doctype html><meta charset="utf-8"><body style="margin:0;background:#888">'
-            f'<iframe src="{html.escape(url, quote=True)}" style="width:{width}px;height:{height}px;border:0;background:#fff">'
+            f'<iframe src="{html.escape(url, quote=True)}" '
+            f'style="width:{width}px;height:{height}px;border:0;background:#fff">'
             "</iframe>",
             encoding="utf-8",
         )
