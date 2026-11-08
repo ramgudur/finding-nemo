@@ -1,5 +1,6 @@
 import type {
   ActivateResponse,
+  AgentRunAccepted,
   AppSpec,
   BacktestDetail,
   Change,
@@ -21,6 +22,7 @@ import type {
   PinRequest,
   POI,
   PublicAppInfo,
+  RunnableAgent,
   ScoutJobAccepted,
   ScoutRequest,
   SimulateRequest,
@@ -60,7 +62,7 @@ function detailText(d: unknown): string {
   return JSON.stringify(d);
 }
 
-async function request<T>(method: "GET" | "POST" | "PUT", path: string, authorityKey?: string, body?: unknown): Promise<T> {
+async function request<T>(method: "GET" | "POST" | "PUT" | "DELETE", path: string, authorityKey?: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (authorityKey) headers["X-Authority-Key"] = authorityKey;
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -86,6 +88,7 @@ async function request<T>(method: "GET" | "POST" | "PUT", path: string, authorit
     }
     throw new ApiError(r.status, detail || `${r.status} ${r.statusText} for ${path}`, details, rawDetail, retryAfterS);
   }
+  if (r.status === 204) return undefined as T;
   return (await r.json()) as T;
 }
 
@@ -154,6 +157,11 @@ export const api = {
   sourcesStatus: (appId: string, key: string) => get<SourceStatus[]>(`${app(appId)}/sources/status`, key),
   simulate: (appId: string, key: string, body: SimulateRequest) =>
     request<SimulateResult>("POST", `${app(appId)}/simulate`, key, body),
+  // 204: stops a running line job
+  stopSimulate: (appId: string, key: string) => request<void>("DELETE", `${app(appId)}/simulate`, key),
+  // 202 queued; 409 not active; 429 cooldown (retryAfterS)
+  runAgent: (appId: string, key: string, agent: RunnableAgent) =>
+    request<AgentRunAccepted>("POST", `${app(appId)}/agents/${agent}/run`, key),
   // --- End-user page (FE1, #269) ---
   // public: title, intent, status, area, last update and public sources; 404 unknown app (or an
   // older backend without the route: callers fall back to /map and /instruction alone)

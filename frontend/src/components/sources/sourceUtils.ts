@@ -84,6 +84,7 @@ export const OPTION_KIND: Record<SourceOptionType, InputKind> = {
   rss: "pull",
   json_api: "pull",
   json_list: "pull",
+  local_file: "pull",
 };
 
 /** Shown in the "We fetch it" column even when the suggester (an older server) doesn't list it. */
@@ -92,6 +93,19 @@ export const JSON_LIST_OPTION: SourceOption = {
   label: "JSON list / GeoJSON feed (we fetch it)",
   why: "A web address that returns a list of items with coordinates. We fetch it on a schedule and map each item.",
 };
+
+/** Shown in "Other ways" even when the suggester (an older server) doesn't list it. */
+export const LOCAL_FILE_OPTION: SourceOption = {
+  type: "local_file",
+  label: "Local text file (we read it every minute)",
+  why: "A text file on the server, one item per line as lat, lon | text. We read it on a schedule and place each line on the map.",
+};
+
+/** A local_file name: bare, no path (same pattern as the server's connector config). */
+export const LOCAL_FILE_NAME = /^[A-Za-z0-9_.-]{1,64}\.txt$/;
+
+/** The default file name: firenews.txt only when the dev's description is about news; otherwise empty. */
+export const defaultLocalFile = (description: string | undefined) => (/\bnews\b/i.test(description ?? "") ? "firenews.txt" : "");
 
 /** How often a fetched source is checked. */
 export const POLL_CHOICES: { s: number; label: string }[] = [
@@ -132,20 +146,29 @@ export interface ConnectorDraft {
   pollS?: number;
   /** json_list only: a sample body for the path preview (stays in this browser, never compiled). */
   sample?: string;
+  /** local_file only: the bare file name under backend/data/feeds/. */
+  filename?: string;
 }
 
-export function connectorDraftFor(o: SourceOption, bbox: BBox | null): ConnectorDraft {
+/** `description` is the dev's words for the source; it only picks the local_file default name. */
+export function connectorDraftFor(o: SourceOption, bbox: BBox | null, description?: string): ConnectorDraft {
   const c = areaCentre(bbox);
   return {
     url: typeof o.config?.url === "string" ? o.config.url : "",
     configText: o.type === "json_api" && c ? JSON.stringify(c) : "",
     ...(o.type === "json_list" ? { mapping: emptyWebhook(), pollS: 300 } : {}),
+    ...(o.type === "local_file" ? { filename: defaultLocalFile(description), pollS: 60 } : {}),
     ...(presetOf(o) === "open_meteo" ? { pollS: 60 } : {}),
   };
 }
 
 /** Why this draft can't be added yet, or null. */
 export function connectorProblem(o: SourceOption, d: ConnectorDraft): string | null {
+  if (o.type === "local_file") {
+    const f = (d.filename ?? "").trim();
+    if (!f) return "Add the file name.";
+    return LOCAL_FILE_NAME.test(f) ? null : "Use a bare file name ending in .txt: letters, digits, . _ or -, no folders.";
+  }
   if (urlRequired(o) && !d.url.trim()) return o.type === "json_list" ? "Add the web address of the JSON list." : "A custom JSON API source needs its URL.";
   if (d.url.trim() && !/^https?:\/\//i.test(d.url.trim())) return "The URL must start with http:// or https://.";
   if (o.type === "json_api" && parseConfig(d.configText) === null) return "Connector config must be a JSON object.";
@@ -160,6 +183,8 @@ export function connectorProblem(o: SourceOption, d: ConnectorDraft): string | n
  *  Compiler can ask the Scout for one). */
 export function connectorOf(o: SourceOption, d: ConnectorDraft): ConnectorConfig | undefined {
   if (OPTION_KIND[o.type] !== "pull") return undefined;
+  if (o.type === "local_file")
+    return { type: "local_file", url: null, preset: null, poll_s: d.pollS ?? 60, config: { filename: (d.filename ?? "").trim() } };
   if (o.type === "json_list") {
     return {
       type: "json_list",
@@ -316,6 +341,8 @@ export function sourcesProblems(d: SourcesDraft): string[] {
     d.sources.some((s) => s.connector?.type === "json_api" && !s.connector.preset && !s.connector.url) &&
       "A custom JSON source needs its URL.",
     d.sources.some((s) => s.connector?.type === "json_list" && !s.connector.url) && "A JSON list source needs its web address.",
+    d.sources.some((s) => s.connector?.type === "local_file" && !LOCAL_FILE_NAME.test(localFileOf(s.connector))) &&
+      "A local file source needs a bare file name ending in .txt.",
     ...d.sources.flatMap((s) =>
       s.connector?.type === "json_list"
         ? webhookProblems(listMappingOf(s.connector), s.fields).map((p) => `${s.id} item mapping: ${p}.`)
@@ -526,6 +553,20 @@ export function previewWebhook(w: WebhookMapping, fields: InputField[] | undefin
   }
   return { state: "ok", itemCount: items.length, rows };
 }
+
+// --- local_file connector: a text file under backend/data/feeds/, one item per line ---
+
+/** The file name in a local_file connector's config ("" when missing). */
+export const localFileOf = (c: ConnectorConfig) => (typeof c.config?.filename === "string" ? c.config.filename : "");
+
+/** "every minute", "every 5 minutes", or "every 90 s". */
+export const pollLabel = (s: number | null | undefined, fallback = 300) => {
+  const v = s ?? fallback;
+  return POLL_CHOICES.find((c) => c.s === v)?.label ?? (v % 60 === 0 ? `every ${v / 60} minutes` : `every ${v} s`);
+};
+
+/** "Local file · every minute" for a local_file connector. */
+export const localFileLabel = (c: ConnectorConfig) => `Local file · ${pollLabel(c.poll_s, 60)}`;
 
 // --- json_list connector: the same mapping keys as a webhook, kept in connector.config (contract E) ---
 

@@ -24,7 +24,7 @@ function source(input: InputSpec): string {
   if (input.kind === "push") return `${SHAPE_WORDS[input.shape]} your app POSTs`;
   const c = input.connector;
   if (!c) return `${SHAPE_WORDS[input.shape]} the platform will collect (connector pending)`;
-  const what = c.preset ? `the ${c.preset} preset` : `a ${c.type === "rss" ? "RSS" : "JSON"} connector`;
+  const what = c.preset ? `the ${c.preset} preset` : c.type === "local_file" ? "a local text file" : `a ${c.type === "rss" ? "RSS" : "JSON"} connector`;
   return `${SHAPE_WORDS[input.shape]} polled from ${what}`;
 }
 
