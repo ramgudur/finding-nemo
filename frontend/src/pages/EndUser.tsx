@@ -8,7 +8,7 @@
 // Recenter button) moves it. Phones stack the page; from 768 px up the map fills the screen and
 // the instruction card floats over it as a sheet on the left (the camera pads for it).
 import L from "leaflet";
-import { Crosshair, Info, LocateFixed, MoveUpRight, Navigation, Phone, TriangleAlert } from "lucide-react";
+import { ChevronDown, ChevronUp, Crosshair, Info, LocateFixed, MoveUpRight, Navigation, Phone, TriangleAlert } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../api/client";
 import { openStream } from "../api/stream";
@@ -148,6 +148,7 @@ export function EndUser({ appId }: { appId: string }) {
   const [lastTickAt, setLastTickAt] = useState<number | null>(null); // local ms of the last known tick
   const [bbox, setBbox] = useState<GeoJsonBBox | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
+  const [userCollapsed, setUserCollapsed] = useState<boolean | null>(null); // null: follow the default
   const [checkKey, setCheckKey] = useState(0); // bumped by "Check again"
   const [pos, setPos] = useState<Pos | null>(null);
   const [source, setSource] = useState<Source>(null);
@@ -657,25 +658,66 @@ export function EndUser({ appId }: { appId: string }) {
   // Phones: one stacked column (the sheet's children, then the map, then the legend, by flex order).
   // Wide screens with a map: the map fills the screen and the sheet floats over its left side.
   const wide = showMap;
+  // The card folds to a title pill so it never has to cover the map. Without directions there is
+  // nothing to act on, so it starts folded; with directions it starts open (it holds the location ask).
+  const collapsed = showMap && (userCollapsed ?? (infoDone && !routingOn));
   return (
     <main
       className={`mx-auto flex max-w-[640px] flex-col gap-4 pb-[calc(16px+env(safe-area-inset-bottom))] pl-[max(16px,env(safe-area-inset-left))] pr-[max(16px,env(safe-area-inset-right))] pt-[max(16px,env(safe-area-inset-top))] text-[#1F3440] ${
         wide ? "md:relative md:block md:h-[100dvh] md:max-w-none md:overflow-hidden md:p-0" : ""
       }`}
     >
+      {collapsed && (
+        <div
+          ref={sheetRef}
+          className="order-1 flex items-center gap-3 self-start rounded-2xl bg-cream/95 py-2 pl-4 pr-2 shadow-[0_4px_18px_rgba(31,52,64,0.2)] backdrop-blur-sm md:absolute md:left-4 md:top-4 md:z-[1100] md:max-w-[calc(100%-140px)]"
+        >
+          <h1 className="m-0 truncate font-display text-[20px] font-semibold leading-tight text-slate">{title}</h1>
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-[14px] font-semibold text-slate">
+            <span aria-hidden className={`inline-block h-2.5 w-2.5 rounded-full ${status.dot}`} />
+            {status.label}
+          </span>
+          <button
+            type="button"
+            onClick={() => setUserCollapsed(false)}
+            aria-expanded={false}
+            aria-label="Show details about this alert"
+            className="inline-flex min-h-[40px] shrink-0 items-center gap-1 rounded-xl px-2.5 text-[15px] font-bold text-primary transition-transform duration-150 ease-out active:scale-[0.97]"
+          >
+            Details
+            <ChevronDown aria-hidden className="h-[18px] w-[18px]" strokeWidth={2.25} />
+          </button>
+        </div>
+      )}
       <div
-        ref={sheetRef}
+        ref={collapsed ? undefined : sheetRef}
         className={
-          wide
+          collapsed
+            ? "hidden"
+            : wide
             ? "contents md:absolute md:left-4 md:top-4 md:z-[1100] md:flex md:max-h-[calc(100%-32px)] md:w-[380px] md:max-w-[calc(100%-32px)] md:flex-col md:gap-4 md:overflow-y-auto md:rounded-2xl md:bg-cream/95 md:p-5 md:shadow-[0_6px_28px_rgba(31,52,64,0.22)] md:backdrop-blur-sm"
             : "contents"
         }
       >
         {/* context: what this page is, whether it is live, and what data it uses */}
         <header className="order-1 grid gap-2">
-          <div>
-            <h1 className="m-0 text-balance font-display text-[28px] font-semibold leading-tight tracking-[-0.015em] text-slate">{title}</h1>
-            <p className="m-0 mt-0.5 font-mono text-[13px] text-inkSoft">{appId}</p>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h1 className="m-0 text-balance font-display text-[28px] font-semibold leading-tight tracking-[-0.015em] text-slate">{title}</h1>
+              <p className="m-0 mt-0.5 font-mono text-[13px] text-inkSoft">{appId}</p>
+            </div>
+            {showMap && (
+              <button
+                type="button"
+                onClick={() => setUserCollapsed(true)}
+                aria-expanded={true}
+                aria-label="Hide details and show the whole map"
+                className="inline-flex min-h-[40px] shrink-0 items-center gap-1 rounded-xl px-2 text-[15px] font-bold text-primary transition-transform duration-150 ease-out active:scale-[0.97]"
+              >
+                Hide
+                <ChevronUp aria-hidden className="h-[18px] w-[18px]" strokeWidth={2.25} />
+              </button>
+            )}
           </div>
           <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] font-semibold text-inkSoft">
             <span className="inline-flex items-center gap-1.5 text-slate">

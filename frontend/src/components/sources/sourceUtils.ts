@@ -140,6 +140,7 @@ export function connectorDraftFor(o: SourceOption, bbox: BBox | null): Connector
     url: typeof o.config?.url === "string" ? o.config.url : "",
     configText: o.type === "json_api" && c ? JSON.stringify(c) : "",
     ...(o.type === "json_list" ? { mapping: emptyWebhook(), pollS: 300 } : {}),
+    ...(presetOf(o) === "open_meteo" ? { pollS: 60 } : {}),
   };
 }
 
