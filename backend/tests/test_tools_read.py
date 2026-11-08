@@ -163,6 +163,7 @@ def test_critic_sees_read_and_write_tools():
         "get_suspicious_users",
         "annotate",
         "run_backtest",
+        "run_backtest_batch",
         "apply_changes",
         "set_user_trust",
     }

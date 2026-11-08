@@ -287,3 +287,119 @@ def test_apply_rejects_trust_candidate_whose_start_moved(env, scripted):
     a = call(ctx(), "apply_changes", backtest_id=r["result"]["backtest_id"], reason="x")
     assert not a["ok"] and "trust changed" in a["error"]
     assert db.get_trust("tools-app", "u2").score == 0.3
+
+
+# -- run_backtest_batch (#52) --------------------------------------------------------
+
+
+@pytest.fixture
+def scripted_batch(monkeypatch, scripted):
+    """Scripted batch outcome: the best passing candidate's weights, or none passing."""
+    state = {"weights": None}
+
+    def fake(spec, window, events, search_spec, *, now, bounds, grid, params=None, **kw):
+        state["bounds"] = bounds
+        cands = []
+        if state["weights"] is not None:
+            scores = {m: 0.6 for m in scripted["methods"]}
+            cands = [bt_mod.BatchCandidate(dict(state["weights"]), scores, scores, True, "improved")]
+        bt = Backtest(
+            id=f"bb{np.random.default_rng().integers(1 << 40)}",
+            kind="batch",
+            candidates_tested=256,
+            candidates_valid=200,
+            train_scores={},
+            holdout_scores={},
+            passed=bool(cands),
+            device="cpu",
+            elapsed_ms=12.0,
+            t=datetime.fromtimestamp(now, UTC),
+        )
+        return bt_mod.BatchOutcome(bt, "256 configs backtested in 12 ms on cpu (200 valid); scripted", cands)
+
+    monkeypatch.setattr("app.tools.scoring_tools.bt_mod.run_backtest_batch", fake)
+    return state
+
+
+def test_batch_tool_is_critic_only():
+    assert "run_backtest_batch" in {t["function"]["name"] for t in registry.tool_schemas("critic")}
+    assert "run_backtest_batch" not in {t["function"]["name"] for t in registry.tool_schemas("scout")}
+
+
+def test_batch_best_candidate_applies_through_guards(env, scripted, scripted_batch):
+    clock, db, eng, _, ctx = env
+    scripted_batch["weights"] = {
+        "crowd_a.density": 0.6,
+        "crowd_b.density": 0.4,
+        "auth.density": 1.0,
+        "news.density": 0.5,
+    }
+    r = call(ctx(), "run_backtest_batch", layers={"crowd_a.density": [0.4, 0.9]}, samples=256, reason="search")
+    assert r["ok"], r
+    res = r["result"]
+    assert res["passed"] and res["reason"].startswith("256 configs backtested in")
+    assert res["best_weights"] == {"crowd_a.density": 0.6, "crowd_b.density": 0.4}
+    # bounds cover only weighted layers, in the engine's order
+    assert set(scripted_batch["bounds"].layer_ids) == set(eng.apps["tools-app"].weighted_ids)
+    assert db.get_backtest("tools-app", res["backtest_id"]).kind == "batch"
+    clock.advance(5)
+    a = call(ctx(), "apply_changes", backtest_id=res["backtest_id"], reason="best holdout")
+    assert a["ok"], a
+    w = eng.apps["tools-app"].weights
+    assert (w["crowd_a.density"], w["crowd_b.density"]) == pytest.approx((0.6, 0.4))
+    assert all(c.backtest_id == res["backtest_id"] for c in db.list_changes("tools-app", kind="weight"))
+
+
+def test_batch_nothing_passing_cannot_be_applied(env, scripted, scripted_batch):
+    _, _, _, _, ctx = env
+    r = call(ctx(), "run_backtest_batch", layers={"crowd_a.density": [0.4, 0.9]}, reason="search")
+    assert r["ok"] and not r["result"]["passed"] and r["result"]["best_weights"] == {}
+    a = call(ctx(), "apply_changes", backtest_id=r["result"]["backtest_id"], reason="x")
+    assert not a["ok"] and "unknown backtest" in a["error"]
+
+
+def test_batch_rejects_override_or_unknown_layers(env, scripted, scripted_batch):
+    _, _, _, _, ctx = env
+    r = call(ctx(), "run_backtest_batch", layers={"nope.density": [0.1, 0.2]}, reason="x")
+    assert not r["ok"] and "not weighted layers" in r["error"]
+    r = call(ctx(), "run_backtest_batch", layers={"crowd_a.density": [0.1, 0.2]}, samples=5000, reason="x")
+    assert not r["ok"] and "invalid arguments" in r["error"]
+
+
+def test_batch_stiff_move_needs_authority_decided(env, scripted, scripted_batch):
+    _, _, _, _, ctx = env
+    scripted["methods"] = ("predictive_check", "authority_confirmation", "cross_input_agreement")
+    scripted_batch["weights"] = {
+        "crowd_a.density": 0.5,
+        "crowd_b.density": 0.5,
+        "auth.density": 1.0,
+        "news.density": 0.52,
+    }
+    r = call(ctx(), "run_backtest_batch", layers={"news.density": [0.5, 0.55]}, reason="news")
+    assert r["ok"] and r["result"]["passed"]
+    a = call(ctx(), "apply_changes", backtest_id=r["result"]["backtest_id"], reason="x")
+    assert not a["ok"] and "authority-confirmation" in a["error"]
+
+
+def test_batch_real_plumbing(env):
+    """No scripting: ticks fill the layer cache, the real batch search runs and is stored."""
+    clock, db, eng, src, ctx = env
+    rng = np.random.default_rng(0)
+    rt = eng.apps["tools-app"]
+    recs = []
+    for k in range(240):
+        lat, lon = rt.grid.to_latlon(rng.normal(200, 15), rng.normal(250, 15))
+        recs.append({"user_id": f"u{k % 30}", "t": T0 - 600 + 2.5 * k, "lat": float(lat), "lon": float(lon)})
+    src.add("tools-app", "crowd_a", recs[::2])
+    src.add("tools-app", "crowd_b", recs[1::2])
+    from app.engine.tick import tick_app
+
+    for t in np.arange(T0 - 600, T0 + 1, 10.0):
+        clock.set(float(t))
+        rt.last = tick_app(rt, src, now=float(t), clock=clock)
+    r = call(ctx(), "run_backtest_batch", layers={"crowd_a.density": [0.2, 0.8]}, samples=64, reason="search")
+    assert r["ok"], r
+    res = r["result"]
+    assert res["candidates_tested"] == 64 and res["device"] in ("cpu", "gpu")
+    assert "configs backtested in" in res["reason"]
+    assert db.get_backtest("tools-app", res["backtest_id"]) is not None

@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.models import Change
 from app.engine import backtest as bt_mod
+from app.engine import tiers
 from app.engine.operators.base import Events
 from app.engine.tick import ALL_HISTORY
 from app.tools import guards
@@ -34,6 +35,15 @@ class RunBacktestArgs(_Args):
     )
     trust: dict[str, float] = Field(default_factory=dict, description="Proposed trust by user_id, in [0, 1].")
     reason: str = Field(description="Why this change should help; goes into the trace and the Change log.")
+
+
+class RunBacktestBatchArgs(_Args):
+    layers: dict[str, tuple[float, float]] = Field(
+        description="Search range [lo, hi] per layer_id to sample; unlisted layers keep their weight. "
+        "Flexible weights are renormalized and out-of-bounds candidates are dropped before scoring."
+    )
+    samples: int = Field(default=256, ge=1, le=bt_mod.MAX_SAMPLES, description="How many configs to try.")
+    reason: str = Field(description="What you are searching for; goes into the trace and the Change log.")
 
 
 class ApplyChangesArgs(_Args):
@@ -157,6 +167,86 @@ def run_backtest(ctx: ToolContext, args: RunBacktestArgs) -> dict[str, Any]:
         "tested_trust": {u: a for u, (_, a) in trust_changes.items()},
         "elapsed_ms": round(out.backtest.elapsed_ms, 1),
         "note": note,
+    }
+
+
+def run_backtest_batch(ctx: ToolContext, args: RunBacktestBatchArgs) -> dict[str, Any]:
+    """Search many weight configs at once over the cached layer history (CLAUDE.md Backtests,
+    batch). Tier bounds, pins and locked weights are enforced by discarding invalid candidates
+    before scoring; ranking is on train only; the top few are checked on the holdout. The best
+    passing candidate is remembered under the batch's backtest_id, so ``apply_changes`` applies
+    exactly that config after re-checking every guard."""
+    reason = guards.require_reason(args.reason)
+    rt = ctx.runtime
+    weighted = set(rt.weighted_ids)
+    unknown = sorted(set(args.layers) - weighted)
+    if unknown:
+        raise GuardError(f"not weighted layers (overrides and unknown ids can't be searched): {unknown}")
+    baseline = dict(rt.weights)
+    params = bt_mod.BacktestParams()
+    events = _events_for_backtest(ctx, params)
+    trust = guards.live_trust_map(ctx)
+    now = ctx.now()
+
+    # Which methods have data decides cold start and stiff bounds, as in run_backtest.
+    probe = bt_mod.run_backtest(rt.spec, events, now=now, weights=baseline, trust=trust, params=params)
+    with_data = set(probe.baseline_train) | set(probe.baseline_holdout)
+    authority_decided = probe.deciding_method == "authority_confirmation"
+    slots = [s for s in guards.weight_slots(ctx) if s.layer_id in weighted]
+    bounds = tiers.bounds(
+        slots,
+        total=guards.flexible_total(ctx),
+        now=now,
+        authority_evidence=authority_decided,
+        methods_with_data=len(with_data),
+    )
+    out = bt_mod.run_backtest_batch(
+        rt.spec,
+        rt.cache.window(),
+        events,
+        {"layers": args.layers, "samples": args.samples},
+        now=now,
+        bounds=bounds,
+        grid=rt.grid,
+        params=params,
+    )
+    ctx.db.add_backtest(ctx.app_id, out.backtest)
+
+    best = next((c for c in out.candidates if c.passed), None)
+    if best is not None:
+        ctx.candidates.put(
+            TestedCandidate(
+                backtest_id=out.backtest.id,
+                app_id=ctx.app_id,
+                kind="weight",
+                passed=True,
+                t=now,
+                baseline_weights=baseline,
+                baseline_trust=dict(trust),
+                weights={**baseline, **best.weights},
+                trust_changes={},
+                methods_with_data=len(with_data),
+                authority_evidence=authority_decided,
+                reason=out.reason,
+            )
+        )
+    changed = (
+        {k: round(v, 6) for k, v in best.weights.items() if abs(v - baseline[k]) > 1e-12} if best is not None else {}
+    )
+    return {
+        "backtest_id": out.backtest.id,
+        "passed": best is not None,
+        "reason": out.reason,  # "N configs backtested in X ms on <device> ..." for the trace
+        "device": out.backtest.device,
+        "candidates_tested": out.backtest.candidates_tested,
+        "candidates_valid": out.backtest.candidates_valid,
+        "frozen": list(bounds.frozen_reasons),
+        "baseline_holdout": out.baseline_holdout,
+        "best_weights": changed,
+        "best_holdout": best.holdout if best is not None else {},
+        "top": [{"passed": c.passed, "holdout": c.holdout, "why": c.reason} for c in out.candidates[:3]],
+        "elapsed_ms": round(out.backtest.elapsed_ms, 1),
+        "note": reason,
     }
 
 
