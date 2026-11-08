@@ -1,4 +1,107 @@
-// PLACEHOLDER — replaced by fe-pond-props
+// Weathered floating log (DESIGN.md §1, "Log"): lies diagonally in the upper right from about
+// (64%, 5%) and runs off the right edge past (100%, 35%). Broken, split near end with faint
+// ripple rings around it (LogRipples). Very subtle bob and slow rotation.
+import { useMemo, useRef } from "react";
+import { useFrame } from "@react-three/fiber";
+import { type Group, PlaneGeometry, ShaderMaterial } from "three";
+import { Z, pctToWorld, pond } from "./pond";
+import { narrowScale, useAspect, useDisposable } from "./shaders/propsCommon";
+import { LOG_FRAG, LOG_VERT } from "./shaders/propsLog";
+import LogRipples from "./LogRipples";
+
+const START: [number, number] = [64, 5];
+const THROUGH: [number, number] = [100, 35];
+// On portrait screens the same % points would stand the log almost upright; keep it diagonal.
+const START_NARROW: [number, number] = [45, 4];
+const THROUGH_NARROW: [number, number] = [100, 20];
+const SHADOW_OFFSET: [number, number] = [1.4, -1.8];
+
+// x in [0, 1] along the log, y in [-1, 1] across.
+const baseGeo = new PlaneGeometry(1, 2, 48, 1).translate(0.5, 0, 0);
+
 export default function FloatingLog() {
-  return null;
+  const aspect = useAspect();
+  const group = useRef<Group>(null);
+
+  const layout = useMemo(() => {
+    const narrow = aspect < 1;
+    const a = narrow ? START_NARROW : START;
+    const b = narrow ? THROUGH_NARROW : THROUGH;
+    const [x0, y0] = pctToWorld(a[0], a[1], aspect);
+    const [x1, y1] = pctToWorld(b[0], b[1], aspect);
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const dist = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx);
+    // The shadow offset is fixed in screen space; express it in the log's rotated frame.
+    const c = Math.cos(-angle);
+    const s = Math.sin(-angle);
+    const shadow: [number, number] = [
+      c * SHADOW_OFFSET[0] - s * SHADOW_OFFSET[1],
+      s * SHADOW_OFFSET[0] + c * SHADOW_OFFSET[1],
+    ];
+    // Half-width: ~7-8% of viewport height across once the soft edge and girth noise are applied.
+    const wid = 5.0 * narrowScale(aspect);
+    const stub = wid * 0.8; // the split stubs reach back this far from the round body
+    // Put the stubs' midpoint on the start point.
+    const ox = x0 - Math.cos(angle) * stub * 0.5;
+    const oy = y0 - Math.sin(angle) * stub * 0.5;
+    return {
+      x0: ox,
+      y0: oy,
+      angle,
+      shadow,
+      len: dist * 1.35 + stub, // extends well past the viewport edge
+      wid,
+      stub,
+    };
+  }, [aspect]);
+
+  const make = (shadow: boolean) =>
+    new ShaderMaterial({
+      vertexShader: LOG_VERT,
+      fragmentShader: LOG_FRAG,
+      defines: shadow ? { SHADOW: "" } : {},
+      uniforms: {
+        uLen: { value: 1 },
+        uWid: { value: 1 },
+        uStub: { value: 0 },
+        uShadowAlpha: { value: 0.18 },
+      },
+      transparent: true,
+      depthWrite: false,
+    });
+  const mat = useDisposable(() => make(false), []);
+  const shadowMat = useDisposable(() => make(true), []);
+  for (const m of [mat, shadowMat]) {
+    m.uniforms.uLen!.value = layout.len;
+    m.uniforms.uWid!.value = layout.wid;
+    m.uniforms.uStub!.value = layout.stub;
+  }
+
+  const t = useRef(0);
+  useFrame((_, dt) => {
+    const g = group.current;
+    if (!g) return;
+    if (!pond.reducedMotion) t.current += Math.min(dt, 0.1);
+    const s = t.current;
+    g.rotation.z = layout.angle + Math.sin(s * 0.09) * 0.012;
+    g.position.x = layout.x0 + Math.sin(s * 0.21 + 1.3) * 0.25;
+    g.position.y = layout.y0 + Math.sin(s * 0.17) * 0.3;
+    g.scale.setScalar(1 + Math.sin(s * 0.5) * 0.004); // bob reads as a tiny swell
+  });
+
+  return (
+    <group ref={group} position={[layout.x0, layout.y0, 0]} rotation={[0, 0, layout.angle]}>
+      <mesh
+        geometry={baseGeo}
+        material={shadowMat}
+        position={[layout.shadow[0], layout.shadow[1], Z.LOG - 0.05]}
+        frustumCulled={false}
+        renderOrder={Z.LOG - 0.05}
+      />
+      <mesh geometry={baseGeo} material={mat} position={[0, 0, Z.LOG]} frustumCulled={false} renderOrder={Z.LOG} />
+      <LogRipples x={layout.stub * 0.8} rx={layout.wid * 3.4} ry={layout.wid * 2.3} />
+    </group>
+  );
 }
