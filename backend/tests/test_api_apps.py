@@ -55,11 +55,15 @@ def test_create_app_rejects_already_active_spec(client):
     assert r.status_code == 422
 
 
-def test_get_app_requires_authority_key(client):
+def test_get_app_is_keyless_until_active_then_requires_the_authority_key(client):
     client.post("/v1/apps", json=_spec())
+    pending = client.get("/v1/apps/test-app")  # no keys exist yet; the dev can reopen the proposal
+    assert pending.status_code == 200 and pending.json()["status"] != "active"
+    keys = client.post("/v1/apps/test-app/activate").json()
     assert client.get("/v1/apps/test-app").status_code == 401
-    r = client.get("/v1/apps/test-app", headers={"X-Authority-Key": "wrong"})
-    assert r.status_code == 401
+    assert client.get("/v1/apps/test-app", headers={"X-Authority-Key": "wrong"}).status_code == 401
+    ok = client.get("/v1/apps/test-app", headers={"X-Authority-Key": keys["authority_key"]})
+    assert ok.status_code == 200 and ok.json()["status"] == "active"
 
 
 def test_get_app_missing_is_404(client):

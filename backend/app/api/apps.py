@@ -148,6 +148,11 @@ def get_app(
     spec = db.get_app(app)
     if spec is None:
         raise HTTPException(status_code=404, detail="app not found")
+    if spec.status != "active":
+        # Not confirmed yet: no keys exist and the spec holds only the dev's own words plus the
+        # Compiler's proposal (no events, no user data), and compile / PUT /spec / activate are
+        # keyless too, so the dev can reopen it from any browser. Rule 8 data starts at activation.
+        return spec
     if not is_authority(db, app, authority_key):
         raise HTTPException(status_code=401, detail="authority key required")
     return spec

@@ -210,6 +210,7 @@ Ingest keys and authority keys are generated per app at activation and stored in
 - `POST /v1/apps/{app}/compile`, body `CompileRequest {intent, grid, inputs: CompileInput[], destination_points?}`. `CompileInput` is `{id, kind, shape, meaning, fields, connector?}`; `connector` is pull only, checked by the URL guard. Connectors and `destination_points` are the dev's words: `finalize_app` copies them verbatim (a connector writes a `Change`, kind `connector`, actor `dev`). Returns the `AppSpec` at `pending_confirmation`; `409` if the app is active, `422` if it never finalizes, `503` on rate budget.
 - `PUT /v1/apps/{app}/spec`: the dev edits a `pending_confirmation` spec (full `AppSpec`; `409` otherwise, `422` with every error). It writes a `Change`, kind `spec_edit`, actor `dev`.
 - `POST /v1/apps/{app}/activate` is the only dev confirmation.
+- `GET /v1/apps/{app}` needs no key while the app isn't active (no keys exist yet; the spec holds only the dev's words plus the proposal). Once active, it needs the authority key (401).
 - `GET /v1/apps/{app}/compile/status` (public, no trace text or tool args): `CompileStatus {running, step, elapsed_s, last_validate?: {errors, warnings}}`, 404 once the app is active. A compile that never finalizes returns `422` with `CompileFailure {reason, errors[], warnings[]}`; `503` carries `Retry-After`.
 
 **Running app (authority key):**
@@ -499,3 +500,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
   - `COMPILE_MIN_GAP_S`, an optional env var, and `/compile` returning 429 (#212).
   - The Scout contract (#209).
   - Kida A takes data retention.
+- **2026-11-08:** `GET /v1/apps/{app}` is keyless until activation, so a dev can reopen a pending proposal from any browser (found by Allen's frontend). Rule 8 data starts at activation.
