@@ -642,3 +642,29 @@ class WebhookReceipt(Model):
     received: int
     accepted: int
     rejected: list[WebhookRejection] = Field(default_factory=list, description="First 20 rejections only.")
+
+
+# --- Simulate (BE3, #268): POST /v1/apps/{app}/simulate (authority key) -------------
+
+SimulateMode = Literal["normal", "spoof"]
+
+
+class SimulateRequest(Model):
+    """Body of `POST /v1/apps/{app}/simulate`: generate test events for one push input. They go
+    through the same validation and storage as `/events` and carry a `sim-` / `spoof-` user_id
+    prefix so they stay identifiable."""
+
+    input_id: str = Field(min_length=1, description="A push input of the app (else 422).")
+    count: int = Field(ge=1, le=200)
+    lat: Lat = Field(ge=-90, le=90, description="Centre; must be inside the app's area (else 422).")
+    lon: Lon = Field(ge=-180, le=180)
+    radius_m: float = Field(ge=10, le=5000)
+    mode: SimulateMode = "normal"
+
+
+class SimulateResult(Model):
+    """202 response: how many generated events were stored, and the user_id prefix they carry."""
+
+    accepted: int = Field(ge=0)
+    rejected: int = Field(ge=0)
+    user_id_prefix: str
