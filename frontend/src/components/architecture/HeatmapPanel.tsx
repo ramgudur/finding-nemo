@@ -2,15 +2,20 @@
 // Rule 8: what is drawn is exactly what the server returned for this key; without a key that is
 // public layers and public hotspots only. `spec` is null in the public view (the spec is authority-only),
 // so the geometry then comes from the MapResponse itself.
-import { Hourglass } from "lucide-react";
+import { Hourglass, Scale, UserX } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
-import type { AppSpec, GeoJsonBBox, MapResponse } from "../../api/types";
+import type { AppSpec, GeoJsonBBox, MapResponse, WeightsView } from "../../api/types";
 import type { LiveAppData } from "../../hooks/useLiveAppData";
+import type { MapLearning } from "../../hooks/useMapLearning";
 import type { VectorState } from "../../hooks/useVectorReadings";
 import { Map } from "../Map/Map";
 import { HEAT_GRADIENT_CSS, fmtLatLon, gridShape } from "../Map/geo";
+import { dominantInputs, sourceTint } from "../Map/sourceColours";
 import { HeatmapStats } from "./HeatmapStats";
+import { SourceLegend } from "./SourceLegend";
 import { MapVectorBadge } from "./VectorFieldBits";
+
+export type ColourMode = "source" | "score";
 
 export interface HeatmapPanelProps {
   spec: AppSpec | null;
@@ -24,6 +29,11 @@ export interface HeatmapPanelProps {
   emptyHint?: ReactNode;
   /** Vector-field layers with their latest reading (authority view): drawn as a corner arrow. */
   vectors?: VectorState[];
+  /** Agent overlays (authority view only): colour by source, change flash, distrusted users, POI marks. */
+  learning?: MapLearning | null;
+  weights?: WeightsView | null;
+  colourMode?: ColourMode;
+  onColourMode?: (m: ColourMode) => void;
 }
 
 function maxValue(m: MapResponse | null, id: string): number | null {
@@ -41,7 +51,20 @@ export function shownLayer(map: MapResponse | null, selectedLayerId: string | nu
   return ids.includes("score") ? "score" : (ids[0] ?? null);
 }
 
-export default function HeatmapPanel({ spec, live, selectedLayerId, className, onPick, marker, emptyHint, vectors = [] }: HeatmapPanelProps) {
+export default function HeatmapPanel({
+  spec,
+  live,
+  selectedLayerId,
+  className,
+  onPick,
+  marker,
+  emptyHint,
+  vectors = [],
+  learning = null,
+  weights = null,
+  colourMode = "score",
+  onColourMode,
+}: HeatmapPanelProps) {
   const { map, hotspots, pois } = live;
   // Destination labels come from the spec (authority view); without it no pin is marked as a destination.
   const labelSet = spec?.outputs?.poi_labels?.label_set;
@@ -66,6 +89,15 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className, o
   const threshold = spec?.outputs?.hotspot_threshold ?? 0.5;
   const shownVector = vectors.find((v) => v.layer.layerId === shown && v.layer.shiftOnly) ?? null;
   const badges = vectors.filter((v) => v.reading);
+  // Colour by source: authority view, the combined score shown, and some input that can tint.
+  const canBySource = !!learning && live.authority && shown === "score" && learning.inputs.some((i) => i.hue);
+  const bySource = canBySource && colourMode === "source";
+  const tint = useMemo(() => {
+    if (!bySource || !learning) return null;
+    const w = new globalThis.Map((weights?.layers ?? []).map((l) => [l.layer_id, l.weight]));
+    return sourceTint(dominantInputs(map, learning.inputs, (id) => w.get(id) ?? 0), learning.inputs);
+  }, [bySource, learning, map, weights]);
+  const chip = learning?.chip ?? null;
   // Three distinct pre-data states: loading (no answer yet), waiting (active, no tick yet), quiet (ticks, no cells).
   const phase: "loading" | "waiting" | "unavailable" | "noPublic" | "quiet" | "data" =
     map === null ? (live.notTicked ? "waiting" : live.settled ? "unavailable" : "loading") : shown === null ? "noPublic" : emptyShown ? "quiet" : "data";
@@ -80,7 +112,25 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className, o
           <h2 className="text-[18px] font-bold text-slate">Live map</h2>
           <p className="mt-1 text-[13.5px] text-ink">{shown === "score" || shown === null ? "The combined score, updated every engine tick." : "One layer before weighting. Pick score in Layers to see the combined map."}</p>
         </div>
-        <span className="font-mono text-[12px] text-ink">showing {shown ?? "nothing yet"}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          {canBySource && onColourMode && (
+            <div role="radiogroup" aria-label="Colour cells by" className="inline-flex rounded-full bg-slate/[0.07] p-0.5 text-[12px] font-bold">
+              {(["source", "score"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="radio"
+                  aria-checked={colourMode === m}
+                  onClick={() => onColourMode(m)}
+                  className={`tap wp-press rounded-full px-2.5 py-1 ${colourMode === m ? "bg-deep text-cream" : "text-ink hover:text-slate"}`}
+                >
+                  {m === "source" ? "By source" : "Score"}
+                </button>
+              ))}
+            </div>
+          )}
+          <span className="font-mono text-[12px] text-ink">showing {shown ?? "nothing yet"}</span>
+        </div>
       </div>
 
       {live.error && !live.keyRejected && (
@@ -108,6 +158,12 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className, o
             height="clamp(320px, 56vh, 540px)"
             onPick={onPick}
             marker={marker}
+            tint={tint}
+            flash={learning?.flash ?? null}
+            distrusted={learning?.distrusted ?? []}
+            agentMarks={!!learning}
+            newPoiIds={learning?.newPoiIds}
+            serverNow={map?.t ?? null}
           />
         ) : (
           <div aria-hidden className="h-[clamp(320px,56vh,540px)] rounded-xl bg-mist/70 motion-safe:animate-pulse" />
@@ -120,6 +176,25 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className, o
             <div className="pointer-events-none absolute right-2 top-2 z-[500] rounded-lg bg-cream/95 px-2.5 py-1.5 font-mono text-[11px] text-slate shadow-[var(--shadow-1)]">
               NE {fmtLatLon(bbox[3], bbox[2])}
             </div>
+            {bySource && learning && (
+              <div className="pointer-events-none absolute bottom-10 left-2 z-[510]">
+                <SourceLegend inputs={learning.inputs} ghosts={learning.ghosts} distrustedCount={learning.distrusted.length} />
+              </div>
+            )}
+            {chip && (
+              <div className="pointer-events-none absolute inset-x-2 top-12 z-[520] flex justify-center">
+                <p
+                  key={chip.id}
+                  role="status"
+                  title={chip.title}
+                  className="wp-chip-in inline-flex max-w-full items-center gap-1.5 truncate rounded-full bg-deep px-3.5 py-1.5 text-[13px] font-bold text-cream shadow-[0_8px_20px_-10px_rgba(23,53,71,0.7)]"
+                >
+                  {chip.text.startsWith("Trust") ? <UserX aria-hidden className="h-3.5 w-3.5 shrink-0" /> : <Scale aria-hidden className="h-3.5 w-3.5 shrink-0" />}
+                  <span className="truncate">{chip.text}</span>
+                  {chip.detail && <span className="shrink-0 font-mono text-[12.5px] font-semibold text-[rgb(var(--c-attn-on-deep))]">· {chip.detail}</span>}
+                </p>
+              </div>
+            )}
             {badges.length > 0 && (
               <div className="pointer-events-none absolute right-2 top-10 z-[500] flex flex-col items-end gap-1.5">
                 {badges.map((v) => (
@@ -185,11 +260,19 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className, o
       <div className="flex flex-col gap-1 font-mono text-[11px] text-ink">
         <div className="flex items-center gap-2">
           <span>0</span>
-          <span className="h-1.5 min-w-0 flex-1 rounded-full" style={{ background: HEAT_GRADIENT_CSS }} aria-hidden />
+          <span
+            className="h-1.5 min-w-0 flex-1 rounded-full"
+            style={{ background: bySource ? "linear-gradient(90deg, rgb(var(--c-slate) / 0.12), rgb(var(--c-slate) / 0.75))" : HEAT_GRADIENT_CSS }}
+            aria-hidden
+          />
           <span>1</span>
         </div>
         <p className="break-words">
-          {shown === "score" ? "score = clamp(Σ wᵢ·norm(layerᵢ), 0, 1), authority overrides applied after" : `${shown ?? "layer"}: normalized layer, before weights`}
+          {shown === "score"
+            ? bySource
+              ? "colour = the input with the largest wᵢ·norm(layerᵢ) in that cell; strength = the combined score"
+              : "score = clamp(Σ wᵢ·norm(layerᵢ), 0, 1), authority overrides applied after"
+            : `${shown ?? "layer"}: normalized layer, before weights`}
         </p>
       </div>
 

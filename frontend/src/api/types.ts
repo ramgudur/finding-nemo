@@ -212,6 +212,30 @@ export interface Backtest {
   device: Device;
   elapsed_ms: number;
   t: IsoDateTime;
+  /** The current weights/trust scored on the same holdout; {} on backtests stored before it was recorded. */
+  baseline_holdout_scores?: Partial<Record<VerificationMethod, number>>;
+  /** The method that decided acceptance; null when none had holdout data (or not recorded). */
+  deciding_method?: VerificationMethod | null;
+}
+
+/** GET /v1/apps/{app}/backtests/{id} (authority only): the Backtest plus its deciding method's holdout comparison. */
+export interface BacktestDetail extends Backtest {
+  holdout_baseline: number | null;
+  holdout_candidate: number | null;
+  /** holdout_candidate - holdout_baseline; null when not recoverable. */
+  holdout_delta: number | null;
+}
+
+/** GET /v1/apps/{app}/trust/lowered (authority only, rule 8): a user whose trust is below 1.0, at their latest event. */
+export interface DistrustedUser {
+  user_id: string;
+  input_id: string | null;
+  trust: number;
+  reason: string;
+  lowered_at: IsoDateTime;
+  last_lat: number | null;
+  last_lon: number | null;
+  last_seen: IsoDateTime | null;
 }
 
 export interface ToolCall {

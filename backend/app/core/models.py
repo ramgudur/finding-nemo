@@ -481,6 +481,44 @@ class Backtest(Model):
     device: Device
     elapsed_ms: float = Field(ge=0)
     t: UtcDatetime
+    # What the candidate was compared against: the current weights/trust scored on the same
+    # holdout, and the method that decided acceptance. Empty / None on backtests stored before
+    # these were recorded, and when the window had too little data to compare.
+    baseline_holdout_scores: dict[VerificationMethod, float] = Field(default_factory=dict)
+    deciding_method: VerificationMethod | None = None
+
+
+class BacktestDetail(Backtest):
+    """`GET /v1/apps/{app}/backtests/{id}` (authority only): the stored Backtest plus the holdout
+    comparison for its deciding method, derived from the stored scores. The three derived fields
+    are None when the baseline wasn't recorded or the deciding method has no score on one side."""
+
+    holdout_baseline: float | None = None
+    holdout_candidate: float | None = None
+    holdout_delta: float | None = Field(default=None, description="holdout_candidate - holdout_baseline")
+
+    @classmethod
+    def from_backtest(cls, bt: Backtest) -> BacktestDetail:
+        m = bt.deciding_method
+        base = bt.baseline_holdout_scores.get(m) if m else None
+        cand = bt.holdout_scores.get(m) if m else None
+        delta = cand - base if base is not None and cand is not None else None
+        return cls(**bt.model_dump(), holdout_baseline=base, holdout_candidate=cand, holdout_delta=delta)
+
+
+class DistrustedUser(Model):
+    """`GET /v1/apps/{app}/trust/lowered` (authority only, rule 8: it carries users' positions).
+    One per user whose trust is below the default (1.0). The position is the user's latest event
+    in any input of the app; None when no event of theirs is stored any more."""
+
+    user_id: str
+    input_id: str | None = None
+    trust: float = Field(ge=0, le=1)
+    reason: str = ""
+    lowered_at: UtcDatetime
+    last_lat: Lat | None = None
+    last_lon: Lon | None = None
+    last_seen: UtcDatetime | None = None
 
 
 class ToolCall(Model):

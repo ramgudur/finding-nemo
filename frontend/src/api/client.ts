@@ -1,11 +1,13 @@
 import type {
   ActivateResponse,
   AppSpec,
+  BacktestDetail,
   Change,
   ClockControl,
   ClockState,
   CompileRequest,
   CompileStatus,
+  DistrustedUser,
   ErrorSeries,
   Event,
   HotspotsResponse,
@@ -121,6 +123,9 @@ export const api = {
   changes: (appId: string, key: string) => get<Change[]>(`${app(appId)}/changes`, key),
   weights: (appId: string, key: string) => get<WeightsView>(`${app(appId)}/weights`, key),
   verification: (appId: string, key: string) => get<VerificationView>(`${app(appId)}/verification`, key),
+  backtest: (appId: string, key: string, backtestId: string) =>
+    get<BacktestDetail>(`${app(appId)}/backtests/${encodeURIComponent(backtestId)}`, key),
+  trustLowered: (appId: string, key: string) => get<DistrustedUser[]>(`${app(appId)}/trust/lowered`, key),
   pin: (appId: string, key: string, layerId: string, body: PinRequest) =>
     request<WeightsView>("POST", `${app(appId)}/weights/${encodeURIComponent(layerId)}/pin`, key, body),
   // dev revert of one Change through the same tools and guards; 409 stale, 422 not revertible / guard rejected

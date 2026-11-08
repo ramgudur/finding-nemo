@@ -1,5 +1,5 @@
-"""Authority-only console reads (trace, changes, weights, verification), the dev's weight pin and
-the dev's revert of a Change.
+"""Authority-only console reads (trace, changes, weights, verification, one backtest, users with
+lowered trust), the dev's weight pin and the dev's revert of a Change.
 
 Every route needs the app's `X-Authority-Key`: rule 8 keeps the trace, the Change log and weights in the
 authority view. A missing or wrong key is 401. Writes go through the tool layer (`pin_weight` with
@@ -8,6 +8,7 @@ authority view. A missing or wrong key is 401. Writes go through the tool layer 
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,14 +16,25 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.deps import authority_key_header, get_db, get_engine
 from app.core.db import Db
-from app.core.models import Change, ChangeKind, Tier, TraceEntry, UtcDatetime, VerificationMethod
+from app.core.models import (
+    BacktestDetail,
+    Change,
+    ChangeKind,
+    DistrustedUser,
+    Tier,
+    TraceEntry,
+    UtcDatetime,
+    VerificationMethod,
+)
 from app.engine.tick import TickEngine
+from app.engine.trust import DEFAULT_TRUST
 from app.tools import guards, read_tools, registry, revert_tools
 from app.tools.context import ToolContext
 
 router = APIRouter(prefix="/v1/apps", tags=["console"])
 
 MAX_TRACE = 500
+MAX_DISTRUSTED = 200
 
 
 # --- contracts (mirrored in frontend/src/api/types.ts) --------------------------------
@@ -205,3 +217,56 @@ def revert_change(
         raise HTTPException(status_code=422, detail="rejected: " + "; ".join(e.reasons)) from None
     except LookupError as e:  # the app's runtime isn't loaded (not active)
         raise HTTPException(status_code=409, detail=str(e)) from None
+
+
+@router.get("/{app}/backtests/{backtest_id}", response_model=BacktestDetail)
+def get_backtest(
+    app: str,
+    backtest_id: str,
+    db: Db = Depends(get_db),
+    authority_key: str | None = Depends(authority_key_header),
+) -> BacktestDetail:
+    """One stored backtest with its holdout comparison (the evidence behind a weight or trust
+    Change's `backtest_id`). 404 when unknown or recorded for another app."""
+    _authority(db, app, authority_key)
+    bt = db.get_backtest(app, backtest_id)
+    if bt is None:
+        raise HTTPException(status_code=404, detail="backtest not found")
+    return BacktestDetail.from_backtest(bt)
+
+
+@router.get("/{app}/trust/lowered", response_model=list[DistrustedUser])
+def get_lowered_trust(
+    app: str,
+    db: Db = Depends(get_db),
+    authority_key: str | None = Depends(authority_key_header),
+) -> list[DistrustedUser]:
+    """Users whose trust is below the default, lowest first, at most 200, each with the position of
+    their latest event. Rule 8: other users' positions, so authority only (never on public REST/WS)."""
+    _authority(db, app, authority_key)
+    records = db.list_trust_below(app, DEFAULT_TRUST, MAX_DISTRUSTED)
+    if not records:
+        return []
+    wanted = {r.user_id for r in records}
+    last_change: dict[str, Change] = {}
+    for c in db.list_changes(app, kind="trust"):  # ascending t: the last lowering wins
+        if c.target in wanted and float(c.after.get("trust", 1.0)) < float(c.before.get("trust", 1.0)):
+            last_change[c.target] = c
+    latest = db.latest_event_by_user(app, [r.user_id for r in records])
+    out = []
+    for r in records:
+        ch = last_change.get(r.user_id)
+        input_id, ev = latest.get(r.user_id, (None, None))
+        out.append(
+            DistrustedUser(
+                user_id=r.user_id,
+                input_id=input_id,
+                trust=round(float(r.score), 6),
+                reason=ch.reason if ch else "",
+                lowered_at=ch.t if ch else datetime.fromtimestamp(r.updated_at, UTC),
+                last_lat=ev.lat if ev else None,
+                last_lon=ev.lon if ev else None,
+                last_seen=ev.ts if ev else None,
+            )
+        )
+    return out

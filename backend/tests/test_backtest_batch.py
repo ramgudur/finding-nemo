@@ -138,6 +138,8 @@ def test_batch_finds_weights_that_move_the_peak_to_the_authority_point():
     assert sum(best.weights.values()) == pytest.approx(2.0)  # flexible total holds
     assert best.holdout["authority_confirmation"] > out.baseline_holdout["authority_confirmation"]
     assert len(out.candidates) <= 5
+    assert bt.baseline_holdout_scores == out.baseline_holdout and bt.deciding_method == "authority_confirmation"
+    assert bt.holdout_scores == best.holdout  # the stored scores are the applied candidate's
 
 
 def test_ranks_on_train_only():

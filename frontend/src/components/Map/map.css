@@ -201,3 +201,144 @@
 .hm-map--picking .leaflet-grab {
   cursor: crosshair;
 }
+
+/* --- Agent marks (console, authority view) ------------------------------------------------- */
+
+/* POI fill opacity follows the labeler's confidence; the cream border keeps a faint pin visible. */
+.hm-poi--marks .hm-poi-dot {
+  background: rgba(43, 86, 112, var(--poi-fill, 1));
+}
+.hm-poi--marks.hm-poi--dest .hm-poi-dot {
+  background: rgba(59, 104, 149, var(--poi-fill, 1));
+}
+/* The caption's extra part (confidence, when it was named) shows on hover or keyboard focus. */
+.hm-poi-more {
+  display: none;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: #45606c;
+}
+.hm-poi--marks:hover .hm-poi-more,
+.leaflet-marker-icon:focus-visible .hm-poi-more {
+  display: inline;
+}
+/* Pins in the right part of the map put their chip on the left, so captions stay on screen. */
+.hm-poi--flip .hm-poi-chip {
+  left: auto;
+  right: 13px;
+}
+.hm-poi-chip.is-tight {
+  flex-wrap: wrap;
+  row-gap: 0;
+  white-space: normal;
+  width: max-content;
+}
+.hm-poi-pulse {
+  position: absolute;
+  left: -16px;
+  top: -16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgb(var(--c-deep));
+  opacity: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hm-poi-pulse {
+    animation: hm-poi-pulse 1.6s var(--ease-out) 1 both;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hm-poi-pulse {
+    opacity: 0.45; /* a static ring until the next POI poll */
+  }
+}
+@keyframes hm-poi-pulse {
+  from {
+    transform: scale(0.45);
+    opacity: 0.75;
+  }
+  to {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+/* Change flash: hotter cells glow warm, cooler cells get a fainter cool outline, then both fade. */
+.hm-flash {
+  fill: none;
+  stroke-linejoin: round;
+}
+.hm-flash--warm {
+  stroke: rgb(var(--c-flash-warm));
+  stroke-opacity: 0.95;
+}
+.hm-flash--cool {
+  stroke: rgb(var(--c-flash-cool));
+  stroke-opacity: 0.32;
+  stroke-width: 1.25px;
+}
+.hm-flash--shift {
+  stroke: rgb(var(--c-deep));
+  stroke-opacity: 0.8;
+}
+.hm-flash-halo {
+  stroke-opacity: 0.28;
+}
+.hm-flash--cool.hm-flash-halo {
+  stroke-opacity: 0.08;
+  stroke-width: 5px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hm-flash:not(.hm-flash--still) {
+    animation: hm-flash-fade 3s ease-in 1 forwards;
+  }
+}
+@keyframes hm-flash-fade {
+  0%,
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Users whose trust was lowered: grey, dashed, quiet (they are discounted, not dangerous). */
+.hm-distrust-ring {
+  stroke: #6e7b81;
+  fill: #8c979c;
+}
+.hm-distrust-dot {
+  stroke: #f8f4ea;
+  fill: #a1abb0;
+}
+.hm-distrust-tip {
+  max-width: 240px;
+  white-space: normal;
+  font-family: "Nunito Sans", system-ui, sans-serif;
+  font-size: 12px;
+}
+.hm-distrust-why {
+  margin-top: 3px;
+  color: #45606c;
+}
+
+/* The change chip over the map: a short rise in, nothing with reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .wp-chip-in {
+    animation: wp-chip-in 220ms var(--ease-out) both;
+  }
+}
+@keyframes wp-chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
