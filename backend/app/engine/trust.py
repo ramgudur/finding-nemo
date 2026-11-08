@@ -16,9 +16,10 @@ verdict; the Critic weighs them and any trust change still has to pass a backtes
 Being close to other entities is never a feature: clusters are what the platform is for.
 
 Domain limits come from the spec: each input's `plausibility` ({max_speed_mps?, jitter_m?,
-flag_constant_speed?, flag_straight_line?}) overrides the neutral defaults below
-(`SpoofParams.from_plausibility`, `suspicious_users_by_input`). Something that legitimately moves
-fast or in straight lines sets its own limits or turns those checks off.
+flag_constant_speed?, flag_straight_line?}) turns on the entity-specific checks
+(`SpoofParams.from_plausibility`, `suspicious_users_by_input`). Without it the defaults are neutral:
+no speed limit and no constant-speed / straight-line checks, because what is plausible depends on
+what the entities are. Duplicate coordinates, ID bursts and shared device/IP always run.
 
 Trust bounds (`check_trust_change`, called by tools/guards.py): trust lives in [0, 1]; agents may
 lower it freely with a reason; an increase is at most +0.1 and at most once per 5 minutes of Clock
@@ -54,8 +55,8 @@ FLAG_WEIGHTS: dict[str, float] = {
 @dataclass(frozen=True)
 class SpoofParams:
     coord_decimals: int = 7  # ~1 cm: "exact" duplicate
-    max_speed_mps: float = 12.0  # neutral default; inputs set their own via plausibility
-    jitter_m: float = 30.0  # position-error allowance subtracted from each hop before the speed test
+    max_speed_mps: float | None = None  # None: no speed limit unless the input's plausibility sets one
+    jitter_m: float = 30.0  # position-error allowance, used only with a speed limit
     burst_window_s: float = 10.0
     burst_min_ids: int = 15
     burst_factor: float = 5.0  # window count vs the rest of the batch's new-ID rate per window
@@ -66,8 +67,8 @@ class SpoofParams:
     straight_min_m: float = 20.0
     device_field: str = "device_id"
     ip_field: str = "ip"
-    flag_constant_speed: bool = True
-    flag_straight_line: bool = True
+    flag_constant_speed: bool = False  # entity-specific: on only via plausibility
+    flag_straight_line: bool = False
 
     @classmethod
     def from_plausibility(cls, plausibility: object | None, base: SpoofParams | None = None) -> SpoofParams:
@@ -167,7 +168,7 @@ def suspicious_users(events: Events, params: SpoofParams | None = None) -> list[
         speed = np.where(ok, dist / np.where(ok, dt, 1.0), np.inf)
         # speed beyond position error: subtract the jitter allowance from each hop first
         excess = np.where(ok, (dist - p.jitter_m) / np.where(ok, dt, 1.0), np.where(dist > p.jitter_m, np.inf, 0.0))
-        if (excess > p.max_speed_mps).any():
+        if p.max_speed_mps is not None and (excess > p.max_speed_mps).any():
             flags[u].add("impossible_speed")
             details[u]["max_speed_mps"] = float(np.max(speed[excess > p.max_speed_mps]))
         # constant speed / straight line: any run of min_hops consecutive hops (a scripted track

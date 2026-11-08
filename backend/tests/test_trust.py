@@ -27,8 +27,12 @@ def _concat(*evs: Events) -> Events:
     )
 
 
-def _flags(events, **kw):
-    return {s.user_id: s.flags for s in suspicious_users(events, SpoofParams(**kw) if kw else None)}
+ON_FOOT = {"max_speed_mps": 12.0, "flag_constant_speed": True, "flag_straight_line": True}
+
+
+def _flags(events, plausibility=None, **kw):
+    params = SpoofParams.from_plausibility(plausibility, SpoofParams(**kw))
+    return {s.user_id: s.flags for s in suspicious_users(events, params)}
 
 
 def test_real_crowd_is_not_flagged_even_when_dense():
@@ -38,7 +42,7 @@ def test_real_crowd_is_not_flagged_even_when_dense():
     rng = np.random.default_rng(0)
     offset = {u: rng.uniform(0, 60) for u in np.unique(ev.user_id)}
     ev = Events(ev.user_id, ev.t + np.array([offset[u] for u in ev.user_id]), ev.lat, ev.lon)
-    assert _flags(ev) == {}
+    assert _flags(ev, ON_FOOT) == {}
     # a tight crowd standing still together is fine too
     rng = np.random.default_rng(1)
     crowd = [
@@ -46,7 +50,7 @@ def test_real_crowd_is_not_flagged_even_when_dense():
         for k in range(30)
         for t in range(0, 120, 10)
     ]
-    assert _flags(events_from_xy(GRID, crowd)) == {}
+    assert _flags(events_from_xy(GRID, crowd), ON_FOOT) == {}
 
 
 def test_exact_duplicate_stationary_accounts():
@@ -64,21 +68,21 @@ def test_scripted_escape_constant_speed_and_straight():
         ang = 2 * np.pi * k / 8
         d = np.array([np.cos(ang), np.sin(ang)])
         rows += [(f"f{k}", float(t), *(np.array([250.0, 250.0]) + d * 3.0 * t)) for t in range(0, 41, 5)]
-    f = _flags(events_from_xy(GRID, rows))
+    f = _flags(events_from_xy(GRID, rows), ON_FOOT)
     for k in range(8):
         assert {"constant_speed", "straight_track"} <= set(f[f"f{k}"])
     # the same tracks with GPS noise are not flagged
     rng = np.random.default_rng(2)
     noisy = [(u, t, x + rng.normal(0, 5), y + rng.normal(0, 5)) for u, t, x, y in rows]
-    assert _flags(events_from_xy(GRID, noisy)) == {}
+    assert _flags(events_from_xy(GRID, noisy), ON_FOOT) == {}
 
 
 def test_impossible_speed_but_not_jitter():
     teleport = [("tp", 0.0, 50.0, 50.0), ("tp", 5.0, 450.0, 450.0)]  # 566 m in 5 s
     jitter = [("j", 0.0, 100.0, 100.0), ("j", 0.5, 110.0, 105.0)]  # 22 m/s but only 11 m: GPS noise
-    f = _flags(events_from_xy(GRID, teleport + jitter))
+    f = _flags(events_from_xy(GRID, teleport + jitter), ON_FOOT)
     assert f == {"tp": ["impossible_speed"]}
-    s = suspicious_users(events_from_xy(GRID, teleport))[0]
+    s = suspicious_users(events_from_xy(GRID, teleport), SpoofParams.from_plausibility(ON_FOOT))[0]
     assert s.details["max_speed_mps"] > 100
 
 
@@ -105,7 +109,7 @@ def test_scores_rank_and_summary_has_no_coordinates():
     fakes = [(f"s{k}", float(t), 100.0, 300.0) for k in range(5) for t in range(0, 60, 5)]
     teleport = [("tp", 0.0, 50.0, 50.0), ("tp", 5.0, 450.0, 450.0)]
     ev = _concat(events_from_xy(GRID, fakes), events_from_xy(GRID, teleport))
-    sus = suspicious_users(ev)
+    sus = suspicious_users(ev, SpoofParams.from_plausibility(ON_FOOT))
     assert sus[0].score >= sus[-1].score and all(0 < s.score <= 1 for s in sus)
     summ = summarize(sus, limit=3)
     assert summ["n_flagged"] == 6 and summ["by_flag"] == {"duplicate_coords": 5, "impossible_speed": 1}
@@ -158,7 +162,7 @@ def test_campus_alert_sim_spoofers_flagged_and_real_users_not(seed):
 
     sc = build(seed=seed)
     ev = Events.from_records([{**p.body, "t": p.sim_t} for p in sc.posts if p.input_id == "panic"])
-    flagged = {s.user_id for s in suspicious_users(ev)}
+    flagged = {s.user_id for s in suspicious_users(ev, SpoofParams.from_plausibility(ON_FOOT))}
     spoof = set(sc.truth["spoof_users"])
     assert flagged == spoof
 
@@ -173,24 +177,36 @@ def _fast_straight_tracks(prefix, speed=40.0, n=6):
     return events_from_xy(GRID, rows)
 
 
-def test_plausibility_from_spec_overrides_defaults():
+def test_neutral_defaults_without_plausibility():
+    # no plausibility: a fast, straight, steady track is not suspicious in itself...
+    assert _flags(_fast_straight_tracks("m")) == {}
+    assert SpoofParams().max_speed_mps is None
+    # ...but entity-agnostic checks still run
+    dup = [(f"s{k}", float(t), 100.0, 300.0) for k in range(3) for t in range(0, 30, 5)]
+    assert all(f == ["duplicate_coords"] for f in _flags(events_from_xy(GRID, dup)).values())
+    shared = [("a", 0.0, 10.0, 10.0, "dev1"), ("b", 1.0, 300.0, 300.0, "dev1")]
+    assert _flags(events_from_xy(GRID, shared, ("device_id",))) == {"a": ["shared_device"], "b": ["shared_device"]}
+
+
+def test_plausibility_from_spec_turns_checks_on():
     ev = _fast_straight_tracks("m")
-    flagged = _flags(ev)
+    flagged = _flags(ev, ON_FOOT)
     assert all({"impossible_speed", "constant_speed", "straight_track"} <= set(f) for f in flagged.values())
     fast_ok = SpoofParams.from_plausibility(
         {"max_speed_mps": 30.0, "flag_constant_speed": False, "flag_straight_line": False}
     )
     assert suspicious_users(ev, fast_ok) == []
 
-    # unset keys keep the defaults; objects with attributes work too
+    # unset keys keep the (neutral) defaults; objects with attributes work too
     class Plaus:
         max_speed_mps = 30.0
         jitter_m = None
         flag_constant_speed = None
-        flag_straight_line = None
+        flag_straight_line = True
 
     p = SpoofParams.from_plausibility(Plaus())
-    assert p.max_speed_mps == 30.0 and p.jitter_m == SpoofParams().jitter_m and p.flag_straight_line
+    assert p.max_speed_mps == 30.0 and p.jitter_m == SpoofParams().jitter_m
+    assert p.flag_straight_line and not p.flag_constant_speed
     assert SpoofParams.from_plausibility(None) == SpoofParams()
 
 
@@ -203,7 +219,7 @@ def test_by_input_uses_each_inputs_limits_and_merges():
     )
     assert {s.user_id for s in sus} == {"s0", "s1", "s2"}
     # a user flagged in two inputs gets the union of flags
-    both = suspicious_users_by_input({"a": dup, "b": _fast_straight_tracks("s", n=1)})
+    both = suspicious_users_by_input({"a": dup, "b": _fast_straight_tracks("s", n=1)}, {"b": ON_FOOT})
     s0 = next(s for s in both if s.user_id == "s0")
     assert {"duplicate_coords", "impossible_speed"} <= set(s0.flags)
 
@@ -218,8 +234,8 @@ def test_plausibility_from_the_spec_model():
             "shape": "track",
             "tier": "flexible",
             "meaning": "tracker pings",
-            "plausibility": {"max_speed_mps": 30.0, "flag_straight_line": False},
+            "plausibility": {"max_speed_mps": 30.0, "flag_constant_speed": True},
         }
     )
     p = SpoofParams.from_plausibility(inp.plausibility)
-    assert p.max_speed_mps == 30.0 and not p.flag_straight_line and p.flag_constant_speed
+    assert p.max_speed_mps == 30.0 and p.flag_constant_speed and not p.flag_straight_line
