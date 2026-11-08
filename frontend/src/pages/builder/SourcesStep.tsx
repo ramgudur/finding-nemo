@@ -9,6 +9,7 @@ import { api } from "../../api/client";
 import { BigInput } from "../../components/builder/BigInput";
 import { FailurePanel, toFailure } from "../../components/builder/Failure";
 import type { Failure } from "../../components/builder/Failure";
+import { StepIntro } from "../../components/builder/Help";
 import { SourceRow } from "../../components/builder/SourceRow";
 import { StepFooter } from "../../components/builder/StepFooter";
 import { useUndoToast } from "../../components/builder/UndoToast";
@@ -79,18 +80,16 @@ export function SourcesStep() {
 
   return (
     <>
-      <header className="flex flex-col gap-1.5">
-        <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.02em] text-slate">Data sources</h1>
-        <p className="max-w-[62ch] text-[15px] text-ink">
-          Describe one source at a time in plain words: what it is and what one item means. We'll suggest ways to
-          connect it.
-        </p>
-      </header>
+      <StepIntro
+        step={3}
+        title="Data sources"
+        lead="Add the data your app listens to, one source at a time. Say in plain words what it is and what one item means; we suggest ways to connect it."
+      />
 
       <BigInput
         id="source-description"
         label="Describe a data source"
-        placeholder="describe a source"
+        placeholder="e.g. people tap a button in our app when they see a problem"
         value={text}
         onChange={setText}
         onSubmit={() => void suggest()}
@@ -116,12 +115,13 @@ export function SourcesStep() {
       {failure && <FailurePanel failure={failure} onClose={() => setFailure(null)} />}
 
       <section aria-labelledby="added-h" className="flex flex-col gap-3">
-        <h2 id="added-h" className="text-[15px] font-semibold text-slate">
-          Added {count > 0 && <span className="font-normal text-ink">({count})</span>}
+        <h2 id="added-h" className="bld-h2">
+          Your sources {count > 0 && <span className="font-normal text-ink">({count})</span>}
         </h2>
         {count === 0 ? (
-          <p className="rounded-2xl border border-dashed border-inkSoft/40 px-4 py-4 text-sm text-ink">
-            Nothing yet. Describe a source above, then pick how it connects.
+          <p className="bld-card-quiet px-4 py-4 text-sm text-ink">
+            Nothing yet. Describe a source above, then pick how it connects. Each source becomes one or more layers on
+            your map.
           </p>
         ) : (
           <ul className="flex flex-col gap-3">
@@ -136,6 +136,7 @@ export function SourcesStep() {
                   onRename={(id) => s.updateSource(i, { id })}
                   onFields={(fields) => s.updateSource(i, { fields })}
                   onWebhook={(webhook) => s.updateSource(i, { webhook })}
+                  onConnector={(connector) => s.updateSource(i, { connector })}
                   onFieldsProblem={(p) =>
                     setFieldProblems((cur) => {
                       const next = { ...cur };

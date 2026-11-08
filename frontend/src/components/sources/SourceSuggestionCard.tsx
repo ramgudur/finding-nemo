@@ -40,20 +40,21 @@ export function SourceSuggestionCard({ option, selected, index, onPick }: Props)
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.22, delay: reduce ? 0 : index * 0.04, ease: [0.22, 1, 0.36, 1] }}
       whileHover={reduce ? undefined : { y: -2 }}
-      className={`suggestion-card flex w-full flex-col gap-1.5 rounded-2xl border px-4 py-3 text-left transition-[background-color,border-color,box-shadow] duration-200 ${
+      className={`suggestion-card flex w-full flex-col gap-1.5 rounded-[14px] px-4 py-3 text-left transition-[background-color,box-shadow] duration-200 ${
         selected
-          ? "border-mutedTeal/60 bg-white/75 shadow-[0_10px_30px_-18px_rgba(53,89,107,0.7)]"
-          : "border-white/70 bg-cream/55 hover:bg-cream/80 hover:shadow-[0_10px_30px_-20px_rgba(53,89,107,0.6)]"
+          ? "bg-[#FBFAF6] shadow-[inset_0_0_0_2px_#35596B,0_10px_26px_-18px_rgba(53,89,107,0.7)]"
+          : "bg-white/45 shadow-[inset_0_0_0_1px_rgba(99,143,145,0.3)] hover:bg-white/75 hover:shadow-[inset_0_0_0_1px_rgba(99,143,145,0.55),0_10px_26px_-20px_rgba(53,89,107,0.6)]"
       }`}
     >
       <span className="flex items-center gap-2">
-        <span className="text-[15px] font-semibold text-slate">{option.label}</span>
+        <span className="text-[15px] font-bold text-slate">{option.label}</span>
         <span className="ml-auto">
           <KindBadge kind={kind} />
         </span>
       </span>
       <span className="text-[13px] leading-snug text-ink">{option.why}</span>
-      {preset && <span className="text-[11px] text-ink">ready-made setup: <span className="font-mono">{preset}</span></span>}
+      {preset && <span className="text-[11.5px] text-ink">ready-made setup: <span className="font-mono">{preset}</span></span>}
+      {selected && kind === "pull" && <span className="text-[11.5px] font-semibold text-slate">Settings are open below. Choose it again to close them.</span>}
     </motion.button>
   );
 }

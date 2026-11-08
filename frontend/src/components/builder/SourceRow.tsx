@@ -1,13 +1,15 @@
 // One added source on the Sources step: who sends it, its editable id, what each item is, the dev's own
 // description, optional extra fields ("level:number, note:string?"), for a push source an optional mapping
-// for another service's webhook JSON, and remove (undo lives in the toast).
+// for another service's webhook JSON, for a JSON list we fetch its item mapping, and remove (undo lives in
+// the toast).
 import { Pencil, X } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { forwardRef, useEffect, useRef, useState } from "react";
-import type { CompileInput, InputField, WebhookMapping } from "../../api/types";
+import type { CompileInput, ConnectorConfig, InputField, WebhookMapping } from "../../api/types";
 import { KindBadge } from "../sources/SourceSuggestionCard";
 import { WebhookEditor } from "../sources/WebhookEditor";
-import { SHAPE_INFO, SLUG, emptyWebhook, fieldsToText, parseFields } from "../sources/sourceUtils";
+import { POLL_CHOICES, SHAPE_INFO, SLUG, emptyWebhook, fieldsToText, listConfigOf, listMappingOf, parseFields } from "../sources/sourceUtils";
+import { useHelp } from "./Help";
 
 interface Props {
   source: CompileInput;
@@ -16,6 +18,8 @@ interface Props {
   onFields: (fields: InputField[]) => void;
   /** Push only: the webhook mapping, or null to receive plain events from the dev's own app. */
   onWebhook: (webhook: WebhookMapping | null) => void;
+  /** Pull only: replace the connector (a JSON list's item mapping is edited here). */
+  onConnector: (connector: ConnectorConfig) => void;
   /** The first problem in the extra-fields text, or null when it parses (the step blocks Next on it). */
   onFieldsProblem: (problem: string | null) => void;
   onRemove: () => void;
@@ -29,7 +33,7 @@ const TYPE_WORD: Record<InputField["type"], string> = {
 };
 
 export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
-  { source, duplicate, onRename, onFields, onWebhook, onFieldsProblem, onRemove },
+  { source, duplicate, onRename, onFields, onWebhook, onConnector, onFieldsProblem, onRemove },
   ref,
 ) {
   const reduce = useReducedMotion();
@@ -43,6 +47,17 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
   const webhookId = `webhook-${source.id}`;
   // Keep what was typed when the dev switches the webhook off and back on.
   const [lastWebhook, setLastWebhook] = useState<WebhookMapping | null>(source.webhook ?? null);
+  const fieldsHelp = useHelp(
+    "extra fields",
+    <>
+      Every item already has a place and a time. List anything else it carries, as <code>name:type</code>, separated by
+      commas. Types: <code>number</code>, <code>integer</code> (whole number), <code>string</code> (text) and{" "}
+      <code>boolean</code> (yes or no). Add <code>?</code> when a value may be missing. For example{" "}
+      <code>level:number, note:string?</code>.
+    </>,
+  );
+  const list = source.connector?.type === "json_list" ? source.connector : null;
+  const every = (s: number | undefined) => POLL_CHOICES.find((c) => c.s === (s ?? 300))?.label ?? `every ${s} s`;
 
   useEffect(() => {
     if (editing) idInput.current?.select();
@@ -59,7 +74,9 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
   const connector = source.connector
     ? source.connector.preset
       ? `ready-made setup: ${source.connector.preset}`
-      : source.connector.url ?? source.connector.type
+      : list
+        ? `${source.connector.url ?? ""} · ${every(list.poll_s)}`
+        : source.connector.url ?? source.connector.type
     : source.kind === "pull"
       ? "no feed yet: the Compiler can ask the Scout to find one"
       : null;
@@ -72,9 +89,7 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, transition: { duration: 0.15 } }}
       transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-      className={`flex flex-col gap-3 rounded-2xl border px-4 py-3.5 ${
-        idBad ? "border-danger/40 bg-[#F6E6DD]/80" : "border-white/70 bg-cream/70"
-      }`}
+      className={`bld-card flex flex-col gap-3 px-4 py-4 sm:px-5 ${idBad ? "!bg-[#F6E6DD]/85" : ""}`}
     >
       <div className="flex flex-wrap items-center gap-2">
         <KindBadge kind={source.kind} small />
@@ -93,12 +108,13 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
               }
             }}
             spellCheck={false}
-            className="phone-16 w-48 rounded-lg border border-white/80 bg-white/70 px-2 py-0.5 font-mono text-[13px] text-slate max-sm:min-h-11"
+            className="bld-field is-mono is-sm w-48"
           />
         ) : (
           <button
             type="button"
             onClick={() => setEditing(true)}
+            title="Rename: this id appears in the source's address"
             className="hit group relative flex min-w-0 items-center gap-1 rounded-md px-1 font-mono text-[13px] font-semibold text-slate transition-colors duration-150 hover:bg-white/60"
           >
             <span className="truncate">{source.id}</span>
@@ -121,13 +137,17 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
           {duplicate ? "Another source already uses this id." : "Use lowercase letters, digits, - or _."}
         </p>
       )}
-      <p className="text-[14px] leading-snug text-slate">“{source.meaning}”</p>
+      <p className="text-[15px] leading-snug text-slate">“{source.meaning}”</p>
       {connector && <p className="truncate font-mono text-[11px] text-ink">{connector}</p>}
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor={fieldsId} className="text-xs font-semibold text-slate">
-          Extra fields <span className="font-normal text-ink">(optional)</span>
-        </label>
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-1.5">
+          <label htmlFor={fieldsId} className="bld-label">
+            Extra values per item <span className="bld-optional">optional</span>
+          </label>
+          {fieldsHelp.button}
+        </div>
+        {fieldsHelp.panel}
         <input
           id={fieldsId}
           value={fieldsText}
@@ -141,24 +161,22 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
           spellCheck={false}
           aria-describedby={`${fieldsId}-hint`}
           aria-invalid={parsed.problems.length > 0}
-          className={`rounded-xl border bg-white/55 px-3 py-1.5 font-mono text-[13px] text-slate placeholder:text-inkSoft focus:bg-white/85 ${
-            parsed.problems.length ? "border-danger/50" : "border-white/70"
-          }`}
+          className="bld-field is-mono w-full"
         />
-        <p id={`${fieldsId}-hint`} className={`text-[11px] ${parsed.problems.length ? "text-danger" : "text-ink"}`}>
+        <p id={`${fieldsId}-hint`} className={`bld-hint ${parsed.problems.length ? "!text-danger" : ""}`}>
           {parsed.problems.length
             ? parsed.problems[0]
             : parsed.fields.length
               ? `Each item also carries: ${parsed.fields
                   .map((f) => `${f.name} (${TYPE_WORD[f.type]}${f.required === false ? ", optional" : ""})`)
                   .join(", ")}.`
-              : "Values each item carries beyond its place and time. Write name:type; add ? for optional. Types: number, integer, string, boolean."}
+              : "Anything each item carries besides its place and time. Leave empty if there is nothing else."}
         </p>
       </div>
 
       {source.kind === "push" && (
         <div className="flex flex-col gap-2">
-          <label htmlFor={webhookId} className="flex w-fit cursor-pointer items-center gap-2 text-xs font-semibold text-slate max-sm:min-h-11">
+          <label htmlFor={webhookId} className="flex w-fit cursor-pointer items-start gap-2 text-[13.5px] font-bold text-slate max-sm:min-h-11">
             <input
               id={webhookId}
               type="checkbox"
@@ -170,11 +188,13 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
                   onWebhook(null);
                 }
               }}
-              className="accent-mutedTeal"
+              className="mt-1 accent-mutedTeal"
             />
             <span>
-              Receives another service's webhook{" "}
-              <span className="font-normal text-ink">(their JSON, mapped to place, time and fields)</span>
+              It comes from another service's webhook
+              <span className="block text-[12.5px] font-normal text-ink">
+                Tick this if the data arrives in their own JSON format; you then say where the place, time and values are.
+              </span>
             </span>
           </label>
           {source.webhook && (
@@ -188,6 +208,20 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
               }}
             />
           )}
+        </div>
+      )}
+
+      {list && (
+        <div className="flex flex-col gap-1.5">
+          <span className="bld-label">What each item holds</span>
+          <WebhookEditor
+            sourceId={source.id}
+            variant="list"
+            mapping={listMappingOf(list)}
+            fields={source.fields}
+            onChange={(m) => onConnector({ ...list, config: listConfigOf(m) })}
+            fetchUrl={list.url ?? ""}
+          />
         </div>
       )}
     </motion.li>

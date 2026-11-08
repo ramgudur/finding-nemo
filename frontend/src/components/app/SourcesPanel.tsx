@@ -38,7 +38,7 @@ export function SourcesPanel({ appId, inputs, status }: { appId: string; inputs:
 function SourceRow({ input, row, loading, fetched, now, keysHref }: { input: InputSpec; row: SourceStatus | null; loading: boolean; fetched: boolean; now: number; keysHref: string }) {
   const Icon = input.kind === "push" ? Send : CloudDownload;
   const line = row ? describeSource(row, now) : null;
-  const via = row ? VIA_LABEL[row.via] : input.kind === "push" ? (input.webhook ? "POST API or webhook" : "POST API") : (input.connector?.type ?? "no connector");
+  const via = row?.via ? VIA_LABEL[row.via] : input.kind === "push" ? (input.webhook ? "POST API or webhook" : "POST API") : (input.connector?.type ?? "no connector");
   return (
     <li className="list-none rounded-2xl bg-white/50 px-3.5 py-3 ring-1 ring-paleWater/70">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

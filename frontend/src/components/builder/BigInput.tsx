@@ -1,6 +1,7 @@
 // The one large horizontal input (DESIGN.md §4). Each step uses it for exactly one thing: the app's intent on
-// About, a source description on Sources. The placeholder ends in a bar that blinks like a caret; typing hides
-// it and the field grows with its content. Not a chat box: no send bubble, no history.
+// About, a source description on Sources. The placeholder is an italic example in a lighter ink (so it never
+// reads as typed text) ending in a blinking caret bar; typing hides it and the field grows with its content.
+// Not a chat box: no send bubble, no history.
 import { CornerDownLeft, LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef } from "react";
 
@@ -53,16 +54,18 @@ export function BigInput({
   return (
     <div className={`flex flex-col gap-2 ${disabled ? "opacity-60" : ""}`}>
       <div
-        className="relative rounded-[28px] border border-white/70 bg-cream/65 px-6 py-5 shadow-[0_18px_60px_-30px_rgba(53,89,107,0.6),inset_0_1px_0_rgba(255,255,255,0.7)] transition-[background-color,box-shadow] duration-200 focus-within:bg-cream/90 focus-within:shadow-[0_0_0_2px_#35596B,0_22px_70px_-28px_rgba(53,89,107,0.65)] sm:px-8 sm:py-6"
+        className="relative cursor-text rounded-[20px] border border-[rgba(99,143,145,0.32)] bg-[#FBFAF6]/95 px-5 py-4 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset,0_16px_40px_-26px_rgba(53,89,107,0.6)] transition-[border-color,box-shadow] duration-200 hover:border-[rgba(99,143,145,0.6)] focus-within:border-mutedTeal focus-within:shadow-[0_0_0_3px_rgba(99,143,145,0.28),0_16px_40px_-26px_rgba(53,89,107,0.6)] sm:px-6 sm:py-5"
         onClick={() => ref.current?.focus()}
       >
+        {/* One grid cell holds both, so a long placeholder grows the box instead of spilling out of it. */}
+        <div className="grid">
         {empty && (
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-x-6 top-5 select-none font-display text-[22px] leading-[1.35] text-inkSoft sm:inset-x-8 sm:top-6 sm:text-[27px]"
+            className="pointer-events-none col-start-1 row-start-1 select-none text-[18px] italic leading-[1.45] text-[#5A747E] sm:text-[20px]"
           >
             {placeholder}
-            <span className="ml-[1px] inline-block animate-cursor-blink font-light text-slate">|</span>
+            <span className="ml-[2px] inline-block animate-cursor-blink not-italic font-light text-mutedTeal">|</span>
           </div>
         )}
         <textarea
@@ -83,8 +86,9 @@ export function BigInput({
           spellCheck
           style={{ caretColor: empty ? "transparent" : undefined }}
           // The container draws the focus ring (focus-within), so the bare textarea needs none of its own.
-          className="block w-full resize-none overflow-hidden bg-transparent font-display text-[22px] leading-[1.35] text-slate focus-visible:outline-none disabled:cursor-not-allowed sm:text-[27px]"
+          className="col-start-1 row-start-1 block w-full resize-none overflow-hidden bg-transparent text-[18px] font-medium leading-[1.45] text-slate focus-visible:outline-none disabled:cursor-not-allowed sm:text-[20px]"
         />
+        </div>
       </div>
       {onSubmit && (
         <div className="flex min-h-[24px] items-center justify-end gap-2 px-3 text-xs text-ink" aria-live="polite">
@@ -97,7 +101,7 @@ export function BigInput({
               <button
                 type="button"
                 onClick={onSubmit}
-                className="tap flex items-center gap-1.5 rounded-full px-2 py-0.5 transition-colors duration-150 hover:bg-white/50"
+                className="tap flex items-center gap-1.5 rounded-full px-2 py-0.5 font-semibold text-slate transition-colors duration-150 hover:bg-white/55"
               >
                 <kbd className="flex items-center gap-1 rounded-md border border-inkSoft/40 bg-white/50 px-1.5 py-px font-mono text-[11px]">
                   Enter <CornerDownLeft size={11} />

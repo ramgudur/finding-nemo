@@ -2,6 +2,7 @@
 // concern (inputs & tiers, verification, visibility & labels, routing). Save goes through PUT /spec;
 // the page owns Confirm & activate. Rule 4: the Compiler only proposed these values; they take effect
 // when the dev confirms, and after that no agent can change tiers, locked weights or verification.
+// Every setting carries plain words (components/builder/explain.ts) and, where it needs more, a "?" note.
 import { Check, ChevronRight, Lock, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ApiError, api } from "../../api/client";
@@ -18,8 +19,27 @@ import type {
   Tier,
   Visibility,
 } from "../../api/types";
+import { useHelp } from "../builder/Help";
+import {
+  ALPHA_DETAIL,
+  HOTSPOT_DETAIL,
+  IMPASSABLE_DETAIL,
+  LABELS_DETAIL,
+  LABEL_MODE_PLAIN,
+  OPERATOR_DETAIL,
+  PLAUSIBILITY_DETAIL,
+  ROUTING_DETAIL,
+  SHAPE_PLAIN,
+  TIER_DETAIL,
+  TIER_PLAIN,
+  VERIFICATION_DETAIL,
+  VERIFICATION_PLAIN,
+  VISIBILITY_PLAIN,
+  operatorPlain,
+} from "../builder/explain";
 import { WebhookSummary } from "../sources/WebhookSummary";
-import { TIER_SURFACE, TierBadge } from "./TierBadge";
+import { listMappingOf } from "../sources/sourceUtils";
+import { TIER_SURFACE } from "./TierBadge";
 import { TIER_HELP, TIERS, layerIdOf, operatorChoices, useOperatorCatalog } from "./specLayers";
 
 const VISIBILITIES: Visibility[] = ["authority", "public"];
@@ -43,16 +63,16 @@ function reviewWarnings(spec: AppSpec): string[] {
   const out: string[] = [];
   for (const i of spec.inputs ?? []) {
     if ((i.shape === "point" || i.shape === "track") && i.tier === "flexible" && !i.plausibility) {
-      out.push(`${i.id}: no plausibility limits, so spoof checks use neutral defaults (no speed limit).`);
+      out.push(`${i.id}: no spoof-check limits (top speed, path shape), so only the basic checks run. Set them under More settings.`);
     }
   }
   const layers = spec.outputs?.layers ?? [];
   const score = layers.find((l) => l.id === "score");
   if (score?.visibility === "public" && layers.some((l) => l.id !== "score" && l.visibility !== "public")) {
-    out.push("score is public while some layers are private; the server will reject this.");
+    out.push("The combined score is public while some layers are private; the server will reject this.");
   }
   if ((spec.routing?.fallback_text ?? "").length > FALLBACK_TEXT_MAX) {
-    out.push(`Routing fallback text is over ${FALLBACK_TEXT_MAX} characters.`);
+    out.push(`The no-route message is over ${FALLBACK_TEXT_MAX} characters.`);
   }
   return out;
 }
@@ -140,31 +160,47 @@ export function useSpecDraft(spec: AppSpec, appId: string, onSaved: (spec: AppSp
 
 // ---------- shared bits ----------
 
-const field =
-  "phone-16 rounded-lg border border-paleWater bg-white/70 px-2 py-1 text-[13px] text-slate max-sm:min-h-11";
-const mono = `${field} font-mono`;
-const smallBtn =
-  "inline-flex items-center gap-1 rounded-full bg-white/60 px-2.5 py-1 text-[12px] font-semibold text-ink ring-1 ring-paleWater transition-[background-color,box-shadow] duration-150 hover:bg-white hover:shadow-sm disabled:opacity-50";
-const label = "text-[12px] text-ink";
+const field = "bld-field is-sm";
+const mono = `${field} is-mono`;
+const smallBtn = "bld-btn bld-btn-secondary bld-btn-sm";
+const label = "text-[12.5px] text-ink";
 
-export function ReviewSection({ id, title, aside, children }: { id: string; title: string; aside?: ReactNode; children: ReactNode }) {
+export function ReviewSection({
+  id,
+  title,
+  aside,
+  help,
+  children,
+}: {
+  id: string;
+  title: string;
+  aside?: ReactNode;
+  /** Longer plain-language note behind a "?" next to the title. */
+  help?: ReactNode;
+  children: ReactNode;
+}) {
+  const h = useHelp(title.toLowerCase(), help);
   return (
-    <section aria-labelledby={id} className="space-y-3 border-t border-paleWater/80 pt-6 first:border-t-0 first:pt-0">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 id={id} className="text-[17px] font-bold text-slate">
-          {title}
-        </h2>
-        {aside && <span className="text-[13px] text-ink">{aside}</span>}
+    <section aria-labelledby={id} className="space-y-3 border-t border-[rgba(99,143,145,0.25)] pt-6 first:border-t-0 first:pt-0">
+      <div className="space-y-1">
+        <div className="flex items-center gap-1.5">
+          <h2 id={id} className="bld-h2">
+            {title}
+          </h2>
+          {help != null && h.button}
+        </div>
+        {aside && <p className="bld-hint max-w-[70ch] text-[13px]">{aside}</p>}
       </div>
+      {h.panel}
       {children}
     </section>
   );
 }
 
-/** Tier choice: the selected tier carries a check and a ring, not just more opacity. */
+/** Tier choice as three cards, each saying in plain words what it lets the AI do. */
 function TierPicker({ inputId, value, onChange }: { inputId: string; value: Tier; onChange: (t: Tier) => void }) {
   return (
-    <div role="radiogroup" aria-label={`${inputId} tier`} className="flex flex-wrap gap-1.5">
+    <div role="radiogroup" aria-label={`${inputId}: how far the AI may change it`} className="grid gap-1.5 sm:grid-cols-3">
       {TIERS.map((t) => {
         const on = value === t;
         return (
@@ -175,14 +211,37 @@ function TierPicker({ inputId, value, onChange }: { inputId: string; value: Tier
             aria-checked={on}
             title={TIER_HELP[t]}
             onClick={() => onChange(t)}
-            className={`tap inline-flex items-center gap-1 rounded-full p-0.5 pr-1 transition-[box-shadow,background-color] duration-150 max-sm:px-1.5 ${
-              on ? "bg-white/80 ring-2 ring-slate/70" : "ring-1 ring-transparent hover:bg-white/50 hover:ring-paleWater"
-            }`}
+            className="bld-choice tap"
           >
-            <span aria-hidden className={`flex h-4 w-4 items-center justify-center rounded-full ${on ? "bg-slate text-cream" : "border border-inkSoft/60"}`}>
+            <span aria-hidden className="bld-choice-dot">
               {on && <Check className="h-3 w-3" strokeWidth={3} />}
             </span>
-            <TierBadge tier={t} />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-[13.5px] font-bold text-slate">{TIER_PLAIN[t].name}</span>
+              <span className="text-[12px] leading-snug text-ink">{TIER_PLAIN[t].line}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Public / private as two small cards. */
+function VisibilityPicker({ name, value, onChange }: { name: string; value: Visibility; onChange: (v: Visibility) => void }) {
+  return (
+    <div role="radiogroup" aria-label={`${name}: who can see it`} className="grid gap-1.5 sm:grid-cols-2">
+      {VISIBILITIES.map((v) => {
+        const on = value === v;
+        return (
+          <button key={v} type="button" role="radio" aria-checked={on} onClick={() => onChange(v)} className="bld-choice tap">
+            <span aria-hidden className="bld-choice-dot">
+              {on && <Check className="h-3 w-3" strokeWidth={3} />}
+            </span>
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-[13px] font-bold text-slate">{VISIBILITY_PLAIN[v].name}</span>
+              <span className="text-[12px] leading-snug text-ink">{VISIBILITY_PLAIN[v].line}</span>
+            </span>
           </button>
         );
       })}
@@ -204,23 +263,23 @@ function operatorParams(o: OperatorConfig): [string, string][] {
   return out;
 }
 
-/** One line naming the values the Advanced disclosure holds, so closing it hides nothing silently. */
+/** One line naming the values "More settings" holds, so closing it hides nothing silently. */
 function advancedSummary(input: InputSpec): string {
-  const parts = [`visibility ${input.visibility ?? "authority"}`];
+  const parts = [VISIBILITY_PLAIN[input.visibility ?? "authority"].name.toLowerCase()];
   if (hasPlausibility(input)) {
     const p = input.plausibility;
-    if (!p) parts.push("plausibility: neutral defaults");
+    if (!p) parts.push("no spoof-check limits");
     else {
-      parts.push(p.max_speed_mps != null ? `max ${fmt(p.max_speed_mps)} m/s` : "no speed limit");
-      if (p.jitter_m != null) parts.push(`jitter ${fmt(p.jitter_m)} m`);
-      const flags = [p.flag_constant_speed && "constant speed", p.flag_straight_line && "straight lines"].filter(Boolean);
+      parts.push(p.max_speed_mps != null ? `top speed ${fmt(p.max_speed_mps)} m/s` : "no speed limit");
+      if (p.jitter_m != null) parts.push(`wobble ${fmt(p.jitter_m)} m`);
+      const flags = [p.flag_constant_speed && "constant speed", p.flag_straight_line && "straight paths"].filter(Boolean);
       parts.push(flags.length ? `flags ${flags.join(", ")}` : "no shape flags");
     }
   }
   const ops = input.operators ?? [];
   if (ops.length > 0) {
     const tuned = ops.filter((o) => operatorParams(o).length > 1 || o.noise_floor != null).length;
-    parts.push(tuned ? `params set on ${tuned} of ${ops.length} operator${ops.length === 1 ? "" : "s"}` : "operator params at defaults");
+    parts.push(tuned ? `technical settings on ${tuned} of ${ops.length} layer${ops.length === 1 ? "" : "s"}` : "technical settings at defaults");
   }
   return parts.join(" · ");
 }
@@ -237,6 +296,18 @@ function notesFor(input: InputSpec, index: number, d: SpecDraft): CardNotes {
 interface CardNotes {
   warnings: string[];
   errors: string[];
+}
+
+/** How a source arrives, in plain words. */
+function arrival(input: InputSpec): string {
+  const c = input.connector;
+  if (input.kind === "push") return input.webhook ? "Sent by another service's webhook" : "Sent by your app";
+  if (!c) return "Fetched by the platform";
+  const every = c.poll_s ? ` every ${c.poll_s >= 60 ? `${fmt(c.poll_s / 60)} min` : `${fmt(c.poll_s)} s`}` : "";
+  if (c.preset) return `Fetched${every} with the ready-made ${c.preset} setup`;
+  if (c.type === "rss") return `Fetched${every} from a news feed`;
+  if (c.type === "json_list") return `Fetched${every} from a JSON list`;
+  return `Fetched${every} from a JSON address`;
 }
 
 function InputCard({
@@ -258,93 +329,116 @@ function InputCard({
   const setP = (patch: Partial<Plausibility>) => onInput({ plausibility: cleanPlausibility({ ...p, ...patch }) });
   const locked = input.tier === "locked";
   const visibility = input.visibility ?? "authority";
+  const tierHelp = useHelp("tiers", TIER_DETAIL);
+  const opHelp = useHelp("map layers", OPERATOR_DETAIL);
+  const spoofHelp = useHelp("spoof checks", PLAUSIBILITY_DETAIL);
+  const opLabel = (c: string) => `${operatorPlain(c).name} (${c})`;
 
   return (
-    <div className={`space-y-3 rounded-2xl border p-4 ${TIER_SURFACE[input.tier]}`}>
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="break-all font-mono text-[14px] font-medium text-slate">{input.id}</span>
-        <span className="text-[12px] text-ink">
-          {input.kind} · {input.shape}
-        </span>
+    <div className={`space-y-4 rounded-2xl border p-4 sm:p-5 ${TIER_SURFACE[input.tier]}`}>
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="break-all font-mono text-[14px] font-semibold text-slate">{input.id}</span>
+          <span className="text-[12.5px] text-ink">
+            {arrival(input)} · {SHAPE_PLAIN[input.shape]}
+          </span>
+        </div>
+        {input.meaning && <p className="max-w-[70ch] text-[13.5px] italic text-ink">“{input.meaning}”</p>}
       </div>
-      {input.meaning && <p className="max-w-[70ch] text-[13px] italic text-ink">“{input.meaning}”</p>}
-      <TierPicker inputId={input.id} value={input.tier} onChange={(tier) => onInput({ tier })} />
 
       <div className="space-y-1.5">
-        <span className="flex items-center gap-2 text-[12px] font-semibold text-slate">
-          Operators
+        <div className="flex items-center gap-1.5">
+          <span className="bld-label">How far the AI may change it</span>
+          {tierHelp.button}
+        </div>
+        {tierHelp.panel}
+        <TierPicker inputId={input.id} value={input.tier} onChange={(tier) => onInput({ tier })} />
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5">
+          <span className="bld-label">How it shows on the map</span>
+          {opHelp.button}
           {locked && (
-            <span className="inline-flex items-center gap-1 font-normal text-ink">
+            <span className="ml-1 inline-flex items-center gap-1 text-[12px] text-ink">
               <Lock aria-hidden className="h-3 w-3" /> weights can't change
             </span>
           )}
-        </span>
-        {ops.length === 0 && <p className="text-[12.5px] text-ink">None: this input won't shape the score.</p>}
+        </div>
+        {opHelp.panel}
+        {ops.length === 0 && <p className="text-[12.5px] text-ink">No layers: this source won't affect the score.</p>}
         {ops.map((o, n) => (
-          <div key={layerIdOf(input.id, o)} className="flex items-center gap-1.5">
-            <select
-              aria-label={`${input.id} operator`}
-              value={o.op}
-              onChange={(e) => {
-                const op = e.target.value;
-                const layer_id = `${input.id}.${op}`;
-                // a different operator takes its own default params; keep weight and noise floor
-                const next: OperatorConfig = { op, weight: o.weight, noise_floor: o.noise_floor ?? null, layer_id };
-                onOperators(ops.map((x, j) => (j === n ? next : x)), [layerIdOf(input.id, o), layer_id]);
-              }}
-              className={`${mono} min-w-0`}
-            >
-              {[o.op, ...choices.filter((c) => c !== o.op && !ops.some((x) => x.op === c))].map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </select>
-            {locked ? (
-              <span
-                className="inline-flex shrink-0 items-center gap-1 px-1 text-[12.5px] text-slate"
-                title="Locked weights never change. Pick another tier first to edit it."
+          <div key={layerIdOf(input.id, o)} className="space-y-1 rounded-xl bg-white/45 px-3 py-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                aria-label={`${input.id}: how it shows on the map`}
+                value={o.op}
+                onChange={(e) => {
+                  const op = e.target.value;
+                  const layer_id = `${input.id}.${op}`;
+                  // a different operator takes its own default params; keep weight and noise floor
+                  const next: OperatorConfig = { op, weight: o.weight, noise_floor: o.noise_floor ?? null, layer_id };
+                  onOperators(ops.map((x, j) => (j === n ? next : x)), [layerIdOf(input.id, o), layer_id]);
+                }}
+                className={`${field} min-w-0 max-w-full flex-1 font-semibold sm:flex-none`}
               >
-                <Lock aria-hidden className="h-3 w-3" />
-                <span className="text-ink">weight</span>
-                <span className="font-mono tabular-nums">{o.weight}</span>
-              </span>
-            ) : (
-              <label className={`flex shrink-0 items-center gap-1 ${label}`}>
-                weight
-                <input
-                  aria-label={`${input.id} ${o.op} weight`}
-                  type="number"
-                  step="0.05"
-                  min={0}
-                  value={o.weight}
-                  onChange={(e) => onOperators(ops.map((x, j) => (j === n ? { ...x, weight: Number(e.target.value) } : x)))}
-                  className={`${mono} w-20`}
-                />
-              </label>
-            )}
-            <button
-              type="button"
-              aria-label={`remove ${layerIdOf(input.id, o)}`}
-              title={`Remove ${layerIdOf(input.id, o)}`}
-              onClick={() => onOperators(ops.filter((_, j) => j !== n))}
-              className={`${smallBtn} tap ml-auto shrink-0 justify-center`}
-            >
-              <Trash2 aria-hidden className="h-3 w-3" />
-            </button>
+                {[o.op, ...choices.filter((c) => c !== o.op && !ops.some((x) => x.op === c))].map((c) => (
+                  <option key={c} value={c}>
+                    {opLabel(c)}
+                  </option>
+                ))}
+              </select>
+              {locked ? (
+                <span
+                  className="inline-flex shrink-0 items-center gap-1 px-1 text-[12.5px] text-slate"
+                  title="Locked weights never change. Pick another tier first to edit it."
+                >
+                  <Lock aria-hidden className="h-3 w-3" />
+                  <span className="text-ink">counts</span>
+                  <span className="font-mono tabular-nums">{o.weight}</span>
+                </span>
+              ) : (
+                <label className={`flex shrink-0 items-center gap-1.5 ${label}`}>
+                  counts
+                  <input
+                    aria-label={`${input.id} ${o.op} weight`}
+                    type="number"
+                    step="0.05"
+                    min={0}
+                    value={o.weight}
+                    onChange={(e) => onOperators(ops.map((x, j) => (j === n ? { ...x, weight: Number(e.target.value) } : x)))}
+                    className={`${mono} w-20`}
+                  />
+                </label>
+              )}
+              <button
+                type="button"
+                aria-label={`remove ${layerIdOf(input.id, o)}`}
+                title={`Remove ${layerIdOf(input.id, o)}`}
+                onClick={() => onOperators(ops.filter((_, j) => j !== n))}
+                className={`${smallBtn} tap ml-auto shrink-0 !px-2`}
+              >
+                <Trash2 aria-hidden className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <p className="text-[12px] text-ink">{operatorPlain(o.op).line}</p>
           </div>
         ))}
         {unused.length > 0 && (
           <select
-            aria-label={`${input.id} add operator`}
+            aria-label={`${input.id} add a map layer`}
             value=""
             onChange={(e) => {
               const op = e.target.value;
               if (op) onOperators([...ops, { op, weight: 0.5, layer_id: `${input.id}.${op}` }]);
             }}
-            className={field}
+            className={`${field} w-fit max-w-full`}
           >
-            <option value="">Add an operator…</option>
+            <option value="">Add another way to show it…</option>
             {unused.map((c) => (
-              <option key={c}>{c}</option>
+              <option key={c} value={c}>
+                {opLabel(c)}: {operatorPlain(c).line}
+              </option>
             ))}
           </select>
         )}
@@ -352,7 +446,7 @@ function InputCard({
 
       {input.connector && (
         <p className="text-[12.5px] text-ink">
-          <span>polls </span>
+          <span>Fetched from </span>
           <span className="font-mono text-slate">
             {input.connector.type}
             {input.connector.preset ? ` (${input.connector.preset})` : ""}
@@ -362,10 +456,11 @@ function InputCard({
       )}
 
       {input.kind === "push" && input.webhook && <WebhookSummary w={input.webhook} />}
+      {input.connector?.type === "json_list" && <WebhookSummary title="Reads each item of the JSON list" w={listMappingOf(input.connector)} />}
 
       {/* This input's notes stay on the card, open or closed. */}
       {notes.errors.length > 0 && (
-        <ul className="space-y-0.5 rounded-xl bg-coral/20 px-3 py-2 text-[12.5px] font-semibold text-[#7A4232]">
+        <ul className="bld-warn space-y-0.5 font-semibold">
           {notes.errors.map((x) => (
             <li key={x} className="[overflow-wrap:anywhere]">
               {x}
@@ -374,54 +469,49 @@ function InputCard({
         </ul>
       )}
       {notes.warnings.length > 0 && (
-        <ul className="space-y-0.5 rounded-xl bg-coral/15 px-3 py-2 text-[12.5px] text-[#7A4232]">
+        <ul className="bld-warn space-y-0.5">
           {notes.warnings.map((x) => (
             <li key={x}>{x}</li>
           ))}
         </ul>
       )}
 
-      <details className="group rounded-xl bg-white/35 open:bg-white/45">
-        <summary className="flex min-h-11 cursor-pointer list-none items-start gap-2 rounded-xl px-3 py-2.5 text-[12.5px] transition-colors duration-150 hover:bg-white/40 sm:min-h-0 [&::-webkit-details-marker]:hidden">
+      <details className="group rounded-xl bg-white/35 open:bg-white/50">
+        <summary className="flex min-h-11 cursor-pointer list-none items-start gap-2 rounded-xl px-3 py-2.5 text-[12.5px] transition-colors duration-150 hover:bg-white/45 sm:min-h-0 [&::-webkit-details-marker]:hidden">
           <ChevronRight aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink transition-transform duration-200 group-open:rotate-90" />
           <span className="min-w-0">
-            <span className="font-semibold text-slate">Advanced</span>
+            <span className="font-bold text-slate">More settings</span>
             <span className="block text-ink [overflow-wrap:anywhere] group-open:hidden">{advancedSummary(input)}</span>
           </span>
         </summary>
-        <div className="space-y-3 px-3 pb-3 pt-1">
-          <label className={`flex flex-wrap items-center gap-1.5 ${label}`}>
-            visibility
-            <select
-              aria-label={`${input.id} visibility`}
-              value={visibility}
-              onChange={(e) => onInput({ visibility: e.target.value as Visibility })}
-              className={field}
-            >
-              {VISIBILITIES.map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-          </label>
+        <div className="space-y-4 px-3 pb-3 pt-1">
+          <div className="space-y-1.5">
+            <span className="bld-label">Who can see this source's layers</span>
+            <VisibilityPicker name={input.id} value={visibility} onChange={(v) => onInput({ visibility: v })} />
+          </div>
 
           {hasPlausibility(input) && (
             <div className="space-y-1.5">
-              <span className="text-[12px] font-semibold text-slate">Plausibility</span>
-              <div className={`flex flex-wrap items-center gap-x-4 gap-y-1.5 ${label}`}>
-                <label className="flex items-center gap-1">
-                  max speed (m/s)
+              <div className="flex items-center gap-1.5">
+                <span className="bld-label">Spoof checks</span>
+                {spoofHelp.button}
+              </div>
+              {spoofHelp.panel}
+              <div className={`flex flex-wrap items-center gap-x-5 gap-y-2 ${label}`}>
+                <label className="flex items-center gap-1.5">
+                  top speed (m/s)
                   <input
                     aria-label={`${input.id} max speed`}
                     type="number"
                     min={0}
                     value={p.max_speed_mps ?? ""}
-                    placeholder="none"
+                    placeholder="no limit"
                     onChange={(e) => setP({ max_speed_mps: numOrNull(e.target.value) })}
-                    className={`${mono} w-20`}
+                    className={`${mono} w-24`}
                   />
                 </label>
-                <label className="flex items-center gap-1">
-                  jitter (m)
+                <label className="flex items-center gap-1.5">
+                  position wobble allowed (m)
                   <input
                     aria-label={`${input.id} jitter`}
                     type="number"
@@ -429,16 +519,16 @@ function InputCard({
                     value={p.jitter_m ?? ""}
                     placeholder="none"
                     onChange={(e) => setP({ jitter_m: numOrNull(e.target.value) })}
-                    className={`${mono} w-20`}
+                    className={`${mono} w-24`}
                   />
                 </label>
-                <label className="flex items-center gap-1 max-sm:min-h-11">
+                <label className="flex items-center gap-1.5 max-sm:min-h-11">
                   <input type="checkbox" className="accent-mutedTeal" checked={!!p.flag_constant_speed} onChange={(e) => setP({ flag_constant_speed: e.target.checked })} />
-                  flag constant speed
+                  flag a perfectly constant speed
                 </label>
-                <label className="flex items-center gap-1 max-sm:min-h-11">
+                <label className="flex items-center gap-1.5 max-sm:min-h-11">
                   <input type="checkbox" className="accent-mutedTeal" checked={!!p.flag_straight_line} onChange={(e) => setP({ flag_straight_line: e.target.checked })} />
-                  flag straight lines
+                  flag perfectly straight paths
                 </label>
               </div>
             </div>
@@ -446,7 +536,8 @@ function InputCard({
 
           {ops.length > 0 && (
             <div className="space-y-1">
-              <span className="text-[12px] font-semibold text-slate">Operator params</span>
+              <span className="bld-label">Technical settings</span>
+              <p className="text-[12px] text-ink">The Compiler set these for each layer; most apps never need to change them.</p>
               <ul className="space-y-1">
                 {ops.map((o) => (
                   <li key={layerIdOf(input.id, o)} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[12px] text-ink">
@@ -487,8 +578,12 @@ export function InputsSection({ d }: { d: SpecDraft }) {
   };
 
   return (
-    <ReviewSection id="rv-inputs" title="Inputs & tiers" aside="Tiers decide how far agents may move each weight.">
-      <div className="grid gap-3 xl:grid-cols-2">
+    <ReviewSection
+      id="rv-inputs"
+      title="Your sources"
+      aside="For each source: how far the AI may change its weight, and how it shows on the map."
+    >
+      <div className="grid gap-4">
         {inputs.map((i, k) => (
           <InputCard key={i.id} input={i} notes={notesFor(i, k, d)} onInput={(patch) => setInput(k, patch)} onOperators={(ops, r) => setOperators(k, ops, r)} />
         ))}
@@ -500,16 +595,29 @@ export function InputsSection({ d }: { d: SpecDraft }) {
 export function VerificationSection({ d }: { d: SpecDraft }) {
   const verification = [...(d.draft.verification ?? [])].sort((a, b) => a.priority - b.priority);
   return (
-    <ReviewSection id="rv-verification" title="Verification" aside="In priority order. The first method with data decides every backtest.">
+    <ReviewSection
+      id="rv-verification"
+      title="How changes are checked"
+      aside="Before the AI changes a weight, it must pass these checks on held-back data, in this order."
+      help={VERIFICATION_DETAIL}
+    >
       {verification.length === 0 ? (
-        <p className="text-[13px] text-ink">None proposed, so the Critic can never change a weight.</p>
+        <p className="bld-warn">No checks were proposed, so the AI can never change a weight.</p>
       ) : (
-        <ol className="space-y-1.5">
+        <ol className="space-y-2">
           {verification.map((v, n) => (
-            <li key={v.method} className="flex items-baseline gap-3 text-[13.5px]">
-              <span className="w-5 text-right font-mono text-[12px] tabular-nums text-ink">{v.priority}</span>
-              <span className="font-mono text-slate">{v.method}</span>
-              {n === 0 && <span className="text-[12px] text-ink">decides first</span>}
+            <li key={v.method} className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/70 font-mono text-[12px] font-semibold tabular-nums text-slate">
+                {v.priority}
+              </span>
+              <span className="min-w-0 space-y-0.5">
+                <span className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="text-[14px] font-bold text-slate">{VERIFICATION_PLAIN[v.method]?.name ?? v.method}</span>
+                  <span className="font-mono text-[11.5px] text-ink">{v.method}</span>
+                  {n === 0 && <span className="text-[12px] font-semibold text-mutedTeal">decides first</span>}
+                </span>
+                <span className="block text-[12.5px] text-ink">{VERIFICATION_PLAIN[v.method]?.line}</span>
+              </span>
             </li>
           ))}
         </ol>
@@ -518,26 +626,43 @@ export function VerificationSection({ d }: { d: SpecDraft }) {
   );
 }
 
+/** "panic.density" -> "panic · Clusters"; "score" -> "Combined score". */
+function layerName(id: string): string {
+  if (id === "score") return "Combined score";
+  const dot = id.lastIndexOf(".");
+  return dot > 0 ? `${id.slice(0, dot)} · ${operatorPlain(id.slice(dot + 1)).name}` : id;
+}
+
 export function VisibilityLabelsSection({ d }: { d: SpecDraft }) {
   const { draft, change } = d;
   const outputs = draft.outputs ?? {};
   const outLayers = outputs.layers ?? [];
   const labels = outputs.poi_labels ?? {};
   const labelSet = labels.label_set ?? [];
+  const mode = labels.mode ?? "auto";
   const setOutputs = (patch: Partial<Outputs>) => change({ ...draft, outputs: { ...outputs, ...patch } });
   const setLabels = (patch: Partial<PoiLabelConfig>) => setOutputs({ poi_labels: { ...labels, ...patch } });
   const setLabel = (k: number, patch: Partial<PoiLabel>) => setLabels({ label_set: labelSet.map((x, j) => (j === k ? { ...x, ...patch } : x)) });
+  const hotHelp = useHelp("hotspot threshold", HOTSPOT_DETAIL);
+  const labelHelp = useHelp("place labels", LABELS_DETAIL);
 
   return (
-    <ReviewSection id="rv-visibility" title="Visibility & labels" aside="Public items reach anyone; everything else needs the authority key.">
+    <ReviewSection
+      id="rv-visibility"
+      title="Who sees what, and place names"
+      aside="Public items reach anyone with the app's link; private ones need your authority key. End users only ever get directions."
+    >
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-2">
-          <h3 className="text-[13px] font-semibold text-slate">Map layers</h3>
-          {outLayers.length === 0 && <p className="text-[13px] text-ink">No output layers.</p>}
-          <div className="grid gap-1.5">
+          <h3 className="bld-h3">Map layers</h3>
+          {outLayers.length === 0 && <p className="text-[13px] text-ink">No map layers are shared.</p>}
+          <div className="grid gap-2">
             {outLayers.map((l, n) => (
               <label key={l.id} className="flex items-center gap-2 text-[13px]">
-                <span className="min-w-0 flex-1 break-all font-mono text-slate">{l.id}</span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="font-semibold text-slate">{layerName(l.id)}</span>
+                  <span className="break-all font-mono text-[11px] text-ink">{l.id}</span>
+                </span>
                 <select
                   aria-label={`${l.id} output visibility`}
                   value={l.visibility ?? "authority"}
@@ -545,83 +670,107 @@ export function VisibilityLabelsSection({ d }: { d: SpecDraft }) {
                   className={field}
                 >
                   {VISIBILITIES.map((x) => (
-                    <option key={x}>{x}</option>
+                    <option key={x} value={x}>
+                      {VISIBILITY_PLAIN[x].name}
+                    </option>
                   ))}
                 </select>
               </label>
             ))}
           </div>
-          <label className={`flex items-center gap-2 pt-1 ${label}`}>
-            hotspot threshold
-            <input
-              aria-label="hotspot threshold"
-              type="number"
-              step="0.05"
-              min={0.05}
-              max={1}
-              value={outputs.hotspot_threshold ?? ""}
-              placeholder="0.5"
-              onChange={(e) => setOutputs({ hotspot_threshold: numOrUndef(e.target.value) })}
-              className={`${mono} w-20`}
-            />
-            <span className="text-[12px]">score at which cells form a hotspot</span>
-          </label>
+          <p className="text-[12px] text-ink">The combined score can be public only when every layer in it is public.</p>
+          <div className="space-y-1.5 pt-2">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <label htmlFor="rv-hot" className="bld-label">
+                Hotspot threshold
+              </label>
+              {hotHelp.button}
+              <input
+                id="rv-hot"
+                aria-label="hotspot threshold"
+                type="number"
+                step="0.05"
+                min={0.05}
+                max={1}
+                value={outputs.hotspot_threshold ?? ""}
+                placeholder="0.5"
+                onChange={(e) => setOutputs({ hotspot_threshold: numOrUndef(e.target.value) })}
+                className={`${mono} w-20`}
+              />
+              <span className="text-[12px] text-ink">score from 0 to 1</span>
+            </div>
+            {hotHelp.panel}
+          </div>
         </div>
 
         <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-[13px] font-semibold text-slate">Place labels</h3>
-            <select aria-label="label mode" value={labels.mode ?? "auto"} onChange={(e) => setLabels({ mode: e.target.value as PoiLabelMode })} className={field}>
+          <div className="flex items-center gap-1.5">
+            <h3 className="bld-h3">Place names</h3>
+            {labelHelp.button}
+          </div>
+          {labelHelp.panel}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <select aria-label="label mode" value={mode} onChange={(e) => setLabels({ mode: e.target.value as PoiLabelMode })} className={field}>
               {LABEL_MODES.map((x) => (
-                <option key={x}>{x}</option>
+                <option key={x} value={x}>
+                  {LABEL_MODE_PLAIN[x].name}
+                </option>
               ))}
             </select>
-            <label className={`ml-auto flex items-center gap-1.5 ${label}`}>
-              min confidence
-              <input
-                aria-label="label minimum confidence"
-                type="number"
-                step="0.05"
-                min={0}
-                max={1}
-                value={labels.min_confidence ?? ""}
-                placeholder="0.6"
-                onChange={(e) => setLabels({ min_confidence: numOrUndef(e.target.value) })}
-                className={`${mono} w-20`}
-              />
-            </label>
+            <span className="text-[12px] text-ink">{LABEL_MODE_PLAIN[mode].line}</span>
           </div>
-          {labelSet.length === 0 && <p className="text-[13px] text-ink">No labels yet.</p>}
+          <label className={`flex flex-wrap items-center gap-1.5 ${label}`}>
+            name a place only when at least
+            <input
+              aria-label="label minimum confidence"
+              type="number"
+              step="0.05"
+              min={0}
+              max={1}
+              value={labels.min_confidence ?? ""}
+              placeholder="0.6"
+              onChange={(e) => setLabels({ min_confidence: numOrUndef(e.target.value) })}
+              className={`${mono} w-20`}
+            />
+            sure (0 to 1)
+          </label>
+          {labelSet.length === 0 && <p className="text-[13px] text-ink">No names yet.</p>}
           {labelSet.map((l, n) => (
             <div key={n} className={`flex flex-wrap items-center gap-x-3 gap-y-1 ${label}`}>
-              <input aria-label="label" value={l.label} onChange={(e) => setLabel(n, { label: e.target.value })} className={`${field} min-w-0 flex-1 max-sm:basis-full`} />
-              <label className="flex items-center gap-1" title="Shown only with the authority key">
+              <input
+                aria-label="label"
+                value={l.label}
+                placeholder="e.g. gathering point"
+                onChange={(e) => setLabel(n, { label: e.target.value })}
+                className={`${field} min-w-0 flex-1 max-sm:basis-full`}
+              />
+              <label className="flex items-center gap-1 max-sm:min-h-11" title="Shown only with the authority key">
                 <input
                   type="checkbox"
                   className="accent-mutedTeal"
                   checked={!!l.sensitive}
                   onChange={(e) => setLabel(n, { sensitive: e.target.checked, ...(e.target.checked ? { destination: false } : {}) })}
                 />
-                sensitive
+                private
               </label>
-              <label className="flex items-center gap-1" title="A public routing target; never sensitive">
+              <label className="flex items-center gap-1 max-sm:min-h-11" title="A public routing target; never private">
                 <input
                   type="checkbox"
                   className="accent-mutedTeal"
                   checked={!!l.destination}
                   onChange={(e) => setLabel(n, { destination: e.target.checked, ...(e.target.checked ? { sensitive: false } : {}) })}
                 />
-                destination
+                route people here
               </label>
-              <button type="button" aria-label={`remove label ${l.label}`} onClick={() => setLabels({ label_set: labelSet.filter((_, j) => j !== n) })} className={`${smallBtn} tap justify-center`}>
-                <Trash2 aria-hidden className="h-3 w-3" />
+              <button type="button" aria-label={`remove label ${l.label}`} onClick={() => setLabels({ label_set: labelSet.filter((_, j) => j !== n) })} className={`${smallBtn} tap !px-2`}>
+                <Trash2 aria-hidden className="h-3.5 w-3.5" />
               </button>
             </div>
           ))}
           <button type="button" onClick={() => setLabels({ label_set: [...labelSet, { label: "", sensitive: false, destination: false }] })} className={`${smallBtn} tap`}>
-            <Plus aria-hidden className="h-3 w-3" /> Add a label
+            <Plus aria-hidden className="h-3.5 w-3.5" /> Add a name
           </button>
-          <p className="text-[12px] text-ink">Sensitive labels stay in the authority view. Destination labels are public routing targets.</p>
+          <p className="text-[12px] text-ink">A private name is seen only with your key. A place people are routed to is always public.</p>
         </div>
       </div>
     </ReviewSection>
@@ -635,57 +784,75 @@ export function RoutingSection({ d }: { d: SpecDraft }) {
   const dests = routing.destination_points ?? [];
   const fallback = routing.fallback_text ?? "";
   const over = fallback.length > FALLBACK_TEXT_MAX;
+  const impHelp = useHelp("the no-go score", IMPASSABLE_DETAIL);
+  const alphaHelp = useHelp("steering", ALPHA_DETAIL);
 
   return (
-    <ReviewSection id="rv-routing" title="Routing" aside="Public route instructions toward destinations, away from high scores.">
-      <label className="flex items-center gap-2 text-[13.5px] text-slate max-sm:min-h-11">
+    <ReviewSection
+      id="rv-routing"
+      title="Directions for end users"
+      aside="Public, short instructions toward a safe destination that steer around high scores."
+      help={ROUTING_DETAIL}
+    >
+      <label className="flex items-center gap-2 text-[14px] font-semibold text-slate max-sm:min-h-11">
         <input type="checkbox" className="accent-mutedTeal" checked={!!routing.enabled} onChange={(e) => setRouting({ enabled: e.target.checked })} />
-        Give end users route instructions
+        Give end users directions
       </label>
       {routing.enabled && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           <p className="text-[13px] text-ink">
             {dests.length === 0
-              ? "No fixed destinations: routes go only to places labelled as destinations."
+              ? "No fixed destinations: routes go only to named places marked “route people here”."
               : `Fixed destinations: ${dests.map((p) => p.label).join(", ")}.`}
           </p>
-          <div className={`flex flex-wrap gap-x-5 gap-y-2 ${label}`}>
-            <label className="flex items-center gap-1.5">
-              impassable at score
-              <input
-                aria-label="impassable score"
-                type="number"
-                step="0.05"
-                min={0}
-                max={1}
-                value={routing.impassable_score ?? ""}
-                placeholder="0.8"
-                onChange={(e) => setRouting({ impassable_score: numOrUndef(e.target.value) })}
-                className={`${mono} w-20`}
-              />
-            </label>
-            <label className="flex items-center gap-1.5">
-              avoidance (alpha)
-              <input
-                aria-label="routing alpha"
-                type="number"
-                step="0.5"
-                min={0}
-                value={routing.alpha ?? ""}
-                placeholder="4"
-                onChange={(e) => setRouting({ alpha: numOrUndef(e.target.value) })}
-                className={`${mono} w-20`}
-              />
-            </label>
+          <div className="flex flex-wrap gap-x-6 gap-y-3">
+            <div className="space-y-1.5">
+              <div className={`flex items-center gap-1.5 ${label}`}>
+                <label htmlFor="rv-imp">never route through a score of</label>
+                <input
+                  id="rv-imp"
+                  aria-label="impassable score"
+                  type="number"
+                  step="0.05"
+                  min={0}
+                  max={1}
+                  value={routing.impassable_score ?? ""}
+                  placeholder="0.8"
+                  onChange={(e) => setRouting({ impassable_score: numOrUndef(e.target.value) })}
+                  className={`${mono} w-20`}
+                />
+                <span>or more</span>
+                {impHelp.button}
+              </div>
+              {impHelp.panel}
+            </div>
+            <div className="space-y-1.5">
+              <div className={`flex items-center gap-1.5 ${label}`}>
+                <label htmlFor="rv-alpha">steer around warm areas</label>
+                <input
+                  id="rv-alpha"
+                  aria-label="routing alpha"
+                  type="number"
+                  step="0.5"
+                  min={0}
+                  value={routing.alpha ?? ""}
+                  placeholder="4"
+                  onChange={(e) => setRouting({ alpha: numOrUndef(e.target.value) })}
+                  className={`${mono} w-20`}
+                />
+                {alphaHelp.button}
+              </div>
+              {alphaHelp.panel}
+            </div>
           </div>
           <label className="block space-y-1">
-            <span className={label}>Text when no route exists</span>
+            <span className="bld-label">Message when no route exists</span>
             <textarea
               aria-label="routing fallback text"
               aria-invalid={over}
               rows={2}
               value={fallback}
-              placeholder="No route available."
+              placeholder="e.g. No safe route right now. Stay where you are and check again shortly."
               onChange={(e) => setRouting({ fallback_text: e.target.value })}
               className={`${field} block w-full max-w-[70ch] resize-y`}
             />
@@ -704,8 +871,8 @@ export function ReviewMessages({ d }: { d: SpecDraft }) {
   return (
     <>
       {d.warnings.length > 0 && (
-        <div className="rounded-2xl bg-coral/15 p-3.5 text-[13px] text-[#7A4232]">
-          <p className="font-semibold">Check before confirming</p>
+        <div className="bld-warn p-3.5">
+          <p className="font-bold">Check before confirming</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
             {d.warnings.map((x) => (
               <li key={x}>{x}</li>
@@ -714,8 +881,8 @@ export function ReviewMessages({ d }: { d: SpecDraft }) {
         </div>
       )}
       {d.saveWarnings && d.saveWarnings.length > 0 && (
-        <div role="status" className="rounded-2xl bg-sage/20 p-3.5 text-[13px] text-slate">
-          <p className="font-semibold">Saved, with warnings</p>
+        <div role="status" className="bld-note p-3.5">
+          <p className="font-bold">Saved, with notes</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
             {d.saveWarnings.map((x) => (
               <li key={x}>{x}</li>
@@ -724,8 +891,8 @@ export function ReviewMessages({ d }: { d: SpecDraft }) {
         </div>
       )}
       {d.saveErrors.length > 0 && (
-        <div role="alert" className="rounded-2xl bg-coral/20 p-3.5 text-[13px] text-[#7A4232]">
-          <p className="font-semibold">The server didn't accept these edits. Fix them, then save again.</p>
+        <div role="alert" className="bld-warn p-3.5">
+          <p className="font-bold">The server didn't accept these edits. Fix them, then save again.</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
             {d.saveErrors.map((x) => (
               <li key={x} className="[overflow-wrap:anywhere]">

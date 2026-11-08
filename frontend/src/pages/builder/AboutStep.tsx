@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { listProjects } from "../../api/authorityKey";
 import { BigInput } from "../../components/builder/BigInput";
+import { Labeled, StepIntro } from "../../components/builder/Help";
 import { StepFooter } from "../../components/builder/StepFooter";
 import { useActiveIds, useDraft } from "../../components/builder/useDraft";
 import { SLUG, aboutProblems, slugFromName } from "../../components/sources/sourceUtils";
@@ -45,15 +46,14 @@ export function AboutStep() {
 
   return (
     <>
-      <header className="flex flex-col gap-1.5">
-        <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.02em] text-slate">About your app</h1>
-        <p className="max-w-[62ch] text-[15px] text-ink">
-          Name it and say what it should do, in your own words. The Compiler reads this to plan the app.
-        </p>
-      </header>
+      <StepIntro
+        step={1}
+        title="About your app"
+        lead="Name it and say, in your own words, what it should show on the map. Nemotron reads this to plan the app; you check the plan before anything goes live."
+      />
 
       <div className="flex flex-col gap-2">
-        <label htmlFor="app-name" className="text-sm font-semibold text-slate">
+        <label htmlFor="app-name" className="bld-label">
           Name
         </label>
         <input
@@ -64,7 +64,7 @@ export function AboutStep() {
           placeholder="e.g. Harbour watch"
           autoComplete="off"
           maxLength={80}
-          className="rounded-2xl border border-white/70 bg-cream/70 px-4 py-3 text-lg text-slate shadow-[0_6px_24px_-14px_rgba(53,89,107,0.45)] transition-colors duration-150 placeholder:text-inkSoft focus:bg-cream/95"
+          className="bld-field px-4 py-3 text-[17px]"
           aria-describedby="app-id-line"
         />
         <div id="app-id-line" className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[13px] text-ink">
@@ -84,7 +84,7 @@ export function AboutStep() {
                 if (e.key === "Enter" || e.key === "Escape") setEditingId(false);
               }}
               spellCheck={false}
-              className="w-56 rounded-lg border border-white/80 bg-white/60 px-2 py-0.5 font-mono text-[13px] text-slate"
+              className="bld-field is-mono is-sm w-56"
             />
           ) : (
             <button
@@ -119,31 +119,38 @@ export function AboutStep() {
             ) : idPending ? (
               "You compiled an app with this id before; compiling again replaces that proposal."
             ) : (
-              "Used in your app's endpoints. It can't change once the app is live."
+              "The short name in your app's web addresses (made from the name). It can't change once the app is live."
             )}
           </span>
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
-        <label htmlFor="app-intent" className="text-sm font-semibold text-slate">
-          What should it do?
-        </label>
+      <Labeled
+        label="What should it do?"
+        htmlFor="app-intent"
+        topic="what to write here"
+        help={
+          <>
+            Say what the map should show and who it is for: what counts as a hot spot, which places matter, and
+            what people should do about it (for example, where to go). Plain words are best. The more you say about
+            places and timing, the better the plan.
+          </>
+        }
+      >
         <BigInput
           id="app-intent"
           label="What should the app do?"
-          placeholder="describe intent for application"
+          placeholder="e.g. show where reports pile up nearby, and point people to the closest calm spot"
           value={draft.intent}
           onChange={setIntent}
           onSubmit={next}
           submitHint="to continue"
           describedBy="intent-hint"
         />
-        <p id="intent-hint" className="px-3 text-xs text-ink">
-          For example: where things gather, where something is happening, and what end users should do about it.
-          Shift + Enter adds a line.
+        <p id="intent-hint" className="bld-hint px-1">
+          A sentence or two is enough. Shift + Enter adds a line.
         </p>
-      </div>
+      </Labeled>
 
       <StepFooter
         problems={problems}

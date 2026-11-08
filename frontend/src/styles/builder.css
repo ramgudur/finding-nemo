@@ -1,0 +1,298 @@
+/* ---------------------------------------------------------------------------------------------
+   Builder (/new/*) and proposal review (/apps/:id/review): one small form system on the watercolor sky.
+   Scoped under .bld so other pages keep their own look. Rules use :where(.bld) so a Tailwind utility on the
+   same element still wins (this file is imported before globals.css).
+   Spacing steps: 4 · 8 · 12 · 16 · 24 · 32 px. Type: Fredoka for page titles only; Nunito Sans for UI;
+   IBM Plex Mono for ids, paths and numbers.
+   --------------------------------------------------------------------------------------------- */
+.bld {
+  --bld-ink: #35596b;
+  --bld-ink-2: #45606c;
+  --bld-ph: #5a747e; /* placeholders: 4.7:1 on the field paper, italic, so they never read as a value */
+  --bld-paper: #fbfaf6; /* field wells */
+  --bld-card: rgba(246, 243, 234, 0.82);
+  --bld-card-quiet: rgba(240, 235, 221, 0.5);
+  --bld-line: rgba(99, 143, 145, 0.32);
+  --bld-line-strong: rgba(99, 143, 145, 0.6);
+  --bld-focus: rgba(99, 143, 145, 0.28);
+  --bld-shadow: 0 1px 0 rgba(255, 255, 255, 0.75) inset, 0 14px 36px -22px rgba(53, 89, 107, 0.5);
+  --bld-danger: #8e4f3c;
+}
+
+/* Type */
+:where(.bld) .bld-title {
+  font-family: Fredoka, ui-rounded, sans-serif;
+  font-weight: 500;
+  font-size: clamp(1.75rem, 1.4rem + 1.4vw, 2.25rem);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: #2f5872;
+  text-wrap: balance;
+}
+:where(.bld) .bld-lead {
+  max-width: 62ch;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--bld-ink-2);
+}
+:where(.bld) .bld-step-no {
+  font-weight: 700;
+  color: var(--bld-ink);
+}
+:where(.bld) .bld-h2 {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--bld-ink);
+}
+:where(.bld) .bld-h3 {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--bld-ink);
+}
+:where(.bld) .bld-label {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--bld-ink);
+}
+:where(.bld) .bld-optional {
+  font-weight: 400;
+  color: var(--bld-ink-2);
+}
+:where(.bld) .bld-hint {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--bld-ink-2);
+}
+
+/* Surfaces: one elevation per card (a soft offset shadow, no outline). */
+:where(.bld) .bld-card {
+  border-radius: 16px;
+  background: var(--bld-card);
+  box-shadow: var(--bld-shadow);
+}
+:where(.bld) .bld-card-quiet {
+  border-radius: 14px;
+  background: var(--bld-card-quiet);
+}
+
+/* Fields: a paper-white well with a hairline, so a filled value reads as filled. */
+:where(.bld) .bld-field {
+  min-width: 0;
+  border-radius: 12px;
+  border: 1px solid var(--bld-line);
+  background: var(--bld-paper);
+  padding: 0.5rem 0.75rem;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--bld-ink);
+  transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+}
+:where(.bld) .bld-field.is-mono {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 400;
+}
+:where(.bld) .bld-field.is-sm {
+  padding: 0.3rem 0.55rem;
+  font-size: 13px;
+  border-radius: 10px;
+}
+:where(.bld) .bld-field:hover:not(:disabled) {
+  border-color: var(--bld-line-strong);
+}
+:where(.bld) .bld-field:focus,
+:where(.bld) .bld-field:focus-visible {
+  outline: none;
+  border-color: #638f91;
+  box-shadow: 0 0 0 3px var(--bld-focus);
+}
+:where(.bld) .bld-field[aria-invalid="true"],
+:where(.bld) .bld-field.is-bad {
+  border-color: rgba(142, 79, 60, 0.55);
+}
+:where(.bld) .bld-field:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.bld input::placeholder,
+.bld textarea::placeholder {
+  color: var(--bld-ph);
+  font-style: italic;
+  font-weight: 400;
+  opacity: 1;
+}
+
+/* Buttons: one primary per region, then secondary, then quiet. */
+:where(.bld) .bld-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  white-space: nowrap;
+  border-radius: 9999px;
+  padding: 0.55rem 1.1rem;
+  font-size: 14px;
+  font-weight: 700;
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.15s, box-shadow 0.15s, color 0.15s;
+}
+:where(.bld) .bld-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+:where(.bld) .bld-btn:not(:disabled):active {
+  transform: translateY(0);
+}
+:where(.bld) .bld-btn:disabled {
+  cursor: not-allowed;
+}
+:where(.bld) .bld-btn-primary {
+  background: #3b6895;
+  color: #f0ebdd;
+  box-shadow: 0 8px 20px -10px rgba(47, 88, 114, 0.9);
+}
+:where(.bld) .bld-btn-primary:not(:disabled):hover {
+  background: #335c85;
+}
+:where(.bld) .bld-btn-primary:disabled {
+  background: rgba(69, 96, 108, 0.42);
+  box-shadow: none;
+}
+:where(.bld) .bld-btn-secondary {
+  background: var(--bld-paper);
+  color: var(--bld-ink);
+  box-shadow: 0 0 0 1px var(--bld-line-strong) inset, 0 4px 12px -8px rgba(53, 89, 107, 0.5);
+}
+:where(.bld) .bld-btn-secondary:not(:disabled):hover {
+  background: #fff;
+}
+:where(.bld) .bld-btn-secondary:disabled {
+  opacity: 0.5;
+}
+:where(.bld) .bld-btn-quiet {
+  color: var(--bld-ink);
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+:where(.bld) .bld-btn-quiet:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.55);
+  transform: none;
+}
+:where(.bld) .bld-btn-quiet:disabled {
+  opacity: 0.45;
+}
+:where(.bld) .bld-btn-sm {
+  padding: 0.35rem 0.8rem;
+  font-size: 13px;
+}
+:where(.bld) .bld-link {
+  font-weight: 700;
+  color: #3b6895;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+:where(.bld) .bld-link:hover {
+  color: #335c85;
+  text-decoration-thickness: 2px;
+}
+
+/* The "?" disclosure. */
+:where(.bld) .bld-help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  color: #638f91;
+  transition: background-color 0.15s, color 0.15s;
+}
+:where(.bld) .bld-help-btn:hover,
+:where(.bld) .bld-help-btn.is-open {
+  background: rgba(99, 143, 145, 0.16);
+  color: var(--bld-ink);
+}
+:where(.bld) .bld-help-panel {
+  max-width: 68ch;
+  border-radius: 12px;
+  background: rgba(169, 210, 213, 0.28);
+  padding: 0.6rem 0.85rem;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--bld-ink);
+  animation: bld-help-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes bld-help-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Choice cards (tier, visibility, label mode): the picked one carries a check and a ring. */
+:where(.bld) .bld-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  border-radius: 12px;
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 0 1px var(--bld-line) inset;
+  transition: background-color 0.15s, box-shadow 0.15s;
+}
+:where(.bld) .bld-choice:hover {
+  background: rgba(255, 255, 255, 0.7);
+}
+:where(.bld) .bld-choice[aria-checked="true"] {
+  background: var(--bld-paper);
+  box-shadow: 0 0 0 2px #35596b inset, 0 6px 16px -12px rgba(53, 89, 107, 0.6);
+}
+:where(.bld) .bld-choice-dot {
+  margin-top: 1px;
+  display: flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(79, 106, 116, 0.6);
+  color: #f0ebdd;
+}
+:where(.bld) .bld-choice[aria-checked="true"] .bld-choice-dot {
+  border-color: #35596b;
+  background: #35596b;
+}
+
+/* Callouts: warning (warm) and note (water). */
+:where(.bld) .bld-warn {
+  border-radius: 12px;
+  background: rgba(217, 147, 126, 0.17);
+  padding: 0.6rem 0.85rem;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #7a4232;
+}
+:where(.bld) .bld-note {
+  border-radius: 12px;
+  background: rgba(169, 210, 213, 0.3);
+  padding: 0.6rem 0.85rem;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--bld-ink);
+}
+
+.bld code,
+:where(.bld) .bld-mono {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+@media (max-width: 639.98px) {
+  /* Higher specificity on purpose: these phone minimums beat any size utility on the element. */
+  .bld .bld-field {
+    font-size: 16px; /* iOS: no zoom on focus */
+    min-height: 44px;
+  }
+  .bld .bld-btn {
+    min-height: 44px;
+  }
+}

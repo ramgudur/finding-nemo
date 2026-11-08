@@ -9,7 +9,7 @@ export type InputShape = "point" | "track" | "fixed_point" | "field" | "document
 export type AppStatus = "draft" | "pending_confirmation" | "active";
 export type VerificationMethod = "authority_confirmation" | "predictive_check" | "cross_input_agreement";
 export type FieldType = "number" | "integer" | "string" | "boolean";
-export type ConnectorType = "rss" | "json_api";
+export type ConnectorType = "rss" | "json_api" | "json_list"; // json_list: contract E (a fetched JSON / GeoJSON list)
 export type PoiLabelMode = "auto" | "on" | "off";
 export type PoiStatus = "active" | "retired";
 export type AgentName = "compiler" | "scout" | "critic" | "poi_labeler" | "message_guard";
@@ -429,7 +429,7 @@ export interface CompileInput {
 }
 
 /** "Add a source" option types. No HTML scraper (rule 10). */
-export type SourceOptionType = "post_api" | "webhook" | "rss" | "json_api";
+export type SourceOptionType = "post_api" | "webhook" | "rss" | "json_api" | "json_list";
 
 /** Body of POST /v1/apps/{app}/sources/suggest. */
 export interface SuggestSourceRequest {
@@ -568,7 +568,7 @@ export type SourceVia = "post_api" | "webhook" | "rss" | "json_api" | "json_list
 export interface SourceStatus {
   input_id: string;
   kind: InputKind;
-  via: SourceVia;
+  via: SourceVia | null; // null: a pull input with no connector yet (#277)
   poll_s: number | null;
   last_polled_at: string | null;
   next_poll_at: string | null;
