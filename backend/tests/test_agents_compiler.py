@@ -149,3 +149,39 @@ def test_live_recorded_compile_meets_the_137_bar():
     assert min(spec.verification, key=lambda v: v.priority).method == "authority_confirmation"
     assert next(i for i in spec.inputs if i.id == "panic").plausibility is not None
     assert len(router._provider("nvidia").client.calls) <= 6
+
+
+DEV_POINTS = [{"lat": 0.004, "lon": 0.006, "label": "Gym (staff)"}, {"lat": 0.009, "lon": 0.001, "label": "Lot C"}]
+
+
+def test_dev_destination_points_are_copied_verbatim_fresh_and_from_cache():
+    cache = CompilerCache()
+    spec = _run(_ctx("campus-alert"), _router("compiler_campus_alert"), cache=cache, destination_points=DEV_POINTS)
+    assert [d.model_dump() for d in spec.routing.destination_points] == DEV_POINTS
+
+    # served from the cache (another app id), the points are still exactly the request's
+    hit = _run(_ctx("a2"), _router("compiler_campus_alert"), cache=cache, app_id="a2", destination_points=DEV_POINTS)
+    assert [d.model_dump() for d in hit.routing.destination_points] == DEV_POINTS
+    # and a request without points never inherits another request's
+    bare = _run(_ctx("campus-alert"), _router("compiler_campus_alert"), cache=cache)
+    assert bare.routing.destination_points == []
+
+
+def test_routing_with_dev_points_but_no_destination_label_passes_finalize():
+    from app.tools.registry import call_tool
+
+    base = _run(_ctx("campus-alert"), _router("compiler_campus_alert"), cache=CompilerCache())
+    raw = base.model_dump(mode="json")
+    for lab in raw["outputs"]["poi_labels"]["label_set"]:
+        lab["destination"] = False
+    raw["routing"] = {**raw["routing"], "enabled": True, "destination_points": []}
+
+    bare = _ctx("campus-alert")
+    refused = call_tool(bare, "finalize_app", {"spec": raw})
+    assert refused["ok"] is False and "nothing can be a destination" in refused["error"]
+
+    ctx = _ctx("campus-alert")
+    ctx.extra["dev_destination_points"] = DEV_POINTS
+    ok = call_tool(ctx, "finalize_app", {"spec": raw})  # the model sent none; the dev's are written in
+    assert ok["ok"], ok
+    assert [d.model_dump() for d in ctx.db.get_app("campus-alert").routing.destination_points] == DEV_POINTS

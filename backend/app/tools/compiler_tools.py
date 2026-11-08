@@ -291,8 +291,13 @@ def request_scout(ctx: ToolContext, args: RequestScoutArgs) -> dict[str, Any]:
 def finalize_app(ctx: ToolContext, args: FinalizeAppArgs) -> dict[str, Any]:
     """The usual path to pending_confirmation: validate the complete proposed spec and
     upsert it directly (whether or not a draft row already existed for this app_id)."""
+    raw = args.spec
+    if "dev_destination_points" in ctx.extra and isinstance(raw, dict):
+        # the dev's map picks, verbatim: the model can't add, move or drop them
+        routing = {**(raw.get("routing") or {}), "destination_points": ctx.extra["dev_destination_points"]}
+        raw = {**raw, "routing": routing}
     try:
-        spec = AppSpec.model_validate(args.spec)
+        spec = AppSpec.model_validate(raw)
     except Exception as e:  # noqa: BLE001 - surfaced to the agent, not raised past the tool
         raise GuardError(f"invalid spec: {e}") from None
     if spec.app_id != ctx.app_id:

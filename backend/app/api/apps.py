@@ -111,6 +111,7 @@ async def compile_app(
         intent=body.intent,
         grid=body.grid.model_dump(mode="json"),
         inputs=[i.model_dump(mode="json") for i in body.inputs],
+        destination_points=[d.model_dump(mode="json") for d in body.destination_points],
         llm=llm,
         cache=cache,
     )

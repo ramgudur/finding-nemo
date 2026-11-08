@@ -405,6 +405,8 @@ export interface CompileRequest {
   intent: string;
   grid: GridSpec;
   inputs: CompileInput[];
+  /** Fixed destinations picked on the map; copied verbatim into routing.destination_points. */
+  destination_points?: DestinationPoint[];
 }
 
 /** POST /v1/apps/{app}/activate. The keys are shown once. */

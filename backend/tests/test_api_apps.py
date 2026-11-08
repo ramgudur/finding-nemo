@@ -177,3 +177,12 @@ def test_compile_second_call_with_same_intent_and_inputs_is_a_cache_hit():
     assert second.status_code == 200
     assert second.json()["app_id"] == "campus-alert-2"
     assert router2._provider("nvidia").client.calls == []
+
+
+def test_compile_copies_the_devs_destination_points():
+    points = [{"lat": 0.002, "lon": 0.003, "label": "Library"}]
+    app = _app_with_llm("compiler_campus_alert")
+    with TestClient(app) as client:
+        r = client.post("/v1/apps/campus-alert/compile", json={**_compile_request(), "destination_points": points})
+    assert r.status_code == 200, r.text
+    assert r.json()["routing"]["destination_points"] == points
