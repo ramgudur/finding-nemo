@@ -67,6 +67,11 @@ If a task seems to require breaking one of these, stop and ask.
     - Every state change writes a `Change` with before/after values, so the dev can roll it back.
     - The dev can pin any weight.
 12. **Never claim Nemotron's internal MoE routes our inputs.** Our "mixture of experts" is system-level.
+13. **We code the platform, never the demos.** The demo apps (Wildfire, Bird tracking) are built in the video by **using the platform we are coding**: Builder, Add a source, live compile, confirm.
+    - Don't write demo app specs, demo-specific code, cached or replayed compiles, or prompt text aimed at a demo.
+    - Don't build, compile or rehearse a demo app ahead of the video, not even through the platform.
+    - Test platform features with neutral examples that aren't the demo apps.
+    - If something a demo will need doesn't work, fix it as a general platform feature.
 
 ## Architecture
 
@@ -392,7 +397,7 @@ Finish each step end to end before starting the next.
 
 ## Demo apps (context only; never hardcode them into the platform)
 
-Demo apps are built **live through the platform** in the video: name and intent, then **Add a source** for each input, then a live Nemotron compile, review, confirm. No demo app is pre-built or hardcoded. When something doesn't work while building one, we fix the **platform**, not the demo. `specs/*.json` are test fixtures and an emergency fallback only. Simulators stand in for a dev's own app and users and post only through the public ingest API.
+**Rule 13: we don't code the demos.** Demo apps are built **live through the platform** in the video: name and intent, then **Add a source** for each input, then a live Nemotron compile, review, confirm. No demo app is pre-built or hardcoded. When something doesn't work while building one, we fix the **platform**, not the demo. `specs/*.json` are test fixtures and an emergency fallback only. Simulators stand in for a dev's own app and users and post only through the public ingest API.
 
 - **Wildfire** (State Farm "worst day" angle; replaces Campus Alert, 2026-11-08):
   - **Sources:** crowd reports from people's phones (push), local news (pull, RSS; the Scout can find feeds), weather (pull, Open-Meteo preset; its wind is a vector field that carries spread).
@@ -449,3 +454,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-08:** Demo apps are built LIVE through the platform in the video (Builder: intent and inputs, then live Nemotron compile, review, confirm, keys). No pre-built demo apps, no demo compile cache, no replayed fixtures. `specs/*.json` stay as test fixtures and an emergency fallback only. The simulators stand in for a dev's own app and users, posting through the public ingest API with the keys the Builder showed. #108 is now the live build path and rehearsal (Allen). This replaces the cached-compile plan in the entry before.
 - **2026-11-08:** `CompileRequest` gets optional `destination_points: DestinationPoint[]` (the dev picks fixed destinations on the Builder map). The Compiler copies them verbatim into `routing.destination_points` and never invents or moves them; they count as a usable destination for `validate_spec`. The sim posts to the input ids the dev types in the Builder (`--input-map` as a backup); `tools/demo` is Builder-first, with `--from-spec` as the emergency fallback (Allen, #108).
 - **2026-11-08:** Demo apps: **Wildfire** replaces Campus Alert, and Bird tracking stays. Both are built live through the platform in the video, and neither is hardcoded; gaps found while building them are fixed in the platform. **Add a source** is essential: the dev describes a source in plain words, a model call infers push or pull, the shape and the source options **before** any technical choice is shown (`POST /v1/apps/{app}/sources/suggest`, `SourceSuggestion`, #152). Options now: POST API or webhook URL (push); RSS, or a JSON API preset or custom URL (pull). Receiving by phone number (SMS) comes later; the HTML scraper stays out (rule 10). All work goes to Allen and Ram; the others come back later. Issues: #152 Add a source (Allen), #153 wildfire sim (Allen), #154 live build rehearsals (Ram's machine).
+- **2026-11-08:** Rule 13 added: we code the platform, never the demos. Wildfire and Bird tracking are built in the video by using the platform. No demo specs, demo-specific code, cached compiles or rehearsal builds ahead of time; test with neutral examples; fix needs as general platform features. #154 (rehearsals) is closed.
