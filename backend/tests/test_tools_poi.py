@@ -151,7 +151,7 @@ def test_create_poi_guards(env):
     r = call(ctx(), "create_poi", candidate_id="made-up", label="gathering spot", confidence=0.9)
     assert not r["ok"] and "code-made candidates" in r["error"]
     r = call(ctx(), "create_poi", candidate_id="c1", label="new kind of place", confidence=0.9)
-    assert not r["ok"] and "annotate" in r["error"]
+    assert not r["ok"] and "propose_label" in r["error"]
     r = call(ctx(), "create_poi", candidate_id="c1", label="gathering spot", confidence=0.3)
     assert not r["ok"] and "min_confidence" in r["error"]
     assert call(ctx(), "create_poi", candidate_id="c1", label="gathering spot", confidence=0.9)["ok"]

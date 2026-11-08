@@ -28,6 +28,7 @@ FieldType = Literal["number", "integer", "string", "boolean"]
 ConnectorType = Literal["rss", "json_api"]  # html is stubbed: rejected here
 PoiLabelMode = Literal["auto", "on", "off"]
 PoiStatus = Literal["active", "retired"]
+LabelProposalStatus = Literal["open", "accepted", "dismissed"]
 AgentName = Literal["compiler", "scout", "critic", "poi_labeler", "message_guard"]
 ChangeKind = Literal["weight", "trust", "poi", "connector", "spec_confirm", "spec_edit"]
 Actor = Literal["agent", "dev"]
@@ -390,6 +391,32 @@ class POI(Model):
     status: PoiStatus = "active"
     created_at: UtcDatetime
     updated_at: UtcDatetime
+
+
+class LabelProposal(Model):
+    """A new POI label type the POI Labeler proposed (`propose_label`). It changes nothing until the dev
+    accepts it (`POST /label-proposals/{id}/accept`), which adds it to the active spec's `label_set`.
+    `why` is agent text: authority view only (rule 8)."""
+
+    id: str
+    label: str = Field(min_length=1, max_length=60)
+    sensitive: bool = False
+    destination: bool = False
+    why: str = Field(max_length=500)
+    status: LabelProposalStatus = "open"
+    t: UtcDatetime
+
+
+class LabelProposalAccept(Model):
+    """Optional body of `POST /label-proposals/{id}/accept`: override the proposed flags."""
+
+    sensitive: bool | None = None
+    destination: bool | None = None
+
+
+class LabelProposalAcceptResponse(Model):
+    proposal: LabelProposal
+    label_set: list[PoiLabel]
 
 
 class Backtest(Model):

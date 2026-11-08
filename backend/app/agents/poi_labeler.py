@@ -3,8 +3,8 @@
 `run_poi_labeler` is one episode: build the task prompt (intent, label mode, label set and the
 trigger), run the generic tool-calling loop with the POI tools (`tools/poi_tools.py`, guarded:
 candidates only, positions copied from the candidate, label set only, sensitive stays authority).
-In `auto` mode it may create nothing; new label types are only *suggested* in its final answer,
-which the loop writes to the trace. `mode: off` never runs.
+In `auto` mode it may create nothing; a new label type is only *proposed* with `propose_label`
+(a stored `LabelProposal` the dev accepts or dismisses in the console). `mode: off` never runs.
 
 `PoiLabelerScheduler` decides *when*: as soon as an unlabeled candidate has persisted
 `PERSIST_TRIGGER_TICKS` ticks (once per candidate), throttled to one triggered run per
@@ -43,7 +43,7 @@ def task_prompt(spec: AppSpec, trigger: str) -> str:
             f"- {lab.label}" + (" (sensitive)" if lab.sensitive else "") + (" (destination)" if lab.destination else "")
             for lab in cfg.label_set
         )
-        or "- (none: create nothing; you may suggest label types)"
+        or "- (none: create nothing; you may propose label types with propose_label)"
     )
     mode = (
         "auto: label only if a candidate is clearly worth naming for this intent; otherwise create nothing and say why"

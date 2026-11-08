@@ -4,13 +4,18 @@ Guards (CLAUDE.md rules 7, 8, 11):
 - POIs come only from code-generated candidates in the latest tick. Tools take a
   ``candidate_id``, never coordinates; a POI's position and radius are copied from its candidate.
 - Labels come only from the spec's ``label_set``. A new label type is a proposal: the tool
-  rejects it and says to use ``annotate`` so it shows in the trace for the dev.
-- ``poi_labels.mode == "off"`` blocks all writes. Confidence below ``min_confidence`` is rejected.
+  rejects it and says to use ``propose_label``, which stores a ``LabelProposal`` (and a trace entry)
+  for the dev. Only the dev's ``accept_label_proposal`` (dev-only tool, behind the authority-only
+  console route) adds it to the active spec's ``label_set``; it re-runs the ``AppSpec`` validation,
+  updates the stored spec and the running one, and records a ``spec_edit`` Change.
+- ``poi_labels.mode == "off"`` blocks all writes, proposals included. Confidence below
+  ``min_confidence`` is rejected.
 - Visibility: a sensitive label is always authority; a destination label is public (the public
   route already reveals it). Otherwise public only if the candidate has contributing layers and
   all of them are public output layers (the hotspot rule); else authority.
 - One active POI per candidate (relabel with ``update_poi``). Every write records a ``Change``.
-- POIs are outputs only: nothing here touches the engine, weights or scores.
+- POIs are outputs only: nothing here touches weights or scores (an accepted label only extends
+  the running spec's ``label_set``).
 
 Read tools return summaries only: counts and aggregates, never raw events or user ids.
 """
@@ -20,15 +25,18 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.core.models import POI, Candidate, Change, Evidence, Visibility
+from app.core.models import POI, AppSpec, Candidate, Change, Evidence, LabelProposal, TraceEntry, Visibility
 from app.tools import geo_tools, guards
 from app.tools.context import ToolContext
 from app.tools.guards import GuardError
 
 MAX_EVIDENCE = 8
 TIME_BUCKETS = 12
+MAX_LABEL_CHARS = 60
+MAX_WHY_CHARS = 500
+MAX_OPEN_PROPOSALS = 5
 
 
 class _Args(BaseModel):
@@ -82,6 +90,23 @@ class UpdatePoiArgs(_Args):
 class RetirePoiArgs(_Args):
     poi_id: str
     reason: str
+
+
+class ProposeLabelArgs(_Args):
+    label: str = Field(min_length=1, max_length=MAX_LABEL_CHARS, description="The new label type's name.")
+    sensitive: bool = Field(default=False, description="Authority-only label (never also a destination).")
+    destination: bool = Field(default=False, description="A routing target (never also sensitive).")
+    why: str = Field(min_length=1, max_length=MAX_WHY_CHARS, description="Why the app needs this label type.")
+
+
+class ProposalDecisionArgs(_Args):
+    proposal_id: str
+    sensitive: bool | None = None
+    destination: bool | None = None
+
+
+class DismissProposalArgs(_Args):
+    proposal_id: str
 
 
 def _r(x: float, nd: int = 4) -> float:
@@ -235,7 +260,7 @@ def _check_label(ctx: ToolContext, label: str) -> None:
     if label not in known:
         raise GuardError(
             f"label {label!r} is not in this app's label_set {sorted(known)}; to suggest a new label type, "
-            "use annotate so the dev can accept it"
+            "use propose_label so the dev can accept it"
         )
 
 
@@ -352,3 +377,115 @@ def retire_poi(ctx: ToolContext, args: RetirePoiArgs) -> dict[str, Any]:
     ctx.db.upsert_poi(ctx.app_id, new, ctx.now())
     ch = _record(ctx, p.id, _poi_state(p), _poi_state(new), reason)
     return {"poi_id": p.id, "status": "retired", "change_id": ch.id}
+
+
+# -- label proposals ---------------------------------------------------------------
+
+
+def _norm_label(label: str) -> str:
+    return " ".join(label.split()).casefold()
+
+
+def _trace(ctx: ToolContext, action: str, result: str, why: str) -> None:
+    # Proposals belong to the POI Labeler's workflow, so dev decisions on them trace under it too.
+    ctx.db.add_trace(
+        TraceEntry(t=ctx.now_dt(), app_id=ctx.app_id, agent="poi_labeler", action=action, result=result, why=why)
+    )
+
+
+def propose_label(ctx: ToolContext, args: ProposeLabelArgs) -> dict[str, Any]:
+    """Store a new label type for the dev to accept or dismiss. Changes no spec or POI."""
+    _check_writable(ctx)
+    label = " ".join(args.label.split())
+    why = args.why.strip()
+    reasons = []
+    if not label:
+        reasons.append("label must not be blank")
+    if not why:
+        reasons.append("why must not be blank")
+    if args.sensitive and args.destination:
+        reasons.append("a label cannot be both sensitive and a destination")
+    key = _norm_label(label)
+    if any(_norm_label(lb.label) == key for lb in ctx.spec.outputs.poi_labels.label_set):
+        reasons.append(f"label {label!r} is already in this app's label_set; use it with create_poi")
+    open_props = ctx.db.list_label_proposals(ctx.app_id, status="open")
+    if any(_norm_label(p.label) == key for p in open_props):
+        reasons.append(f"label {label!r} already has an open proposal awaiting the dev")
+    if len(open_props) >= MAX_OPEN_PROPOSALS:
+        reasons.append(f"{MAX_OPEN_PROPOSALS} proposals are already open; wait for the dev to decide")
+    if reasons:
+        raise GuardError(reasons)
+    prop = LabelProposal(
+        id=f"lp-{guards.new_change_id()[:12]}",
+        label=label,
+        sensitive=args.sensitive,
+        destination=args.destination,
+        why=why,
+        status="open",
+        t=ctx.now_dt(),
+    )
+    ctx.db.add_label_proposal(ctx.app_id, prop)
+    _trace(ctx, "propose_label", f"proposed label {label!r} ({prop.id})", why)
+    return {"proposal_id": prop.id, "label": prop.label, "status": prop.status}
+
+
+def _open_proposal(ctx: ToolContext, proposal_id: str) -> LabelProposal:
+    prop = ctx.db.get_label_proposal(ctx.app_id, proposal_id)
+    if prop is None:
+        raise LookupError(f"unknown label proposal {proposal_id!r}")
+    if prop.status != "open":
+        raise GuardError(f"label proposal {proposal_id} is {prop.status}, not open")
+    return prop
+
+
+def accept_label_proposal(ctx: ToolContext, args: ProposalDecisionArgs) -> dict[str, Any]:
+    """Dev only: add an open proposal's label to the active spec's label_set (flags may be overridden),
+    re-validating the whole spec, then update the stored and the running spec and record a Change."""
+    guards.require_dev(ctx, "accepting a label proposal")
+    prop = _open_proposal(ctx, args.proposal_id)
+    rt = ctx.runtime
+    spec = rt.spec
+    if spec.status != "active":
+        raise GuardError("the app is not active")
+    key = _norm_label(prop.label)
+    before = [lb.model_dump(mode="json") for lb in spec.outputs.poi_labels.label_set]
+    if any(_norm_label(lb["label"]) == key for lb in before):
+        raise GuardError(f"label {prop.label!r} is already in the label_set")
+    new_label = {
+        "label": prop.label,
+        "sensitive": prop.sensitive if args.sensitive is None else args.sensitive,
+        "destination": prop.destination if args.destination is None else args.destination,
+    }
+    raw = spec.model_dump(mode="json")
+    raw["outputs"]["poi_labels"]["label_set"] = [*before, new_label]
+    try:
+        new_spec = AppSpec.model_validate(raw)  # re-runs: destination can't be sensitive; labels unique
+    except ValidationError as e:
+        raise GuardError([str(err["msg"]) for err in e.errors()]) from None
+    after = [lb.model_dump(mode="json") for lb in new_spec.outputs.poi_labels.label_set]
+    ctx.db.upsert_app(new_spec, ctx.now())
+    rt.spec = new_spec  # the running app sees the label at once (poi tools read ctx.spec)
+    ch = Change(
+        id=guards.new_change_id(),
+        app_id=ctx.app_id,
+        kind="spec_edit",
+        target="outputs.poi_labels.label_set",
+        before=before,
+        after=after,
+        reason=f"dev accepted label proposal {prop.id} ({prop.label!r})",
+        actor=ctx.actor,
+        t=ctx.now_dt(),
+    )
+    ctx.db.add_change(ch)
+    accepted = ctx.db.set_label_proposal_status(ctx.app_id, prop.id, "accepted")
+    _trace(ctx, "label proposal accepted by dev", f"added label {prop.label!r} ({prop.id})", ch.reason)
+    return {"proposal": accepted.model_dump(mode="json"), "label_set": after, "change_id": ch.id}
+
+
+def dismiss_label_proposal(ctx: ToolContext, args: DismissProposalArgs) -> dict[str, Any]:
+    """Dev only: close an open proposal without changing the spec."""
+    guards.require_dev(ctx, "dismissing a label proposal")
+    prop = _open_proposal(ctx, args.proposal_id)
+    dismissed = ctx.db.set_label_proposal_status(ctx.app_id, prop.id, "dismissed")
+    _trace(ctx, "label proposal dismissed by dev", f"dismissed label {prop.label!r} ({prop.id})", "dismissed by dev")
+    return {"proposal": dismissed.model_dump(mode="json")}
