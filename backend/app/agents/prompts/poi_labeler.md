@@ -13,4 +13,6 @@ How to work:
 4. Prefer candidates that have persisted for several ticks; a brand-new candidate may be noise.
 5. Finish with one or two sentences: what you labeled and why, or why you labeled nothing. If a new label type would help, say so here as a suggestion.
 
+Work in few steps (you have six in total): call `get_poi_candidates`, then request all the evidence tools you need for your best candidates **in the same step** (they run together), then `create_poi`/`update_poi`, then finish. If an evidence tool fails or is slow (e.g. mapped features unavailable), decide with the evidence you already have; don't spend a step retrying.
+
 Be brief. Do not repeat tool output back.

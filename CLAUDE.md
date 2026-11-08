@@ -209,6 +209,14 @@ Ingest keys and authority keys are generated per app at activation and stored in
 - `POST /v1/apps/{app}/compile`, body `CompileRequest {intent, grid, inputs: CompileInput[], destination_points?}`. `CompileInput` is `{id, kind, shape, meaning, fields, connector?}`; `connector` is pull only, checked by the URL guard. Connectors and `destination_points` are the dev's words: `finalize_app` copies them verbatim (a connector writes a `Change`, kind `connector`, actor `dev`). Returns the `AppSpec` at `pending_confirmation`; `409` if the app is active, `422` if it never finalizes, `503` on rate budget.
 - `PUT /v1/apps/{app}/spec`: the dev edits a `pending_confirmation` spec (full `AppSpec`; `409` otherwise, `422` with every error). It writes a `Change`, kind `spec_edit`, actor `dev`.
 - `POST /v1/apps/{app}/activate` is the only dev confirmation.
+- `GET /v1/apps/{app}/compile/status` (public, no trace text or tool args): `CompileStatus {running, step, elapsed_s, last_validate?: {errors, warnings}}`, 404 once the app is active. A compile that never finalizes returns `422` with `CompileFailure {reason, errors[], warnings[]}`; `503` carries `Retry-After`.
+
+**Running app (authority key):**
+- `POST /v1/apps/{app}/changes/{id}/revert`: applies the Change's `before` through the same tools and guards as `actor=dev`, and writes a new Change with `reverts=<id>`. Dev reverts are exempt from the agent rate caps (trust +0.1 per 5 min, stiff ±10%/h), but not from the flexible ±25% per-step limit or any hard bound. `409` if the target changed since; `422` for `spec_confirm` or a guard failure.
+- `GET /v1/apps/{app}/label-proposals`, which returns `LabelProposal[] {id, label, sensitive, destination, why, status: open|accepted|dismissed, t}`.
+- `POST /v1/apps/{app}/label-proposals/{id}/accept`, optional body `{sensitive?, destination?}`, which returns `{proposal, label_set}`. It adds the label to the running spec and writes a `spec_edit` Change.
+- `POST /v1/apps/{app}/label-proposals/{id}/dismiss`.
+- The POI Labeler proposes labels with the `propose_label` tool (at most 5 open per app). `why` is agent text and is authority-only.
 
 **Event (push):** `POST /v1/apps/{app}/inputs/{input}/events`
 - Header `X-Ingest-Key`; body `{user_id?, lat, lon, ts, ...input fields}`.
@@ -219,7 +227,7 @@ Ingest keys and authority keys are generated per app at activation and stored in
 - **POI:** `{id, candidate_id, lat, lon, radius_m, label, confidence, evidence[], visibility, status, created_at, updated_at}`
 - **Backtest:** `{id, kind: single|batch, candidates_tested, candidates_valid, train_scores, holdout_scores, passed, device: cpu|gpu, elapsed_ms, t}`
 - **TraceEntry:** `{t, app_id, agent, model, saw, hypothesis, tested, result, action, why, tool_calls[], skipped_reason?}`
-- **Change:** `{id, app_id, kind: weight|trust|poi|connector|spec_edit|spec_confirm, target, before, after, reason, backtest_id?, actor: agent|dev, t}`
+- **Change:** `{id, app_id, kind: weight|trust|poi|connector|spec_edit|spec_confirm, target, before, after, reason, backtest_id?, actor: agent|dev, reverts?, t}`
 - **Instruction:** `{text, destination{lat, lon, label}, route[[lat, lon]], distance_m, computed_at, guard{passed, checks[]}}`
 - **Hotspot:** `{id, lat, lon, radius_m, score, mean, area_m2, n_cells, persisted_ticks, contributing_layers[], visibility}`. `score` is the peak cell score; `radius_m = sqrt(area_m2 / π)`. The tick produces it; `/hotspots` and the Critic/POI tools read it.
 - **MapResponse** (`GET /map?format=geojson`): `{app_id, t, cell_m, bbox: [min_lon, min_lat, max_lon, max_lat], layers: {<layer_id> | "score": FeatureCollection}}`. One Polygon feature per cell with `properties: {value, row, col}` (a single `value` field). Cells with `value < 0.01` are omitted to keep the payload small. Without the authority key, only `public` layers are included.
@@ -474,3 +482,9 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-08:** Kida A and Kida B are back on platform tasks: #191 (stiff cap leak) for Kida A, #194 (broad field layers flood the score) for Kida B.
 - **2026-11-08:** Navmi is paused, so Allen takes over `frontend/` from her branch `frontend-aquatic-rebuild`, following `frontend/PLAN.md` and `frontend/HANDOFF.md`. He asks his human for the original design image before building visuals, to keep Navmi's vision. Allen's backend issues move: #190 (label proposals) and #169 (hardening) to Kida A; #181 (land PR #187) and #183 (dev-requested Scout) to Kida B. #153 stays on hold, unassigned.
 - **2026-11-08:** Allen owns all of `frontend/` with full authority: design, new dependencies, deleting files and merging, with no lead approval needed for frontend-only changes. Backend contracts, API routes and env vars still go through the lead.
+- **2026-11-08:** Live checks of Nemotron agents on neutral apps:
+  - The Critic ran no backtest before deciding. Its prompt now runs a batch backtest once out of cold start (live: 256 configs tested).
+  - The POI Labeler ran out of steps calling one tool at a time. It now batches evidence calls (live: named "problem spot").
+  - The Compiler gives a single-location field weight 0, or uses it as a vector field (live: 4 of 4).
+  - Dev reverts keep the flexible ±25% per-step limit (Ram: devs rarely set weights by hand).
+  - Core contracts now cover compile status/failure, revert, and label proposals.
