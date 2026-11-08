@@ -46,10 +46,10 @@ If a task seems to require breaking one of these, stop and ask.
    | Tier | Used for | Weight changes allowed |
    |---|---|---|
    | `locked` | authority inputs | never |
-   | `stiff` | news, official sensors | at most ±10% per hour, and only with authority-confirmation evidence |
+   | `stiff` | news, official sensors | at most ±10% per hour, and only when `authority_confirmation` is the backtest's deciding method |
    | `flexible` | crowd inputs | at most ±25% per step. Flexible weights are renormalized so their sum stays at the value set at creation. Stiff and locked weights are never moved by renormalization. |
 
-   - **Trust:** agents may lower a user's trust freely (with a reason). Increases are capped at **+0.1 per user per 5 minutes** of Clock time.
+   - **Trust:** agents may lower a user's trust freely (with a reason). Increases need a passing backtest (`run_backtest` → `apply_changes`) and are capped at **+0.1 per user per 5 minutes** of Clock time. `set_user_trust` only lowers.
    - **Cold start:** reject flexible weight changes until **at least two** verification methods have data. Return a clear reason so it shows in the trace.
    - Stiffness comes from the tier set at creation, never from the weight's current value.
 6. **Authority overrides always win.** They are applied after the weighted sum.
@@ -422,3 +422,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-07:** Backtest ε applies to every non-deciding method with data (lower priority); a candidate that loses a higher-priority method's data is rejected (PR #31).
 - **2026-11-07:** WS frames `auth_ok` / `tick` approved as proposed by Allen; REST with a wrong authority key returns 401, no key returns public data.
 - **2026-11-07:** Kida seat b files and takes `trust.py` spoof features (step 3) next, then the batch backtest (step 5).
+- **2026-11-07:** Trust increases need a passing backtest; `set_user_trust` only lowers. Stiff weight changes pass only when `authority_confirmation` is the deciding method. Storing tested candidates in `Backtest` is declined for now (after a restart the Critic re-runs the backtest). (PR #39)
