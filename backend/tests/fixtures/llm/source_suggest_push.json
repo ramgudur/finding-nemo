@@ -1,6 +1,6 @@
 {
   "scenario": "source_suggest_push",
-  "description": "Add a source: a source the dev's own app sends; Lightning, reasoning off, returns a JSON object as content.",
+  "description": "Synthetic, hand-written; not a recorded model run. Add a source: a source the dev's own app sends; shaped like a reasoning-off JSON-mode reply (content is a JSON object).",
   "steps": [
     {
       "expect": {
