@@ -66,7 +66,7 @@ The lead assigned areas up front (table below). Within your area, claim tasks as
 
 ### Areas
 
-Assigned by the lead on 2026-11-07. Paths are under `backend/app/` unless they start with `backend/`, `frontend/`, `sim/` or `specs/`. New areas get added here by the lead.
+Assigned by the lead on 2026-11-07. **Since 2026-11-08 (about 01:40 CST): all new tasks go to Allen (`@AllenZheng-05`). Kida A, Kida B and Navmi take no new tasks (usage limits); their open issues moved to Allen. The table below records who built what; Allen may edit any of these areas, posting on the board as usual.** Paths are under `backend/app/` unless they start with `backend/`, `frontend/`, `sim/` or `specs/`. New areas get added here by the lead.
 
 | Area | Owner | Folders | Notes |
 |---|---|---|---|
