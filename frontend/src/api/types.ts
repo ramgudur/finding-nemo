@@ -461,3 +461,26 @@ export interface OperatorInfo {
   role: "layer" | "override";
   params: Record<string, unknown>;
 }
+
+// --- Compile progress and failure (api/apps.py; added for the Sources page) ---
+
+/** Errors and warnings from the platform's spec checks, as plain strings. */
+export interface ValidateResult {
+  errors: string[];
+  warnings: string[];
+}
+
+/** GET /v1/apps/{app}/compile/status: public-safe progress (apps not active only; 404 otherwise). */
+export interface CompileStatus {
+  running: boolean;
+  step: number; // Compiler trace entries (model steps) since this compile started
+  elapsed_s: number; // 0 when not running
+  last_validate?: ValidateResult | null;
+}
+
+/** `detail` of the 422 from POST /v1/apps/{app}/compile when the Compiler never finalized. */
+export interface CompileFailure {
+  reason: string;
+  errors: string[];
+  warnings: string[];
+}

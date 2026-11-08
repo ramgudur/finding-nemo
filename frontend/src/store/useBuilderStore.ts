@@ -39,6 +39,10 @@ interface BuilderState {
   setAppStatus: (s: AppStatus) => void;
   setSelectedLayerId: (id: string | null) => void;
   resetDraft: () => void;
+
+  // Sources page additions: edit a committed source in place (e.g. its id from the chip).
+  updateSource: (index: number, patch: Partial<CompileInput>) => void;
+  removeSourceAt: (index: number) => void;
 }
 
 const initialDraft = {
@@ -76,4 +80,8 @@ export const useBuilderStore = create<BuilderState>((set) => ({
   setAppStatus: (status) => set({ appStatus: status }),
   setSelectedLayerId: (id) => set({ selectedLayerId: id }),
   resetDraft: () => set({ ...initialDraft }),
+
+  updateSource: (index, patch) =>
+    set((s) => ({ sources: s.sources.map((x, i) => (i === index ? { ...x, ...patch } : x)) })),
+  removeSourceAt: (index) => set((s) => ({ sources: s.sources.filter((_, i) => i !== index) })),
 }));
