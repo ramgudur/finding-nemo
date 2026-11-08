@@ -1,4 +1,6 @@
 import asyncio
+import json as _json
+from pathlib import Path as _Path
 
 from fake_llm import FakeAsyncOpenAI
 
@@ -9,10 +11,14 @@ from app.core.db import Db
 from app.core.models import AppSpec
 from app.tools.context import ToolContext
 
-BBOX = {"min_lat": 0.0, "min_lon": 0.0, "max_lat": 0.01, "max_lon": 0.01}
-GRID = {"cell_m": 10, "bbox": BBOX}
-INTENT = "find where people gather"
-INPUTS = [{"id": "pings", "kind": "push", "shape": "point", "meaning": "a ping means someone is here"}]
+# The dev request that matches the recorded `compiler_campus_alert` fixture, whose finalize_app
+# call proposes specs/campus-alert.json: finalize_app pins the dev's inputs, intent and grid (#164),
+# so the request has to declare the same inputs the recording proposes.
+_FIXTURE_SPEC = _json.loads((_Path(__file__).parents[2] / "specs" / "campus-alert.json").read_text(encoding="utf-8"))
+GRID = _FIXTURE_SPEC["grid"]
+BBOX = GRID["bbox"]
+INTENT = _FIXTURE_SPEC["intent"]
+INPUTS = [{k: i[k] for k in ("id", "kind", "shape", "meaning", "fields") if k in i} for i in _FIXTURE_SPEC["inputs"]]
 
 
 def _router(script) -> LlmRouter:

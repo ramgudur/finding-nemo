@@ -651,3 +651,54 @@ def test_finalize_app_refuses_an_unsafe_dev_connector_url(ctx, monkeypatch):
     r = _call(ctx, "finalize_app", {"spec": _pull_spec_dict()})
     assert r["ok"] is False and "connector URL refused" in r["error"]
     assert ctx.db.get_app("draft-app").status == "draft"
+
+
+# -- the dev's declarations are pinned at finalize (#164) -----------------------------------------
+
+
+def _pinned_ctx(ctx):
+    ctx.extra["dev_inputs"] = [
+        {"id": "pings", "kind": "push", "shape": "point", "meaning": "the dev's own words", "fields": []}
+    ]
+    ctx.extra["dev_intent"] = "the dev's intent"
+    ctx.extra["dev_grid"] = {"cell_m": 10, "bbox": BBOX}
+    return ctx
+
+
+def _proposal(**over):
+    inp = {
+        "id": "pings",
+        "kind": "push",
+        "shape": "track",  # the model changed the shape
+        "tier": "flexible",
+        "meaning": "a reworded meaning",
+        "operators": [{"op": "density", "weight": 1.0}],
+        "plausibility": {"max_speed_mps": 12},
+    }
+    spec = {
+        **_draft().model_dump(mode="json"),
+        "intent": "a reworded intent",
+        "inputs": [inp],
+        "verification": [{"method": "predictive_check", "priority": 1}],
+    }
+    return {**spec, **over}
+
+
+def test_finalize_pins_the_devs_inputs_intent_and_grid(ctx):
+    r = _call(_pinned_ctx(ctx), "finalize_app", {"spec": _proposal()})
+    assert r["ok"], r
+    saved = ctx.db.get_app("draft-app")
+    (inp,) = saved.inputs
+    assert (inp.meaning, inp.shape, inp.kind) == ("the dev's own words", "point", "push")
+    assert saved.intent == "the dev's intent"
+    assert inp.operators[0].op == "density" and inp.tier == "flexible"  # the model's choices stay
+
+
+def test_finalize_rejects_inputs_the_dev_did_not_declare_or_dropped(ctx):
+    _pinned_ctx(ctx)
+    extra = _proposal()
+    extra["inputs"] = [*extra["inputs"], {**extra["inputs"][0], "id": "invented"}]
+    r = _call(ctx, "finalize_app", {"spec": extra})
+    assert not r["ok"] and "not declared by the dev" in r["error"] and "invented" in r["error"]
+    r2 = _call(ctx, "finalize_app", {"spec": _proposal(inputs=[])})
+    assert not r2["ok"] and "missing" in r2["error"] and "pings" in r2["error"]

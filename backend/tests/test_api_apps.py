@@ -112,10 +112,16 @@ def test_activate_adds_app_to_the_engine(client, app):
 
 
 def _compile_request() -> dict:
+    """Matches the recorded `compiler_campus_alert` fixture, which proposes specs/campus-alert.json:
+    finalize_app pins the dev's inputs, intent and grid (#164), so they must be the same."""
+    import json
+    from pathlib import Path
+
+    spec = json.loads((Path(__file__).parents[2] / "specs" / "campus-alert.json").read_text(encoding="utf-8"))
     return {
-        "intent": "find where people gather",
-        "grid": {"cell_m": 10, "bbox": {"min_lat": 0.0, "min_lon": 0.0, "max_lat": 0.01, "max_lon": 0.01}},
-        "inputs": [{"id": "pings", "kind": "push", "shape": "point", "meaning": "a ping means someone is here"}],
+        "intent": spec["intent"],
+        "grid": spec["grid"],
+        "inputs": [{k: i[k] for k in ("id", "kind", "shape", "meaning", "fields") if k in i} for i in spec["inputs"]],
     }
 
 
@@ -193,8 +199,17 @@ def test_compile_copies_the_devs_destination_points():
 FEED = {"type": "rss", "url": "https://feeds.example.org/area.xml", "poll_s": 300, "config": {}, "preset": None}
 
 
+def _neutral_request() -> dict:
+    """A small request for tests with their own synthetic proposal (not the recorded fixture)."""
+    return {
+        "intent": "find where people gather",
+        "grid": {"cell_m": 10, "bbox": {"min_lat": 0.0, "min_lon": 0.0, "max_lat": 0.01, "max_lon": 0.01}},
+        "inputs": [{"id": "pings", "kind": "push", "shape": "point", "meaning": "a ping means someone is here"}],
+    }
+
+
 def _pull_compile_request() -> dict:
-    req = _compile_request()
+    req = _neutral_request()
     req["inputs"].append(
         {
             "id": "feed",
@@ -209,7 +224,7 @@ def _pull_compile_request() -> dict:
 
 def _finalize_script() -> dict:
     """The model proposes the feed input with a different URL; finalize_app must keep the dev's."""
-    req = _compile_request()
+    req = _neutral_request()
     spec = {
         "app_id": "some-app",
         "intent": req["intent"],

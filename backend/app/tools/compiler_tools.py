@@ -316,6 +316,30 @@ def finalize_app(ctx: ToolContext, args: FinalizeAppArgs) -> dict[str, Any]:
     """The usual path to pending_confirmation: validate the complete proposed spec and
     upsert it directly (whether or not a draft row already existed for this app_id)."""
     raw = args.spec
+    dev_inputs = ctx.extra.get("dev_inputs")
+    if dev_inputs is not None and isinstance(raw, dict):
+        # The dev's own declarations, verbatim: the model proposes tiers, operators and the rest,
+        # but can't add, drop or reword an input, or change the intent or the area.
+        declared = {d["id"]: d for d in dev_inputs}
+        proposed = [i for i in (raw.get("inputs") or []) if isinstance(i, dict)]
+        ids = [i.get("id") for i in proposed]
+        extra = [i for i in ids if i not in declared]
+        missing = [d for d in declared if d not in ids]
+        if extra or missing:
+            raise GuardError(
+                f"inputs must be exactly the dev's {sorted(declared)}"
+                + (f"; not declared by the dev: {extra}" if extra else "")
+                + (f"; missing: {missing}" if missing else "")
+            )
+        pinned = ("kind", "shape", "meaning", "fields")
+        raw = {
+            **raw,
+            "inputs": [{**i, **{k: declared[i["id"]].get(k, []) for k in pinned}} for i in proposed],
+        }
+        if "dev_intent" in ctx.extra:
+            raw["intent"] = ctx.extra["dev_intent"]
+        if "dev_grid" in ctx.extra:
+            raw["grid"] = ctx.extra["dev_grid"]
     if "dev_destination_points" in ctx.extra and isinstance(raw, dict):
         # the dev's map picks, verbatim: the model can't add, move or drop them
         routing = {**(raw.get("routing") or {}), "destination_points": ctx.extra["dev_destination_points"]}
