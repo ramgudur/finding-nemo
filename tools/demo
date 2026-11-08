@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# One-command demo: backend (DEMO_MODE=1), frontend, create + activate the app, then the simulator.
+# Usage: tools/demo [campus-alert|flyway] [--fresh] [--no-sim]
+#   --fresh   start from an empty demo DB (keys change; the old ones stop working)
+#   --no-sim  bring everything up but don't start the simulator
+# Ctrl-C stops everything it started. Keys live in data/ (gitignored); never commit them.
+set -euo pipefail
+
+APP="campus-alert"
+FRESH=0
+SIM=1
+for a in "$@"; do
+  case "$a" in
+    campus-alert|flyway) APP="$a" ;;
+    --fresh) FRESH=1 ;;
+    --no-sim) SIM=0 ;;
+    -h|--help) sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "demo: unknown argument '$a' (try --help)" >&2; exit 2 ;;
+  esac
+done
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DATA="$ROOT/data"
+DB="$DATA/demo.db"
+KEYS="$DATA/demo-keys-$APP.json"
+API="http://127.0.0.1:8000"
+mkdir -p "$DATA"
+
+PY="$ROOT/backend/.venv/Scripts/python"
+[ -x "$PY" ] || PY="$ROOT/backend/.venv/bin/python"
+[ -x "$PY" ] || PY="$(command -v python3 || command -v python)"
+command -v npm >/dev/null || { echo "demo: npm not found" >&2; exit 1; }
+
+if [ "$FRESH" = 1 ]; then rm -f "$DB" "$DATA"/demo-keys-*.json; fi
+
+PIDS=()
+cleanup() {
+  echo; echo "demo: stopping..."
+  for p in "${PIDS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done
+}
+trap cleanup EXIT INT TERM
+
+json() { "$PY" -c "import json,sys; print(json.load(sys.stdin)$1)"; }
+
+echo "demo: backend on :8000 (DEMO_MODE=1, db $DB)"
+( cd "$ROOT/backend" && DEMO_MODE=1 SQLITE_PATH="$DB" exec "$PY" -m uvicorn app.main:app --port 8000 ) \
+  > "$DATA/demo-backend.log" 2>&1 &
+PIDS+=($!)
+echo "demo: frontend on :5173 (also on your LAN IP for phones)"
+( cd "$ROOT/frontend" && exec npx vite --port 5173 --strictPort ) > "$DATA/demo-frontend.log" 2>&1 &
+PIDS+=($!)
+
+for _ in $(seq 1 60); do curl -sf "$API/v1/health" >/dev/null && break; sleep 0.5; done
+curl -sf "$API/v1/health" >/dev/null || { echo "demo: backend didn't start; see data/demo-backend.log" >&2; exit 1; }
+
+code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/v1/apps" -H "Content-Type: application/json" \
+  --data-binary "@$ROOT/specs/$APP.json")
+case "$code" in
+  201) echo "demo: created $APP" ;;
+  409) echo "demo: $APP already exists" ;;
+  *) echo "demo: creating $APP failed (HTTP $code)" >&2; exit 1 ;;
+esac
+if [ ! -s "$KEYS" ]; then
+  if ! curl -sf -X POST "$API/v1/apps/$APP/activate" > "$KEYS.tmp"; then
+    rm -f "$KEYS.tmp"
+    echo "demo: $APP is active but its keys aren't in $KEYS; rerun with --fresh" >&2; exit 1
+  fi
+  mv "$KEYS.tmp" "$KEYS"
+fi
+INGEST=$(json "['ingest_key']" < "$KEYS")
+AUTH=$(json "['authority_key']" < "$KEYS")
+
+cat <<EOF
+
+  Console (authority):  http://localhost:5173/apps/$APP
+  Authority key:        $AUTH
+  End-user page:        http://localhost:5173/apps/$APP/go
+  Keys file:            $KEYS   (gitignored; shown once at activation)
+  Logs:                 data/demo-backend.log, data/demo-frontend.log
+
+EOF
+
+if [ "$SIM" = 1 ]; then
+  # The sim follows the server clock, so the server clock sets the pace: campus-alert runs at 1x,
+  # flyway's 75 min of tag data at 20x (about 4 min). Change it live with Pause/Speed in the console.
+  SPEED=1
+  [ "$APP" = "flyway" ] && SPEED=20
+  curl -sf -X POST "$API/v1/debug/apps/$APP/clock" -H "X-Authority-Key: $AUTH" -H "Content-Type: application/json"     -d "{\"paused\": false, \"speed\": $SPEED}" > /dev/null
+  echo "demo: simulator at ${SPEED}x (--follow-clock: Pause/Speed in the console drive it)"
+  cd "$ROOT"
+  export PYTHONUNBUFFERED=1
+  if [ "$APP" = "flyway" ]; then
+    INGEST_KEY="$INGEST" "$PY" -m sim.flyway --api "$API" --follow-clock
+  else
+    INGEST_KEY="$INGEST" "$PY" -m sim.campus_alert --api "$API" --follow-clock
+  fi
+  echo "demo: simulator finished; the map keeps ticking. Ctrl-C to stop."
+fi
+wait
