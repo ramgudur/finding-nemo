@@ -22,6 +22,7 @@ import {
 import { specLayers } from "../components/architecture/specLayers";
 import { TierBadge } from "../components/architecture/TierBadge";
 import { VERIFICATION_PLAIN } from "../components/builder/explain";
+import { PublicViewBox } from "../components/review/PublicView";
 import { useBuilderStore } from "../store/useBuilderStore";
 import { isProposed } from "../components/app/appState";
 
@@ -118,12 +119,13 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
   const [activating, setActivating] = useState(false);
   const [activateError, setActivateError] = useState<{ text: string; live?: boolean } | null>(null);
 
-  const d = useSpecDraft(spec, appId, (next) => {
+  const persist = (next: AppSpec) => {
     const st = useBuilderStore.getState();
     if (st.compiledSpec?.app_id === next.app_id) st.setCompiledSpec(next);
     saveSpecSnapshot(next);
     onSaved(next);
-  });
+  };
+  const d = useSpecDraft(spec, appId, persist);
 
   // a proposal on screen stays reopenable from Projects (records are automatic; there is no Save Project)
   useEffect(() => {
@@ -202,6 +204,8 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
           </p>
         )}
       </header>
+
+      <PublicViewBox spec={spec} dirty={d.dirty} onSaved={persist} />
 
       <section aria-labelledby="rv-how" className="bld-card p-4 sm:p-5">
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">

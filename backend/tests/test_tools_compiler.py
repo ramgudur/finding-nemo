@@ -66,6 +66,9 @@ def test_validate_spec_accepts_a_good_spec(ctx):
             }
         ],
         "verification": [{"method": "predictive_check", "priority": 1}],
+        "outputs": {
+            "layers": [{"id": "score", "visibility": "public"}, {"id": "pings.density", "visibility": "public"}]
+        },
     }
     r = _call(ctx, "validate_spec", {"spec": spec})
     assert r["result"]["valid"] is True
@@ -102,8 +105,67 @@ def test_validate_spec_warns_when_verification_leaves_out_a_method_the_inputs_ca
     }
     assert not any("leaves out" in x for x in _call(ctx, "validate_spec", {"spec": full})["result"]["warnings"])
     # one weighted input: cross_input_agreement can't have data, so it isn't asked for
-    single = {**base, "inputs": [inp("a")], "verification": [{"method": "predictive_check", "priority": 1}]}
+    single = {
+        **base,
+        "inputs": [inp("a")],
+        "verification": [{"method": "predictive_check", "priority": 1}],
+        "outputs": {"layers": [{"id": "a.density", "visibility": "public"}]},
+    }
     assert _call(ctx, "validate_spec", {"spec": single})["result"]["warnings"] == []
+
+
+def _nothing_public_spec(**over) -> dict:
+    """A neutral one-input app; every output private unless `over` says otherwise."""
+    return {
+        **_draft().model_dump(mode="json"),
+        "inputs": [
+            {
+                "id": "reports",
+                "kind": "push",
+                "shape": "point",
+                "tier": "flexible",
+                "meaning": "a resident reports a blocked street",
+                "operators": [{"op": "density", "weight": 1.0}],
+                "plausibility": {"max_speed_mps": 3},
+            }
+        ],
+        "verification": [{"method": "predictive_check", "priority": 1}],
+        **over,
+    }
+
+
+def _nothing_public(ctx, spec) -> bool:
+    warnings = _call(ctx, "validate_spec", {"spec": spec})["result"]["warnings"]
+    return any(w.startswith("Nothing is public") for w in warnings)
+
+
+def test_validate_spec_warns_when_the_public_would_get_nothing(ctx):
+    private = _nothing_public_spec(outputs={"layers": [{"id": "score", "visibility": "authority"}]})
+    r = _call(ctx, "validate_spec", {"spec": private})["result"]
+    assert r["valid"] is True  # a warning, never an error: private is a legitimate choice (rule 8)
+    assert _nothing_public(ctx, private)
+    # labels on, but none is a destination: a non-destination POI is public only where its layers are
+    labelled = _nothing_public_spec(
+        outputs={"poi_labels": {"mode": "auto", "label_set": [{"label": "blocked street"}]}},
+    )
+    assert _nothing_public(ctx, labelled)
+
+
+def test_validate_spec_nothing_public_warning_is_absent_once_something_is_public(ctx):
+    public_score = _nothing_public_spec(
+        outputs={"layers": [{"id": "score", "visibility": "public"}, {"id": "reports.density", "visibility": "public"}]}
+    )
+    assert not _nothing_public(ctx, public_score)
+    one_layer = _nothing_public_spec(outputs={"layers": [{"id": "reports.density", "visibility": "public"}]})
+    assert not _nothing_public(ctx, one_layer)
+    destination = _nothing_public_spec(
+        outputs={"poi_labels": {"mode": "auto", "label_set": [{"label": "open route", "destination": True}]}}
+    )
+    assert not _nothing_public(ctx, destination)
+    routed = _nothing_public_spec(
+        routing={"enabled": True, "destination_points": [{"lat": 0.005, "lon": 0.005, "label": "meeting point"}]}
+    )
+    assert not _nothing_public(ctx, routed)
 
 
 def test_validate_spec_warns_on_missing_plausibility_for_flexible_track_or_point(ctx):
