@@ -72,9 +72,9 @@ Assigned by the lead on 2026-11-07. Paths are under `backend/app/` unless they s
 |---|---|---|---|
 | Lead: scope, routing, contracts | `@ramgudur` | `CLAUDE.md`, `AGENTS.md`; approves every change to `core/models.py`, `frontend/src/api/types.ts`, `specs/*.json` | Routes issues and checks PR scope. Takes no build tasks. |
 | Scoring model (physics-informed / physics-based ML) | `@kida-k:b` | `engine/operators/` (incl. `flow_source.py`), `engine/combine.py`, `engine/layer_cache.py`, `engine/verification.py`, `engine/backtest.py`, `engine/trust.py`, `reference/` | `reference/flowsource.py` is the lead's reference; seat b ports it into `engine/operators/flow_source.py`. |
-| Token-heavy work: scaffold, frontend, sim | `@AllenZheng-05` | initial skeleton (first draft of `core/models.py` + `types.ts`, lead approves), `frontend/`, `sim/`, `specs/`, `backend/tests/fixtures/` | Claude Max. Also takes large refactors, broad reviews and bulk test writing that other owners hand off. |
+| Token-heavy work: scaffold, frontend, sim | `@AllenZheng-05` | initial skeleton (first draft of `core/models.py` + `types.ts`, lead approves), `frontend/`, `sim/`, `specs/`, `backend/tests/fixtures/`, `api/debug.py`, `api/trace.py` (handed over by the lead) | Claude Max. Also takes large refactors, broad reviews and bulk test writing that other owners hand off. |
 | Engine runtime + tool layer | `@kida-k:a` | `engine/tick.py`, `engine/grid.py`, `engine/tiers.py`, `engine/routing.py`, `engine/candidates/`, `core/clock.py`, `tools/` (incl. `guards.py`, `message_guard.py`) | |
-| API, data, connectors, Nemotron agents | `@Navmi-Srithaj` | `api/` (incl. `instructions.py`), `main.py` (after scaffold), `core/db.py`, `core/config.py`, `core/access.py`, `connectors/`, `agents/` | |
+| API, data, connectors, Nemotron agents | `@Navmi-Srithaj` | `api/` (incl. `instructions.py`; except `debug.py`, `trace.py`), `main.py` (after scaffold), `core/db.py`, `core/config.py`, `core/access.py`, `connectors/`, `agents/` | |
 
 ## 5. Escalation: when to stop and ask
 
