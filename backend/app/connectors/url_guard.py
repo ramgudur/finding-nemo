@@ -9,7 +9,8 @@ itself or its network. Used by `engine.fetch_raw` / `fetch_raw_sync` (every poll
   addresses and `metadata` hostnames.
 - Private and loopback: blocked unless allowed. The default allows them only in DEMO_MODE, where the
   scripted demo feed is served on localhost.
-- Callers don't follow redirects (httpx's default), so a redirect can't bounce to a blocked address.
+- Redirects: callers follow at most `MAX_REDIRECTS` hops via `next_hop`, which re-runs this check on
+  every hop, so a redirect can't bounce to a blocked address.
 Known limit: we resolve, then the HTTP client resolves again, so DNS rebinding between the two isn't
 covered. The link-local block and no-redirects cover the main cloud-metadata case.
 """
@@ -25,6 +26,10 @@ from urllib.parse import urlparse
 _METADATA_HOSTS = {"metadata.google.internal", "metadata"}
 
 Resolver = Callable[..., list[Any]]
+
+
+MAX_REDIRECTS = 3
+REDIRECT_CODES = (301, 302, 303, 307, 308)
 
 
 class UnsafeUrl(ValueError):
@@ -67,3 +72,15 @@ def check_url(url: str, *, allow_private: bool | None = None, resolve: Resolver 
         if ip.is_multicast or ip.is_unspecified or ip.is_reserved:
             raise UnsafeUrl("that address is not allowed")
     return url
+
+
+def next_hop(current_url: str, location: str | None, *, allow_private: bool | None = None, hops: int = 0) -> str:
+    """The checked URL a redirect points to. Raises UnsafeUrl past MAX_REDIRECTS, on a missing
+    Location, or if the target fails `check_url` (same rules as the first request)."""
+    from urllib.parse import urljoin
+
+    if hops >= MAX_REDIRECTS:
+        raise UnsafeUrl(f"more than {MAX_REDIRECTS} redirects")
+    if not location:
+        raise UnsafeUrl("redirect without a Location header")
+    return check_url(urljoin(current_url, location), allow_private=allow_private)

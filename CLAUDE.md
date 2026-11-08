@@ -511,3 +511,12 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
   - 245 events ingested with 0 rejected; 450 WebSocket frames with 0 errors (max gap 3.2 s); public instructions served.
   - The Critic applied 9 gated weight changes, down to the 10% floor. The POI Labeler named the place.
   - Fix: the Labeler ran out of steps in 7 of 9 repeat runs. It now stops early when nothing is new (live: 3 steps).
+- **2026-11-08:** The Scout works live with Tavily (key in `backend/.env`). Fixes from live runs:
+  - Fetched bodies were decompressed twice; this is fixed.
+  - `brotli` is a new dependency (Ram approved), because many feeds force br compression.
+  - Redirects are followed for up to 3 hops, and every hop is re-checked by the URL guard (Scout tools and connector polls).
+  - `test_connector` counts RSS items without coordinates, since the locator places them.
+  - An agent's connector that fails its test is removed (a Change is written).
+  - A connector change updates the running engine's spec.
+  - Scout prompt: commit early, use only probed feeds, one connector per input.
+  - Live result: WBAL feed configured and tested (40 items) in 34 s.
