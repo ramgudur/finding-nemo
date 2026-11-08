@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from app.tools import read_tools as rd
 from app.tools import scoring_tools as st
 from app.tools.context import ToolContext
 from app.tools.guards import GuardError
@@ -37,6 +38,45 @@ class Tool:
 TOOLS: dict[str, Tool] = {
     t.name: t
     for t in (
+        Tool(
+            "get_map_summary",
+            "Latest tick: score stats, hotspots (id, position, peak, contributing layers), every layer's "
+            "weight with its tier and pin, and the flexible weight total.",
+            rd.NoArgs,
+            rd.get_map_summary,
+            frozenset({"critic"}),
+        ),
+        Tool(
+            "get_layer_stats",
+            "Per-layer stats from the latest tick: normalized max/mean, share of non-zero cells, peak position, "
+            "weight, and small operator extras (e.g. a point estimate).",
+            rd.LayerStatsArgs,
+            rd.get_layer_stats,
+            frozenset({"critic"}),
+        ),
+        Tool(
+            "get_verification_report",
+            "Verification methods (in spec priority) on the cached recent window with current weights: value, "
+            "whether each has data, and whether the app is still in cold start.",
+            rd.WindowArgs,
+            rd.get_verification_report,
+            frozenset({"critic"}),
+        ),
+        Tool(
+            "get_suspicious_users",
+            "Spoof flags per user over the window (duplicate coords across accounts, impossible speed, new-ID "
+            "bursts, constant speed, straight tracks, shared device/IP). Flags, not verdicts; no coordinates.",
+            rd.WindowArgs,
+            rd.get_suspicious_users,
+            frozenset({"critic"}),
+        ),
+        Tool(
+            "annotate",
+            "Leave a short note for the dev in the trace. Changes nothing.",
+            rd.AnnotateArgs,
+            rd.annotate,
+            frozenset({"critic", "compiler", "scout", "poi_labeler"}),
+        ),
         Tool(
             "run_backtest",
             "Backtest a proposed weight or trust change on held-out recent data. Weights are checked "
