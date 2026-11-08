@@ -135,6 +135,7 @@ export function SourcesStep() {
                   duplicate={ids.indexOf(src.id) !== i}
                   onRename={(id) => s.updateSource(i, { id })}
                   onFields={(fields) => s.updateSource(i, { fields })}
+                  onWebhook={(webhook) => s.updateSource(i, { webhook })}
                   onFieldsProblem={(p) =>
                     setFieldProblems((cur) => {
                       const next = { ...cur };

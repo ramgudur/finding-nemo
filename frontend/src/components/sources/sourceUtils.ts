@@ -11,6 +11,8 @@ import type {
   InputShape,
   SourceOption,
   SourceOptionType,
+  TsFormat,
+  WebhookMapping,
 } from "../../api/types";
 
 /** Same pattern as core/models.py SLUG (app ids and input ids). */
@@ -211,6 +213,10 @@ export function sourcesProblems(d: SourcesDraft): string[] {
     d.sources.some((s) => s.kind === "push" && s.connector) && "A source your app sends can't also be polled.",
     d.sources.some((s) => s.connector?.type === "json_api" && !s.connector.preset && !s.connector.url) &&
       "A custom JSON source needs its URL.",
+    d.sources.some((s) => s.kind === "pull" && s.webhook) && "A source we fetch can't also receive a webhook.",
+    ...d.sources.flatMap((s) =>
+      s.kind === "push" && s.webhook ? webhookProblems(s.webhook, s.fields).map((p) => `${s.id} webhook: ${p}.`) : [],
+    ),
   ].filter(Boolean) as string[];
 }
 
@@ -232,3 +238,178 @@ export function firstIncompleteStep(d: SourcesDraft, activeIds: string[] = []): 
 /** True when the draft has nothing the dev typed yet. */
 export const draftIsEmpty = (d: SourcesDraft) =>
   !d.name.trim() && !d.appId && !d.intent.trim() && !d.bbox && d.sources.length === 0 && d.destinationPoints.length === 0;
+
+// --- Webhook mapping (push only): data only, never code (rule 10) ---
+
+export const TS_FORMATS: { value: TsFormat; label: string }[] = [
+  { value: "iso", label: "ISO 8601 text" },
+  { value: "epoch_s", label: "seconds since 1970" },
+  { value: "epoch_ms", label: "milliseconds since 1970" },
+];
+
+/** A fresh mapping for a source that receives another service's webhook (lat/lon still to fill). */
+export const emptyWebhook = (): WebhookMapping => ({
+  items_path: "",
+  lat: "",
+  lon: "",
+  ts: null,
+  ts_format: "iso",
+  user_id: null,
+  fields: {},
+});
+
+export type Dug = { ok: true; value: unknown } | { ok: false; error: string };
+
+/** Resolve a dotted path with list indices ("geometry.coordinates.1") like api/webhooks.py `_dig`:
+ *  a list takes an integer index, an object a key, and "" is the node itself. A pure lookup, no eval. */
+export function digPath(data: unknown, path: string): Dug {
+  let node = data;
+  const parts = path ? path.split(".") : [];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i] ?? "";
+    const at = parts.slice(0, i).join(".") || "the item";
+    if (Array.isArray(node)) {
+      if (!/^\s*-?\d+\s*$/.test(part)) return { ok: false, error: `${at} is a list, and "${part}" isn't an index` };
+      let idx = Number(part);
+      if (idx < 0) idx += node.length;
+      if (idx < 0 || idx >= node.length) return { ok: false, error: `${at} has no item ${part} (it has ${node.length})` };
+      node = node[idx];
+    } else if (node !== null && typeof node === "object") {
+      if (!Object.prototype.hasOwnProperty.call(node, part)) return { ok: false, error: `${at} has no "${part}"` };
+      node = (node as Record<string, unknown>)[part];
+    } else {
+      return { ok: false, error: `${at} is ${describeValue(node)}, so "${part}" can't be read from it` };
+    }
+  }
+  return { ok: true, value: node };
+}
+
+/** A short, safe rendering of a JSON value for the preview. */
+export function describeValue(v: unknown): string {
+  if (v === null) return "null";
+  if (v === undefined) return "nothing";
+  if (Array.isArray(v)) return `a list of ${v.length}`;
+  if (typeof v === "object") return "an object";
+  if (typeof v === "string") return JSON.stringify(v.length > 40 ? `${v.slice(0, 40)}…` : v);
+  return String(v);
+}
+
+/** "a..b" or a trailing dot never resolves on the server. */
+function pathFormProblem(path: string): string | null {
+  return path.split(".").some((p) => p === "") ? `"${path}" has an empty part; separate names with single dots` : null;
+}
+
+/** Why a mapping can't be sent yet. Required declared fields need a path, or every item would be rejected. */
+export function webhookProblems(w: WebhookMapping, fields: InputField[] | undefined): string[] {
+  const out: string[] = [];
+  if (!w.lat.trim()) out.push("say where the latitude is");
+  if (!w.lon.trim()) out.push("say where the longitude is");
+  const paths = [w.items_path ?? "", w.lat, w.lon, w.ts ?? "", w.user_id ?? "", ...Object.values(w.fields ?? {})];
+  for (const p of paths.map((x) => x.trim()).filter(Boolean)) {
+    const bad = pathFormProblem(p);
+    if (bad && !out.includes(bad)) out.push(bad);
+  }
+  for (const f of fields ?? []) {
+    if (f.required !== false && !(w.fields?.[f.name] ?? "").trim()) out.push(`say where the required field ${f.name} is`);
+  }
+  return out;
+}
+
+/** The mapping as the compile body carries it: trimmed, blanks as null, and fields only for declared names. */
+export function webhookForCompile(w: WebhookMapping, fields: InputField[] | undefined): WebhookMapping {
+  const declared = new Set((fields ?? []).map((f) => f.name));
+  const mapped: Record<string, string> = {};
+  for (const [name, path] of Object.entries(w.fields ?? {})) {
+    if (declared.has(name) && path.trim()) mapped[name] = path.trim();
+  }
+  return {
+    items_path: (w.items_path ?? "").trim(),
+    lat: w.lat.trim(),
+    lon: w.lon.trim(),
+    ts: w.ts?.trim() || null,
+    ts_format: w.ts_format ?? "iso",
+    user_id: w.user_id?.trim() || null,
+    fields: mapped,
+  };
+}
+
+export interface PreviewRow {
+  ok: boolean;
+  text: string;
+}
+
+export type SamplePreview =
+  | { state: "empty" }
+  | { state: "bad"; error: string }
+  | { state: "ok"; itemCount: number; rows: Record<string, PreviewRow> };
+
+function previewTs(raw: unknown, fmt: TsFormat): PreviewRow {
+  if (fmt === "iso") {
+    const t = typeof raw === "string" ? Date.parse(raw) : NaN;
+    return Number.isNaN(t)
+      ? { ok: false, text: `${describeValue(raw)} isn't an ISO 8601 time` }
+      : { ok: true, text: new Date(t).toISOString() };
+  }
+  const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? Number(raw) : NaN;
+  const unit = fmt === "epoch_s" ? "seconds" : "milliseconds";
+  if (!Number.isFinite(n)) return { ok: false, text: `${describeValue(raw)} isn't a number of ${unit}` };
+  const d = new Date(fmt === "epoch_s" ? n * 1000 : n);
+  return Number.isNaN(d.getTime()) ? { ok: false, text: `${n} ${unit} is out of range` } : { ok: true, text: d.toISOString() };
+}
+
+const TYPE_CHECK: Record<FieldType, (v: unknown) => boolean> = {
+  number: (v) => typeof v === "number",
+  integer: (v) => typeof v === "number" && Number.isInteger(v),
+  boolean: (v) => typeof v === "boolean",
+  string: (v) => typeof v === "string",
+};
+
+/** Preview key for a declared field's row. */
+export const fieldKey = (name: string) => `field:${name}`;
+
+/** What each path resolves to for the FIRST item of a pasted sample. JSON.parse only, never eval (rule 10). */
+export function previewWebhook(w: WebhookMapping, fields: InputField[] | undefined, sample: string): SamplePreview {
+  if (!sample.trim()) return { state: "empty" };
+  let body: unknown;
+  try {
+    body = JSON.parse(sample);
+  } catch (e) {
+    return { state: "bad", error: `The sample isn't valid JSON: ${e instanceof Error ? e.message : "parse error"}.` };
+  }
+  const listed = digPath(body, (w.items_path ?? "").trim());
+  if (!listed.ok) return { state: "bad", error: `Items list: ${listed.error}.` };
+  const items = Array.isArray(listed.value) ? listed.value : [listed.value];
+  if (items.length === 0) return { state: "bad", error: "The items list is empty, so there's no first item to preview." };
+  const item: unknown = items[0];
+  const rows: Record<string, PreviewRow> = {};
+  const one = (key: string, path: string, check: (v: unknown) => PreviewRow) => {
+    const p = path.trim();
+    if (!p) return;
+    const form = pathFormProblem(p);
+    if (form) {
+      rows[key] = { ok: false, text: form };
+      return;
+    }
+    const r = digPath(item, p);
+    rows[key] = r.ok ? check(r.value) : { ok: false, text: r.error };
+  };
+  const coord = (limit: number, name: string) => (v: unknown): PreviewRow => {
+    if (typeof v !== "number" || !Number.isFinite(v))
+      return { ok: false, text: `${describeValue(v)} isn't a number${typeof v === "string" ? " (it's text)" : ""}` };
+    if (Math.abs(v) > limit) return { ok: false, text: `${v} is outside ±${limit}, so it can't be a ${name}` };
+    return { ok: true, text: String(v) };
+  };
+  const any = (v: unknown): PreviewRow => ({ ok: true, text: describeValue(v) });
+  one("lat", w.lat, coord(90, "latitude"));
+  one("lon", w.lon, coord(180, "longitude"));
+  one("ts", w.ts ?? "", (v) => previewTs(v, w.ts_format ?? "iso"));
+  one("user_id", w.user_id ?? "", any);
+  for (const f of fields ?? []) {
+    one(fieldKey(f.name), w.fields?.[f.name] ?? "", (v) =>
+      TYPE_CHECK[f.type](v)
+        ? any(v)
+        : { ok: false, text: `${describeValue(v)} isn't ${f.type === "integer" ? "an integer" : `a ${f.type}`}` },
+    );
+  }
+  return { state: "ok", itemCount: items.length, rows };
+}

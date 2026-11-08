@@ -18,6 +18,8 @@ interface BuilderState {
   cellM: number;
   destinationPoints: DestinationPoint[];
   sources: CompileInput[];
+  /** Sample webhook payloads the dev pasted, by source id (only for the client-side preview; never sent). */
+  webhookSamples: Record<string, string>;
   /** ISO time of the last successful compile of this draft (null while it's still being built). */
   compiledAt: string | null;
 
@@ -52,6 +54,7 @@ interface BuilderState {
   resetDraft: () => void;
 
   updateSource: (index: number, patch: Partial<CompileInput>) => void;
+  setWebhookSample: (sourceId: string, text: string) => void;
   removeSourceAt: (index: number) => void;
   /** Put a source back at its old position (undo of a removal). */
   insertSourceAt: (index: number, input: CompileInput) => void;
@@ -66,6 +69,7 @@ const initialDraft = {
   cellM: 25,
   destinationPoints: [] as DestinationPoint[],
   sources: [] as CompileInput[],
+  webhookSamples: {} as Record<string, string>,
   compiledAt: null as string | null,
   compiledSpec: null as AppSpec | null,
   compiling: false,
@@ -74,6 +78,9 @@ const initialDraft = {
   appStatus: "idle" as AppStatus,
   selectedLayerId: null as string | null,
 };
+
+/** Keeps a pasted sample from filling sessionStorage. */
+export const MAX_SAMPLE_CHARS = 20_000;
 
 /** sessionStorage can throw (private mode, blocked storage): fall back to a no-op store. */
 const safeSession = createJSONStorage(() => {
@@ -114,7 +121,15 @@ export const useBuilderStore = create<BuilderState>()(
       resetDraft: () => set({ ...initialDraft }),
 
       updateSource: (index, patch) =>
-        set((s) => ({ sources: s.sources.map((x, i) => (i === index ? { ...x, ...patch } : x)) })),
+        set((s) => {
+          const old = s.sources[index]?.id;
+          const renamed = old !== undefined && patch.id !== undefined && patch.id !== old && old in s.webhookSamples;
+          const webhookSamples = renamed ? { ...s.webhookSamples, [patch.id as string]: s.webhookSamples[old] ?? "" } : s.webhookSamples;
+          if (renamed) delete webhookSamples[old];
+          return { sources: s.sources.map((x, i) => (i === index ? { ...x, ...patch } : x)), webhookSamples };
+        }),
+      setWebhookSample: (sourceId, text) =>
+        set((s) => ({ webhookSamples: { ...s.webhookSamples, [sourceId]: text.slice(0, MAX_SAMPLE_CHARS) } })),
       removeSourceAt: (index) => set((s) => ({ sources: s.sources.filter((_, i) => i !== index) })),
       insertSourceAt: (index, input) =>
         set((s) => {
@@ -137,6 +152,7 @@ export const useBuilderStore = create<BuilderState>()(
         cellM: s.cellM,
         destinationPoints: s.destinationPoints,
         sources: s.sources,
+        webhookSamples: s.webhookSamples,
         compiledAt: s.compiledAt,
       }),
     },

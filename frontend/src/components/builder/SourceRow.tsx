@@ -1,17 +1,21 @@
 // One added source on the Sources step: who sends it, its editable id, what each item is, the dev's own
-// description, optional extra fields ("level:number, note:string?") and remove (undo lives in the toast).
+// description, optional extra fields ("level:number, note:string?"), for a push source an optional mapping
+// for another service's webhook JSON, and remove (undo lives in the toast).
 import { Pencil, X } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { forwardRef, useEffect, useRef, useState } from "react";
-import type { CompileInput, InputField } from "../../api/types";
+import type { CompileInput, InputField, WebhookMapping } from "../../api/types";
 import { KindBadge } from "../sources/SourceSuggestionCard";
-import { SHAPE_INFO, SLUG, fieldsToText, parseFields } from "../sources/sourceUtils";
+import { WebhookEditor } from "../sources/WebhookEditor";
+import { SHAPE_INFO, SLUG, emptyWebhook, fieldsToText, parseFields } from "../sources/sourceUtils";
 
 interface Props {
   source: CompileInput;
   duplicate: boolean;
   onRename: (id: string) => void;
   onFields: (fields: InputField[]) => void;
+  /** Push only: the webhook mapping, or null to receive plain events from the dev's own app. */
+  onWebhook: (webhook: WebhookMapping | null) => void;
   /** The first problem in the extra-fields text, or null when it parses (the step blocks Next on it). */
   onFieldsProblem: (problem: string | null) => void;
   onRemove: () => void;
@@ -25,7 +29,7 @@ const TYPE_WORD: Record<InputField["type"], string> = {
 };
 
 export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
-  { source, duplicate, onRename, onFields, onFieldsProblem, onRemove },
+  { source, duplicate, onRename, onFields, onWebhook, onFieldsProblem, onRemove },
   ref,
 ) {
   const reduce = useReducedMotion();
@@ -36,6 +40,9 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
   const idBad = !SLUG.test(source.id) || duplicate;
   const parsed = parseFields(fieldsText);
   const fieldsId = `fields-${source.id}`;
+  const webhookId = `webhook-${source.id}`;
+  // Keep what was typed when the dev switches the webhook off and back on.
+  const [lastWebhook, setLastWebhook] = useState<WebhookMapping | null>(source.webhook ?? null);
 
   useEffect(() => {
     if (editing) idInput.current?.select();
@@ -147,6 +154,41 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
               : "Values each item carries beyond its place and time. Write name:type; add ? for optional. Types: number, integer, string, boolean."}
         </p>
       </div>
+
+      {source.kind === "push" && (
+        <div className="flex flex-col gap-2">
+          <label htmlFor={webhookId} className="flex w-fit cursor-pointer items-center gap-2 text-xs font-semibold text-slate">
+            <input
+              id={webhookId}
+              type="checkbox"
+              checked={!!source.webhook}
+              onChange={(e) => {
+                if (e.target.checked) onWebhook(lastWebhook ?? emptyWebhook());
+                else {
+                  setLastWebhook(source.webhook ?? null);
+                  onWebhook(null);
+                }
+              }}
+              className="accent-mutedTeal"
+            />
+            <span>
+              Receives another service's webhook{" "}
+              <span className="font-normal text-ink">(their JSON, mapped to place, time and fields)</span>
+            </span>
+          </label>
+          {source.webhook && (
+            <WebhookEditor
+              sourceId={source.id}
+              mapping={source.webhook}
+              fields={source.fields}
+              onChange={(m) => {
+                setLastWebhook(m);
+                onWebhook(m);
+              }}
+            />
+          )}
+        </div>
+      )}
     </motion.li>
   );
 });

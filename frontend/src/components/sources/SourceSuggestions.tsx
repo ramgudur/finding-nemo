@@ -1,6 +1,7 @@
 // Results of the real POST /v1/apps/{app}/sources/suggest, split into push (the dev's app sends events to
 // a generated endpoint with its ingest key) and pull (the platform polls a connector). Push options add
-// a source on click; pull options open their connector settings first.
+// a source on click (a webhook option adds it with an empty mapping to fill on its row); pull options open
+// their connector settings first.
 import { ArrowDownToLine, ChevronDown, Plus, RefreshCw, X } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
@@ -14,6 +15,7 @@ import {
   connectorDraftFor,
   connectorOf,
   connectorProblem,
+  emptyWebhook,
   optionKey,
   slugFromDescription,
 } from "./sourceUtils";
@@ -46,6 +48,7 @@ export function SourceSuggestions({ suggestion, bbox, takenIds, onAdd, onDismiss
     meaning: suggestion.meaning, // the dev's words, verbatim
     fields: [],
     connector: connectorOf(o, d),
+    ...(o.type === "webhook" ? { webhook: emptyWebhook() } : {}),
   });
 
   const pick = (o: SourceOption) => {
