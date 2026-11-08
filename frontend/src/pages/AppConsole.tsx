@@ -25,6 +25,7 @@ import { VerificationScores } from "../components/VerificationScores/Verificatio
 import { WeightsPanel } from "../components/WeightsPanel/WeightsPanel";
 import { useAuthorityConsoleData } from "../hooks/useAuthorityConsoleData";
 import { useLiveAppData } from "../hooks/useLiveAppData";
+import { useVectorReadings } from "../hooks/useVectorReadings";
 import { useBuilderStore } from "../store/useBuilderStore";
 import { isProposed } from "../components/app/appState";
 import { LabelProposals } from "../components/app/LabelProposals";
@@ -113,6 +114,7 @@ export default function AppConsole() {
     if (data.rejected) reject();
   }, [data.rejected, reject]);
   const sources = useSourceStatus(appId, authority ? key : null, reject);
+  const vectors = useVectorReadings(appId, authority ? key : null, authority ? spec : null, reject);
 
   // Test your app: where simulated events land (the area's centre until the dev picks a point)
   const [testPoint, setTestPoint] = useState<TestPoint | null>(null);
@@ -247,6 +249,7 @@ export default function AppConsole() {
                 : null
             }
             marker={authority && (picking || testPoint) ? point : null}
+            vectors={authority ? vectors : []}
             emptyHint={
               authority ? (
                 <>
@@ -342,6 +345,7 @@ export default function AppConsole() {
                 shownId={shownLayer(live.map, selectedLayerId)}
                 onSelectLayer={setSelectedLayerId}
                 sources={authority ? sources.rows : null}
+                vectors={authority ? vectors : []}
               />
             ) : !authority ? (
               <div className="space-y-2 rounded-2xl bg-white/40 p-4 text-[13.5px] text-slate">

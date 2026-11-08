@@ -1,12 +1,14 @@
 // One operator layer in the stack: id, operator, weight, tier, visibility, status and a deterministic description.
 // Click toggles selection. A locked weight is plain text beside a lock, never an editable-looking control.
-import { Eye, EyeOff, Lock } from "lucide-react";
+import { Eye, EyeOff, Lock, MoveRight } from "lucide-react";
 import { motion } from "motion/react";
 import type { ReactNode } from "react";
 import type { OperatorInfo } from "../../api/types";
+import type { VectorState } from "../../hooks/useVectorReadings";
 import { LayerDescription } from "./LayerDescription";
 import { fmtWeight, type SpecLayer } from "./specLayers";
 import { TIER_SURFACE, TierBadge } from "./TierBadge";
+import { VectorRowSummary } from "./VectorFieldBits";
 
 export interface LayerRowProps {
   layer: SpecLayer;
@@ -21,6 +23,10 @@ export interface LayerRowProps {
   tone?: "fresh" | "quiet" | "waiting" | "empty" | "error" | "pinned" | "override";
   selected: boolean;
   onToggle: () => void;
+  /** Set when this layer is a vector field (speed + direction): its latest reading and what it moves. */
+  vector?: VectorState | null;
+  /** Set when a vector field carries this layer before scoring ("Shifted ~1.9 km SW along …"). */
+  shiftNote?: string | null;
   /** Extra detail shown under a selected row. */
   children?: ReactNode;
 }
@@ -35,10 +41,12 @@ const STATUS_DOT: Record<NonNullable<LayerRowProps["tone"]>, string> = {
   override: "bg-slate/70",
 };
 
-export function LayerRow({ layer, info, weight, maxWeight, status, tone, selected, onToggle, children }: LayerRowProps) {
+export function LayerRow({ layer, info, weight, maxWeight, status, tone, selected, onToggle, vector, shiftNote, children }: LayerRowProps) {
   const { layerId, input, op, visibility } = layer;
   const tier = input.tier;
   const isOverride = info ? info.role === "override" : op.op === "override";
+  // weight 0 and a vector field: it only moves another layer, so the bar and weight would read "empty"
+  const shiftOnly = !isOverride && !!vector?.layer.shiftOnly && weight === 0;
   const pct = isOverride ? 100 : maxWeight > 0 ? Math.max(3, Math.min(100, (weight / maxWeight) * 100)) : 0;
 
   return (
@@ -79,12 +87,24 @@ export function LayerRow({ layer, info, weight, maxWeight, status, tone, selecte
           </span>
           <span className="ml-auto inline-flex items-center gap-1.5">
             {tier === "locked" && <Lock aria-label="locked weight" className="h-3 w-3 text-slate/70" />}
-            <span className="text-inkSoft">{isOverride ? "after Σ" : "w"}</span>
-            <span className="font-mono tabular-nums text-slate">{isOverride ? "override" : fmtWeight(weight)}</span>
+            <span className="text-inkSoft">{isOverride ? "after Σ" : shiftOnly ? "before Σ" : "w"}</span>
+            <span className="font-mono tabular-nums text-slate">{isOverride ? "override" : shiftOnly ? "moves a layer" : fmtWeight(weight)}</span>
           </span>
         </span>
 
-        <span aria-hidden className="relative mt-2 block h-1 overflow-hidden rounded-full bg-white/50">
+        {vector && (
+          <span className="relative mt-2 block">
+            <VectorRowSummary state={vector} />
+          </span>
+        )}
+        {shiftNote && (
+          <span className="relative mt-1.5 flex items-center gap-1 text-[11.5px] font-medium text-primary">
+            <MoveRight aria-hidden className="h-3 w-3 shrink-0" />
+            {shiftNote}
+          </span>
+        )}
+
+        <span aria-hidden className={`relative mt-2 h-1 ${shiftOnly ? "hidden" : "block"} overflow-hidden rounded-full bg-white/50`}>
           <span
             className={`block h-full rounded-full transition-[width] duration-500 ${
               tier === "locked"
