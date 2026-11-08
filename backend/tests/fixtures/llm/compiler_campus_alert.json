@@ -1,0 +1,58 @@
+{
+  "scenario": "compiler_campus_alert",
+  "description": "Compiler run turning the campus-alert intent and inputs into a proposed spec: lists operators, validates, finalizes.",
+  "steps": [
+    {
+      "expect": {
+        "tools_include": [
+          "list_operators",
+          "validate_spec",
+          "finalize_app"
+        ],
+        "reasoning": true
+      },
+      "response": {
+        "reasoning_content": "Panic presses stream positions of people moving away from danger, so a flow operator fits; room and police markers are authority fixed points.",
+        "tool_calls": [
+          {
+            "id": "call_p1",
+            "name": "list_operators",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_p2",
+            "name": "validate_spec",
+            "arguments": {
+              "spec": "${spec:campus-alert}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_p3",
+            "name": "finalize_app",
+            "arguments": {
+              "spec": "${spec:campus-alert}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "content": "Proposed spec is ready for confirmation: 4 inputs (1 flexible track, 2 locked authority markers, 1 stiff news feed).",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "scenario": "bad_tool_arguments",
+  "description": "A tool call whose arguments are not valid JSON: the loop reports the error to the model instead of crashing.",
+  "steps": [
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_b1",
+            "name": "annotate",
+            "arguments_raw": "{\"text\": "
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "content": "done",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

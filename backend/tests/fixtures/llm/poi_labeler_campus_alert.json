@@ -1,0 +1,65 @@
+{
+  "scenario": "poi_labeler_campus_alert",
+  "description": "POI Labeler run: gets candidates, checks nearby map features, labels one candidate from the app's label_set.",
+  "steps": [
+    {
+      "expect": {
+        "tools_include": [
+          "get_poi_candidates",
+          "osm_features_near",
+          "create_poi"
+        ]
+      },
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_l1",
+            "name": "get_poi_candidates",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_l2",
+            "name": "osm_features_near",
+            "arguments": {
+              "candidate_id": "${tool_result:call_l1:candidates.0.id}",
+              "radius_m": 50
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_l3",
+            "name": "create_poi",
+            "arguments": {
+              "candidate_id": "${tool_result:call_l1:candidates.0.id}",
+              "label": "threat origin",
+              "confidence": 0.72,
+              "evidence": [
+                {
+                  "kind": "layer_stats",
+                  "text": "flow source point estimate within the candidate radius"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "content": "Labeled 1 candidate.",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

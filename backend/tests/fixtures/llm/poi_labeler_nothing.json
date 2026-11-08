@@ -1,0 +1,23 @@
+{
+  "scenario": "poi_labeler_nothing",
+  "description": "POI Labeler in auto mode: no candidate is worth labeling for the intent, so it creates nothing and says why.",
+  "steps": [
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_n1",
+            "name": "get_poi_candidates",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "content": "No candidate is worth naming for this app's intent; nothing created.",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "scenario": "extract_article",
+  "description": "Per-article extraction with reasoning off: returns a JSON object as content.",
+  "steps": [
+    {
+      "expect": {
+        "reasoning": false
+      },
+      "response": {
+        "content": "{\"relevant\": true, \"lat\": 32.7796, \"lon\": -96.76, \"confidence\": 0.8, \"summary\": \"Police respond to a reported threat at the exhibition hall.\"}",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

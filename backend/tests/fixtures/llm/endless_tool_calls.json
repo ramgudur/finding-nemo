@@ -1,0 +1,162 @@
+{
+  "scenario": "endless_tool_calls",
+  "description": "A model that keeps calling tools: the loop must stop at the agent's max iterations.",
+  "steps": [
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_e1",
+            "name": "annotate",
+            "arguments": {
+              "text": "note 1"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_e2",
+            "name": "annotate",
+            "arguments": {
+              "text": "note 2"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_e3",
+            "name": "annotate",
+            "arguments": {
+              "text": "note 3"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_e4",
+            "name": "annotate",
+            "arguments": {
+              "text": "note 4"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_e5",
+            "name": "annotate",
+            "arguments": {
+              "text": "note 5"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_e6",
+            "name": "annotate",
+            "arguments": {
+              "text": "note 6"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_e7",
+            "name": "annotate",
+            "arguments": {
+              "text": "note 7"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_e8",
+            "name": "annotate",
+            "arguments": {
+              "text": "note 8"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_e9",
+            "name": "annotate",
+            "arguments": {
+              "text": "note 9"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_e10",
+            "name": "annotate",
+            "arguments": {
+              "text": "note 10"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_e11",
+            "name": "annotate",
+            "arguments": {
+              "text": "note 11"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_e12",
+            "name": "annotate",
+            "arguments": {
+              "text": "note 12"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
