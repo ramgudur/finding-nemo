@@ -1,6 +1,7 @@
-// Settings for a pull option before it becomes a source: a feed / endpoint URL for RSS, custom JSON APIs and
-// JSON lists; the JSON config for json_api (presets included); and for a JSON list, how often to fetch it and
-// where each item keeps its place, time and fields (the same mapping editor as webhooks).
+// Settings for a pull option before it becomes a source. "main" is what it can't be added without: the feed /
+// endpoint address (RSS, custom JSON APIs, JSON lists) and a JSON list's item mapping. "more" is what has a
+// good default: how often a JSON list is fetched, and a json_api's JSON config (presets start at the area's
+// centre). The suggestion card shows "main" inline and "more" under Details.
 import type { SourceOption } from "../../api/types";
 import { Labeled } from "../builder/Help";
 import { WebhookEditor } from "./WebhookEditor";
@@ -11,20 +12,25 @@ export function ConnectorConfigFields({
   option,
   draft,
   onChange,
+  part = "all",
 }: {
   option: SourceOption;
   draft: ConnectorDraft;
   onChange: (d: ConnectorDraft) => void;
+  part?: "main" | "more" | "all";
 }) {
+  const main = part !== "more";
+  const more = part !== "main";
   const preset = presetOf(option);
   const showUrl = !preset;
   const configBad = option.type === "json_api" && parseConfig(draft.configText) === null;
   const urlMissing = urlRequired(option) && !draft.url.trim();
   const list = option.type === "json_list";
   const urlId = `url-${option.type}`;
+  if (!(main && (showUrl || list)) && !(more && (list || option.type === "json_api"))) return null;
   return (
     <div className="flex flex-col gap-4">
-      {showUrl && (
+      {main && showUrl && (
         <Labeled
           label={option.type === "rss" ? "Feed address" : list ? "Web address of the list" : "JSON endpoint address"}
           htmlFor={urlId}
@@ -49,12 +55,11 @@ export function ConnectorConfigFields({
             className="bld-field is-mono w-full"
           />
           {option.type === "rss" && !draft.url.trim() && (
-            <span className="bld-hint">No feed yet? Leave it empty and the Compiler can ask the Scout to find one.</span>
+            <span className="bld-hint">No feed yet? Leave it empty and we'll look for one.</span>
           )}
         </Labeled>
       )}
-      {list && (
-        <>
+      {more && list && (
           <Labeled label="How often to fetch it" htmlFor="poll-s">
             <select
               id="poll-s"
@@ -69,6 +74,8 @@ export function ConnectorConfigFields({
               ))}
             </select>
           </Labeled>
+      )}
+      {main && list && (
           <div className="flex flex-col gap-1.5">
             <span className="bld-label">What each item holds</span>
             <WebhookEditor
@@ -81,11 +88,9 @@ export function ConnectorConfigFields({
               onSample={(sample) => onChange({ ...draft, sample })}
               fetchUrl={draft.url}
             />
-            <span className="bld-hint">Extra values per item (a level, a note) can be added on the source once it's added.</span>
           </div>
-        </>
       )}
-      {option.type === "json_api" && (
+      {more && option.type === "json_api" && (
         <Labeled
           label={
             <>

@@ -17,6 +17,7 @@
   --bld-focus: rgba(99, 143, 145, 0.28);
   --bld-shadow: 0 1px 0 rgba(255, 255, 255, 0.75) inset, 0 14px 36px -22px rgba(53, 89, 107, 0.5);
   --bld-danger: #8e4f3c;
+  --bld-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 /* Type */
@@ -134,13 +135,28 @@
   padding: 0.55rem 1.1rem;
   font-size: 14px;
   font-weight: 700;
-  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.15s, box-shadow 0.15s, color 0.15s;
+  transition: transform 160ms var(--bld-ease-out), background-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
 }
-:where(.bld) .bld-btn:not(:disabled):hover {
-  transform: translateY(-1px);
+@media (hover: hover) and (pointer: fine) {
+  :where(.bld) .bld-btn:not(:disabled):hover {
+    transform: translateY(-1px);
+  }
 }
-:where(.bld) .bld-btn:not(:disabled):active {
-  transform: translateY(0);
+/* Pressables answer the press: a small scale-down, never from or to nothing. */
+:where(.bld) .bld-btn:not(:disabled):active,
+:where(.bld) .bld-press:active {
+  transform: scale(0.97);
+}
+:where(.bld) .bld-press {
+  transition: transform 160ms var(--bld-ease-out), background-color 150ms ease, color 150ms ease;
+}
+/* Disclosure chevron: points right when closed, down when open. */
+:where(.bld) .bld-chevron {
+  transform: rotate(-90deg);
+  transition: transform 200ms var(--bld-ease-out);
+}
+:where(.bld) .bld-chevron.is-open {
+  transform: rotate(0deg);
 }
 :where(.bld) .bld-btn:disabled {
   cursor: not-allowed;
@@ -226,6 +242,10 @@
   from { opacity: 0; transform: translateY(-2px); }
   to { opacity: 1; transform: none; }
 }
+@keyframes bld-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 
 /* Choice cards (tier, visibility, label mode): the picked one carries a check and a ring. */
 :where(.bld) .bld-choice {
@@ -294,5 +314,24 @@
   }
   .bld .bld-btn {
     min-height: 44px;
+  }
+}
+
+/* Reduced motion: keep the fades that explain a change, drop the movement. */
+@media (prefers-reduced-motion: reduce) {
+  :where(.bld) .bld-btn,
+  :where(.bld) .bld-press,
+  :where(.bld) .bld-chevron {
+    transition-property: background-color, box-shadow, color;
+  }
+  :where(.bld) .bld-btn:not(:disabled):active,
+  :where(.bld) .bld-press:active {
+    transform: none;
+  }
+  :where(.bld) .bld-chevron {
+    transition: none;
+  }
+  :where(.bld) .bld-help-panel {
+    animation-name: bld-fade-in;
   }
 }
