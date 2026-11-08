@@ -27,9 +27,9 @@ float causticLayer(vec2 p, float t) {
   vec4 v = voronoi(p, t, 0.9, off, id);
   // Line width and brightness wander along the web so it reads hand-painted, not tiled.
   float wv = vnoise(p * 1.3 + 5.0);
-  float line = (1.0 - smoothstep(0.0, mix(0.035, 0.085, wv), v.x)) * mix(0.55, 1.0, vnoise(p * 0.9 - 2.0));
-  float glow = 1.0 - smoothstep(0.0, 0.22, v.x);
-  return line * 0.7 + glow * glow * 0.3;
+  float line = (1.0 - smoothstep(0.0, mix(0.045, 0.11, wv), v.x)) * mix(0.6, 1.0, vnoise(p * 0.9 - 2.0));
+  float glow = 1.0 - smoothstep(0.0, 0.3, v.x);
+  return line * 0.75 + glow * glow * 0.35;
 }
 
 float ring(float d, float r, float w) {
@@ -71,10 +71,10 @@ void main() {
   }
 
   // ---- base tint ----
-  vec3 cDeep = vec3(0.600, 0.808, 0.851);   // edges/corners: deeper turquoise, still light
-  vec3 cWater = vec3(0.663, 0.851, 0.886);  // #A9D9E2
-  vec3 cSky = vec3(0.796, 0.910, 0.933);    // #CBE8EE
-  vec3 cSun = vec3(0.905, 0.958, 0.955);    // sunlit highlight
+  vec3 cDeep = vec3(0.420, 0.760, 0.830);   // edges/corners: deeper turquoise, still light
+  vec3 cWater = vec3(0.561, 0.827, 0.871);  // #8FD3DE
+  vec3 cSky = vec3(0.714, 0.890, 0.918);    // #B6E3EA
+  vec3 cSun = vec3(0.880, 0.960, 0.955);    // sunlit highlight
   vec3 cCream = vec3(0.985, 0.975, 0.925);  // caustic lines
 
   vec2 q = (uv - 0.5) * vec2(uAspect, 1.0);
@@ -106,18 +106,23 @@ void main() {
   cs = cs * 0.8 + 0.22 * causticLayer(cp / 7.5 + vec2(-t * 0.012, t * 0.016) + 9.1, t * 0.48 + 2.0);
   // Patchy strength so the web breathes instead of tiling evenly.
   float breath = 0.55 + 0.6 * fbm(p * 0.035 + vec2(t * 0.01, -t * 0.008));
-  cs *= breath * (0.75 + 0.35 * sun + 0.3 * shaft) * (1.0 - edge * 0.35);
+  // Sun glitter: strongest in the upper half and along the light shaft, softer toward the bottom.
+  float upper = smoothstep(0.05, 0.95, uv.y);
+  cs *= breath * (0.45 + 0.55 * upper + 0.45 * sun + 0.6 * shaft) * (1.0 - edge * 0.25);
 
   // ---- grain (watercolor paper) ----
   float grain = fbm(p * 1.4) - 0.5;
   float fine = hash12(floor(gl_FragCoord.xy)) - 0.5;
 
-  float alpha = 0.44 + edge * 0.18 + sun * 0.22 + shaft * 0.2 + calm * 0.12;
+  // Clear water: a light, saturated tint so everything below stays visible; denser only where sunlit
+  // and in the calm centre behind the title.
+  float alpha = 0.20 + edge * 0.12 + sun * 0.30 + shaft * 0.16 + calm * 0.26;
   vec3 outCol = col;
-  float c = clamp(cs * 0.6 + rip * 1.0, 0.0, 1.0);
+  float c = clamp(cs * 0.8 * (1.0 - 0.4 * calm) + rip * 1.0, 0.0, 1.0);
   outCol = mix(outCol, cCream, c);
-  alpha = mix(alpha, 0.92, c);
-  outCol += grain * 0.035 + fine * 0.012;
+  alpha = mix(alpha, 0.9, c);
+  alpha += grain * 0.05;
+  outCol += grain * 0.03 + fine * 0.012;
 
   gl_FragColor = vec4(outCol, clamp(alpha, 0.0, 1.0));
 }
