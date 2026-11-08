@@ -1,0 +1,186 @@
+{
+  "scenario": "compiler_fleeing_tags",
+  "description": "Contrast run for the live path: the same tags track input as Flyway, but its meaning says phones stream GPS while their owners move away from a danger, so the Compiler proposes flow_source only (no dwell/density) and a modest max speed with the straight-line and constant-speed checks off.",
+  "steps": [
+    {
+      "expect": {
+        "tools_include": [
+          "list_operators",
+          "validate_spec",
+          "finalize_app"
+        ],
+        "reasoning": true
+      },
+      "response": {
+        "reasoning_content": "Same GPS track shape, but these pings come from people moving away from a danger: where they flee from matters, not where they linger. flow_source fits; dwell and density would mark where they end up. People on foot move a few m/s, so a modest max speed; people fleeing can move steadily and straight, so the straight-line and constant-speed checks stay off.",
+        "tool_calls": [
+          {
+            "id": "call_c1",
+            "name": "list_operators",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_c2",
+            "name": "validate_spec",
+            "arguments": {
+              "spec": {
+                "app_id": "flee-check",
+                "intent": "Find the places tagged birds use along their flyway: where they land, linger and gather, and how wind may carry their movement, and name those places from map evidence.",
+                "grid": {
+                  "cell_m": 50,
+                  "bbox": {
+                    "min_lat": 32.807034,
+                    "min_lon": -96.743877,
+                    "max_lat": 32.842966,
+                    "max_lon": -96.701123
+                  }
+                },
+                "inputs": [
+                  {
+                    "id": "tags",
+                    "kind": "push",
+                    "shape": "track",
+                    "tier": "flexible",
+                    "visibility": "authority",
+                    "meaning": "Phones stream their GPS position about every second while their owners move away from a danger.",
+                    "fields": [
+                      {
+                        "name": "tag_id",
+                        "type": "string",
+                        "required": false,
+                        "description": "Hardware tag identifier."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "flow_source",
+                        "weight": 1.0
+                      }
+                    ],
+                    "plausibility": {
+                      "max_speed_mps": 8,
+                      "jitter_m": 20,
+                      "flag_constant_speed": false,
+                      "flag_straight_line": false
+                    }
+                  }
+                ],
+                "verification": [
+                  {
+                    "method": "predictive_check",
+                    "priority": 1
+                  }
+                ],
+                "outputs": {
+                  "layers": [
+                    {
+                      "id": "score",
+                      "visibility": "authority"
+                    },
+                    {
+                      "id": "tags.flow_source",
+                      "visibility": "authority"
+                    }
+                  ],
+                  "hotspot_threshold": 0.5
+                },
+                "routing": {
+                  "enabled": false
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_c3",
+            "name": "finalize_app",
+            "arguments": {
+              "spec": {
+                "app_id": "flee-check",
+                "intent": "Find the places tagged birds use along their flyway: where they land, linger and gather, and how wind may carry their movement, and name those places from map evidence.",
+                "grid": {
+                  "cell_m": 50,
+                  "bbox": {
+                    "min_lat": 32.807034,
+                    "min_lon": -96.743877,
+                    "max_lat": 32.842966,
+                    "max_lon": -96.701123
+                  }
+                },
+                "inputs": [
+                  {
+                    "id": "tags",
+                    "kind": "push",
+                    "shape": "track",
+                    "tier": "flexible",
+                    "visibility": "authority",
+                    "meaning": "Phones stream their GPS position about every second while their owners move away from a danger.",
+                    "fields": [
+                      {
+                        "name": "tag_id",
+                        "type": "string",
+                        "required": false,
+                        "description": "Hardware tag identifier."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "flow_source",
+                        "weight": 1.0
+                      }
+                    ],
+                    "plausibility": {
+                      "max_speed_mps": 8,
+                      "jitter_m": 20,
+                      "flag_constant_speed": false,
+                      "flag_straight_line": false
+                    }
+                  }
+                ],
+                "verification": [
+                  {
+                    "method": "predictive_check",
+                    "priority": 1
+                  }
+                ],
+                "outputs": {
+                  "layers": [
+                    {
+                      "id": "score",
+                      "visibility": "authority"
+                    },
+                    {
+                      "id": "tags.flow_source",
+                      "visibility": "authority"
+                    }
+                  ],
+                  "hotspot_threshold": 0.5
+                },
+                "routing": {
+                  "enabled": false
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "content": "Proposed spec is ready for confirmation: tags (flexible track) -> flow_source 1.0, plausibility max 8 m/s, straight-line and constant-speed checks off; score authority-only; routing off.",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

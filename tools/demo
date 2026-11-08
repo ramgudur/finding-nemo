@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
 # One-command demo: backend (DEMO_MODE=1), frontend, create + activate the app, then the simulator.
-# Usage: tools/demo [campus-alert|flyway] [--fresh] [--no-sim]
-#   --fresh   start from an empty demo DB (keys change; the old ones stop working)
-#   --no-sim  bring everything up but don't start the simulator
+# Usage: tools/demo [campus-alert|flyway] [--fresh] [--no-sim] [--live|--live-llm [--confirm]]
+#   --fresh     start from an empty demo DB (keys change; the old ones stop working)
+#   --no-sim    bring everything up but don't start the simulator
+#   --live      compile from specs/compile/<app>.json via /compile, answered at once from the compile
+#               cache seeded with a recorded clean Compiler run (no key needed; tools/demo_server.py)
+#   --live-llm  the same, but the Compiler really calls Nemotron (NVIDIA_API_KEY, 30-100 s, can vary)
+#   --confirm   with --live/--live-llm: activate the proposal without waiting for the dev's review
 # Ctrl-C stops everything it started. Keys live in data/ (gitignored); never commit them.
 set -euo pipefail
 
 APP="campus-alert"
 FRESH=0
 SIM=1
+LIVE=0
+CONFIRM=0
 for a in "$@"; do
   case "$a" in
     campus-alert|flyway) APP="$a" ;;
     --fresh) FRESH=1 ;;
     --no-sim) SIM=0 ;;
-    -h|--help) sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --live) LIVE=1 ;;
+    --live-llm) LIVE=2 ;;
+    --confirm) CONFIRM=1 ;;
+    -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "demo: unknown argument '$a' (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -24,7 +33,13 @@ DATA="$ROOT/data"
 DB="$DATA/demo.db"
 KEYS="$DATA/demo-keys-$APP.json"
 API="http://127.0.0.1:8000"
+COMPILE_REQ="$ROOT/specs/compile/$APP.json"
 mkdir -p "$DATA"
+
+if [ "$CONFIRM" = 1 ] && [ "$LIVE" = 0 ]; then echo "demo: --confirm only goes with --live or --live-llm" >&2; exit 2; fi
+if [ "$LIVE" != 0 ] && [ ! -f "$COMPILE_REQ" ]; then
+  echo "demo: no compile request for $APP ($COMPILE_REQ); --live works for: flyway" >&2; exit 2
+fi
 
 PY="$ROOT/backend/.venv/Scripts/python"
 [ -x "$PY" ] || PY="$ROOT/backend/.venv/bin/python"
@@ -43,8 +58,14 @@ trap cleanup EXIT INT TERM
 json() { "$PY" -c "import json,sys; print(json.load(sys.stdin)$1)"; }
 
 echo "demo: backend on :8000 (DEMO_MODE=1, db $DB)"
-( cd "$ROOT/backend" && DEMO_MODE=1 SQLITE_PATH="$DB" exec "$PY" -m uvicorn app.main:app --port 8000 ) \
-  > "$DATA/demo-backend.log" 2>&1 &
+if [ "$LIVE" = 1 ]; then  # the real app, its compile cache seeded from the recorded run
+  ( cd "$ROOT/backend" && DEMO_MODE=1 SQLITE_PATH="$DB" DEMO_SEED_COMPILE="$APP" \
+      exec "$PY" -m uvicorn --factory --app-dir "$ROOT/tools" demo_server:app --port 8000 ) \
+    > "$DATA/demo-backend.log" 2>&1 &
+else
+  ( cd "$ROOT/backend" && DEMO_MODE=1 SQLITE_PATH="$DB" exec "$PY" -m uvicorn app.main:app --port 8000 ) \
+    > "$DATA/demo-backend.log" 2>&1 &
+fi
 PIDS+=($!)
 echo "demo: frontend on :5173 (also on your LAN IP for phones)"
 ( cd "$ROOT/frontend" && exec npx vite --port 5173 --strictPort ) > "$DATA/demo-frontend.log" 2>&1 &
@@ -53,20 +74,78 @@ PIDS+=($!)
 for _ in $(seq 1 60); do curl -sf "$API/v1/health" >/dev/null && break; sleep 0.5; done
 curl -sf "$API/v1/health" >/dev/null || { echo "demo: backend didn't start; see data/demo-backend.log" >&2; exit 1; }
 
-code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/v1/apps" -H "Content-Type: application/json" \
-  --data-binary "@$ROOT/specs/$APP.json")
-case "$code" in
-  201) echo "demo: created $APP" ;;
-  409) echo "demo: $APP already exists" ;;
-  *) echo "demo: creating $APP failed (HTTP $code)" >&2; exit 1 ;;
-esac
-if [ ! -s "$KEYS" ]; then
+activate() {
   if ! curl -sf -X POST "$API/v1/apps/$APP/activate" > "$KEYS.tmp"; then
     rm -f "$KEYS.tmp"
     echo "demo: $APP is active but its keys aren't in $KEYS; rerun with --fresh" >&2; exit 1
   fi
   mv "$KEYS.tmp" "$KEYS"
+}
+
+if [ "$LIVE" != 0 ]; then
+  # Live path (build step 7): the Compiler proposes the spec from the dev's intent + raw inputs.
+  if [ -s "$KEYS" ]; then
+    echo "demo: $APP is already compiled and active (keys in $KEYS); use --fresh to compile again"
+  else
+    if [ "$LIVE" = 1 ]; then
+      echo "demo: compiling $APP from specs/compile/$APP.json (recorded clean run, served from the compile cache)..."
+    else
+      echo "demo: compiling $APP live from specs/compile/$APP.json (Nemotron Super, reasoning on; 30-100 s)..."
+    fi
+    OUT="$DATA/demo-compiled-$APP.json"
+    code=$(curl -s -o "$OUT" -w "%{http_code}" --max-time 420 -X POST "$API/v1/apps/$APP/compile" \
+      -H "Content-Type: application/json" --data-binary "@$COMPILE_REQ" || true)
+    case "$code" in
+      200) echo "demo: the Compiler proposed a spec (pending_confirmation):" ;;
+      409) echo "demo: $APP is already active" ;;
+      503) echo "demo: compile skipped: $(cat "$OUT") (no NVIDIA_API_KEY in backend/.env, or rate budget). Fallback: tools/demo $APP --fresh --live" >&2; exit 1 ;;
+      *) echo "demo: compile failed (HTTP ${code:-timeout}): $(cat "$OUT" 2>/dev/null). Fallback: tools/demo $APP --fresh --live" >&2; exit 1 ;;
+    esac
+    if [ "$code" = 200 ]; then
+      "$PY" - "$OUT" <<'EOF'
+import json, sys
+s = json.load(open(sys.argv[1], encoding="utf-8"))
+for i in s["inputs"]:
+    ops = ", ".join(f"{o['op']} {o['weight']}" for o in i["operators"])
+    p = i.get("plausibility")
+    pl = f"; plausibility max {p['max_speed_mps']} m/s, straight-line {p['flag_straight_line']}, constant-speed {p['flag_constant_speed']}" if p else ""
+    print(f"    {i['id']:>8}: {i['kind']} {i['shape']}, {i['tier']}, {i['visibility']} -> {ops}{pl}")
+labels = [lb["label"] for lb in s["outputs"]["poi_labels"]["label_set"]]
+print(f"    labels: {', '.join(labels) or 'none'}; routing {'on' if s['routing']['enabled'] else 'off'}")
+EOF
+      if [ "$CONFIRM" = 1 ]; then
+        activate
+        echo "demo: --confirm: activated the proposal (a dev-confirm Change is recorded)"
+      else
+        cat <<EOF
+
+  Review the proposal above (it is pending_confirmation), then confirm it as the dev:
+    - press Enter here to confirm from the terminal; or
+    - in the Builder (http://localhost:5173/, app id $APP): enter the intent and inputs from
+      specs/compile/$APP.json, press Compile (a fresh compile, ~100 s: the Builder form has no
+      field descriptions, so it is not a cache hit), review, "Confirm and activate", and paste
+      the keys it shows here.
+EOF
+        read -r -p "  Confirmed in the Builder? Paste its ingest key (or just press Enter to confirm here): " PASTED
+        if [ -n "$PASTED" ]; then
+          read -r -p "  ...and its authority key: " PASTED_AUTH
+          printf '{"app_id": "%s", "ingest_key": "%s", "authority_key": "%s"}\n' "$APP" "$PASTED" "$PASTED_AUTH" > "$KEYS"
+        else
+          activate
+        fi
+      fi
+    fi
+  fi
+else
+  code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/v1/apps" -H "Content-Type: application/json" \
+    --data-binary "@$ROOT/specs/$APP.json")
+  case "$code" in
+    201) echo "demo: created $APP" ;;
+    409) echo "demo: $APP already exists" ;;
+    *) echo "demo: creating $APP failed (HTTP $code)" >&2; exit 1 ;;
+  esac
 fi
+[ -s "$KEYS" ] || activate
 INGEST=$(json "['ingest_key']" < "$KEYS")
 AUTH=$(json "['authority_key']" < "$KEYS")
 

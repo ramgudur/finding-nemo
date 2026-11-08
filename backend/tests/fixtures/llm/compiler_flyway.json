@@ -1,0 +1,357 @@
+{
+  "scenario": "compiler_flyway",
+  "description": "Compiler run on the Flyway intent and raw inputs (specs/compile/flyway.json, no tiers/operators): the tags track's meaning says birds land and linger, so it proposes dwell + density (not flow_source as for Campus Alert's panic track), bird plausibility, a stiff Open-Meteo wind field, the stopover label set, an authority-only score and no routing; then validates and finalizes.",
+  "steps": [
+    {
+      "expect": {
+        "tools_include": [
+          "list_operators",
+          "validate_spec",
+          "finalize_app"
+        ],
+        "reasoning": true
+      },
+      "response": {
+        "reasoning_content": "The tags are GPS tracks, but the dev says birds land and linger at places they use and fly fast between them. Where pings pile up over time is the point, so dwell (with density as support) fits, not flow_source. Birds fly fast and straight, so plausibility needs a high max speed and the straight-line and constant-speed checks off. Wind is a pull field from a public weather API: stiff, Open-Meteo preset, a vector field that may shift the density layer.",
+        "tool_calls": [
+          {
+            "id": "call_f1",
+            "name": "list_operators",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "reasoning_content": "dwell takes track input with radius_m, min_dwell_s and window_s; field takes vector fields. Validate the proposal before finalizing.",
+        "tool_calls": [
+          {
+            "id": "call_f2",
+            "name": "validate_spec",
+            "arguments": {
+              "spec": {
+                "app_id": "flyway",
+                "intent": "Find the places tagged birds use along their flyway: where they land, linger and gather, and how wind may carry their movement, and name those places from map evidence.",
+                "grid": {
+                  "cell_m": 50,
+                  "bbox": {
+                    "min_lat": 32.807034,
+                    "min_lon": -96.743877,
+                    "max_lat": 32.842966,
+                    "max_lon": -96.701123
+                  }
+                },
+                "inputs": [
+                  {
+                    "id": "tags",
+                    "kind": "push",
+                    "shape": "track",
+                    "tier": "flexible",
+                    "visibility": "authority",
+                    "meaning": "GPS tags on birds report a position about every minute. Birds land and linger at places they use (water, roosts, feeding grounds), then fly between them fast and in fairly straight lines.",
+                    "fields": [
+                      {
+                        "name": "tag_id",
+                        "type": "string",
+                        "required": false,
+                        "description": "Hardware tag identifier."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "dwell",
+                        "weight": 0.7,
+                        "radius_m": 60,
+                        "min_dwell_s": 600,
+                        "window_s": 3600,
+                        "half_life_s": 1800,
+                        "sigma_m": 60,
+                        "cluster_m": 80
+                      },
+                      {
+                        "op": "density",
+                        "weight": 0.3,
+                        "half_life_s": 1800,
+                        "sigma_m": 60
+                      }
+                    ],
+                    "plausibility": {
+                      "max_speed_mps": 30,
+                      "jitter_m": 40,
+                      "flag_constant_speed": false,
+                      "flag_straight_line": false
+                    }
+                  },
+                  {
+                    "id": "wind",
+                    "kind": "pull",
+                    "shape": "field",
+                    "tier": "stiff",
+                    "visibility": "public",
+                    "meaning": "Surface wind over the area: speed and the direction it comes from. Wind may carry where birds drift.",
+                    "fields": [
+                      {
+                        "name": "wind_speed_10m",
+                        "type": "number",
+                        "required": true,
+                        "description": "m/s"
+                      },
+                      {
+                        "name": "wind_direction_10m",
+                        "type": "number",
+                        "required": true,
+                        "description": "compass degrees the wind comes from"
+                      }
+                    ],
+                    "connector": {
+                      "type": "json_api",
+                      "preset": "open_meteo",
+                      "poll_s": 900,
+                      "config": {
+                        "latitude": 32.825,
+                        "longitude": -96.7225
+                      }
+                    },
+                    "operators": [
+                      {
+                        "op": "field",
+                        "weight": 0.0,
+                        "value_field": "wind_speed_10m",
+                        "vector_speed_field": "wind_speed_10m",
+                        "vector_dir_field": "wind_direction_10m",
+                        "vector_dir_convention": "from",
+                        "shift_layer": "tags.density",
+                        "shift_horizon_s": 1800
+                      }
+                    ]
+                  }
+                ],
+                "verification": [
+                  {
+                    "method": "predictive_check",
+                    "priority": 1
+                  },
+                  {
+                    "method": "cross_input_agreement",
+                    "priority": 2
+                  }
+                ],
+                "outputs": {
+                  "layers": [
+                    {
+                      "id": "score",
+                      "visibility": "authority"
+                    },
+                    {
+                      "id": "tags.dwell",
+                      "visibility": "authority"
+                    },
+                    {
+                      "id": "tags.density",
+                      "visibility": "authority"
+                    },
+                    {
+                      "id": "wind.field",
+                      "visibility": "public"
+                    }
+                  ],
+                  "poi_labels": {
+                    "mode": "auto",
+                    "min_confidence": 0.6,
+                    "label_set": [
+                      {
+                        "label": "watering hole"
+                      },
+                      {
+                        "label": "roost"
+                      },
+                      {
+                        "label": "feeding ground"
+                      },
+                      {
+                        "label": "stopover"
+                      }
+                    ]
+                  },
+                  "hotspot_threshold": 0.5
+                },
+                "routing": {
+                  "enabled": false
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_f3",
+            "name": "finalize_app",
+            "arguments": {
+              "spec": {
+                "app_id": "flyway",
+                "intent": "Find the places tagged birds use along their flyway: where they land, linger and gather, and how wind may carry their movement, and name those places from map evidence.",
+                "grid": {
+                  "cell_m": 50,
+                  "bbox": {
+                    "min_lat": 32.807034,
+                    "min_lon": -96.743877,
+                    "max_lat": 32.842966,
+                    "max_lon": -96.701123
+                  }
+                },
+                "inputs": [
+                  {
+                    "id": "tags",
+                    "kind": "push",
+                    "shape": "track",
+                    "tier": "flexible",
+                    "visibility": "authority",
+                    "meaning": "GPS tags on birds report a position about every minute. Birds land and linger at places they use (water, roosts, feeding grounds), then fly between them fast and in fairly straight lines.",
+                    "fields": [
+                      {
+                        "name": "tag_id",
+                        "type": "string",
+                        "required": false,
+                        "description": "Hardware tag identifier."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "dwell",
+                        "weight": 0.7,
+                        "radius_m": 60,
+                        "min_dwell_s": 600,
+                        "window_s": 3600,
+                        "half_life_s": 1800,
+                        "sigma_m": 60,
+                        "cluster_m": 80
+                      },
+                      {
+                        "op": "density",
+                        "weight": 0.3,
+                        "half_life_s": 1800,
+                        "sigma_m": 60
+                      }
+                    ],
+                    "plausibility": {
+                      "max_speed_mps": 30,
+                      "jitter_m": 40,
+                      "flag_constant_speed": false,
+                      "flag_straight_line": false
+                    }
+                  },
+                  {
+                    "id": "wind",
+                    "kind": "pull",
+                    "shape": "field",
+                    "tier": "stiff",
+                    "visibility": "public",
+                    "meaning": "Surface wind over the area: speed and the direction it comes from. Wind may carry where birds drift.",
+                    "fields": [
+                      {
+                        "name": "wind_speed_10m",
+                        "type": "number",
+                        "required": true,
+                        "description": "m/s"
+                      },
+                      {
+                        "name": "wind_direction_10m",
+                        "type": "number",
+                        "required": true,
+                        "description": "compass degrees the wind comes from"
+                      }
+                    ],
+                    "connector": {
+                      "type": "json_api",
+                      "preset": "open_meteo",
+                      "poll_s": 900,
+                      "config": {
+                        "latitude": 32.825,
+                        "longitude": -96.7225
+                      }
+                    },
+                    "operators": [
+                      {
+                        "op": "field",
+                        "weight": 0.0,
+                        "value_field": "wind_speed_10m",
+                        "vector_speed_field": "wind_speed_10m",
+                        "vector_dir_field": "wind_direction_10m",
+                        "vector_dir_convention": "from",
+                        "shift_layer": "tags.density",
+                        "shift_horizon_s": 1800
+                      }
+                    ]
+                  }
+                ],
+                "verification": [
+                  {
+                    "method": "predictive_check",
+                    "priority": 1
+                  },
+                  {
+                    "method": "cross_input_agreement",
+                    "priority": 2
+                  }
+                ],
+                "outputs": {
+                  "layers": [
+                    {
+                      "id": "score",
+                      "visibility": "authority"
+                    },
+                    {
+                      "id": "tags.dwell",
+                      "visibility": "authority"
+                    },
+                    {
+                      "id": "tags.density",
+                      "visibility": "authority"
+                    },
+                    {
+                      "id": "wind.field",
+                      "visibility": "public"
+                    }
+                  ],
+                  "poi_labels": {
+                    "mode": "auto",
+                    "min_confidence": 0.6,
+                    "label_set": [
+                      {
+                        "label": "watering hole"
+                      },
+                      {
+                        "label": "roost"
+                      },
+                      {
+                        "label": "feeding ground"
+                      },
+                      {
+                        "label": "stopover"
+                      }
+                    ]
+                  },
+                  "hotspot_threshold": 0.5
+                },
+                "routing": {
+                  "enabled": false
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "content": "Proposed spec is ready for confirmation: tags (flexible track) -> dwell 0.7 + density 0.3 with bird plausibility (30 m/s, straight-line and constant-speed checks off); wind (stiff, open_meteo) -> vector field shifting tags.density, weight 0; labels watering hole, roost, feeding ground, stopover; score authority-only; routing off.",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

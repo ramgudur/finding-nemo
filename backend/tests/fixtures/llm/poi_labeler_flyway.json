@@ -1,0 +1,75 @@
+{
+  "scenario": "poi_labeler_flyway",
+  "description": "POI Labeler run on Flyway after the replay: finds persistent unlabeled dwell candidates, checks nearby map features for the top one, and labels it a stopover from the app's label_set.",
+  "steps": [
+    {
+      "expect": {
+        "tools_include": [
+          "get_poi_candidates",
+          "find_candidates",
+          "osm_features_near",
+          "create_poi"
+        ],
+        "reasoning": false
+      },
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_y1",
+            "name": "find_candidates",
+            "arguments": {
+              "source": "dwell_clusters",
+              "min_persisted_ticks": 3,
+              "unlabeled_only": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_y2",
+            "name": "osm_features_near",
+            "arguments": {
+              "candidate_id": "${tool_result:call_y1:candidates.0.id}",
+              "radius_m": 150
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_y3",
+            "name": "create_poi",
+            "arguments": {
+              "candidate_id": "${tool_result:call_y1:candidates.0.id}",
+              "label": "stopover",
+              "confidence": 0.74,
+              "evidence": [
+                {
+                  "kind": "layer_stats",
+                  "text": "tagged birds dwell here for tens of minutes, then leave fast toward another cluster"
+                },
+                {
+                  "kind": "osm",
+                  "text": "lake shoreline within 150 m"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "content": "Labeled 1 candidate as a stopover.",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

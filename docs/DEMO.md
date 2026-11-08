@@ -24,6 +24,7 @@ On Windows, run the scripts from Git Bash.
 tools/demo campus-alert          # or: tools/demo flyway
 tools/demo campus-alert --fresh  # empty demo DB and new keys
 tools/demo flyway --no-sim       # bring it up without running the simulator
+tools/demo flyway --fresh --live # the Compiler's spec instead of specs/flyway.json (see "Live path")
 ```
 
 What `tools/demo` does:
@@ -67,7 +68,40 @@ Wildlife around White Rock Lake, Dallas: 12 tagged birds dwell at three shore st
 - **Plausibility:** fast, straight, steady flight is normal for birds. The spec's `plausibility` turns those spoof checks off, so no bird is flagged.
 - **Visibility:** `score` is authority-only because it derives from private tag layers. Only `wind.field` is public.
 - **Wind:** a pull input (Open-Meteo preset). It needs the connector engine (#80); until then the wind layer is empty.
-- **Live compile:** compiling the same GPS input into a different operator needs the Compiler (#81). Show the hand-written spec until then.
+- **Live compile:** see "Live path (step 7)" below to have the Compiler build this spec live.
+
+## Live path (step 7): Flyway compiled by the Compiler
+
+The same app, but the spec comes from the Compiler instead of `specs/flyway.json`.
+
+**At the table, don't compile live.** Live Nemotron compiles take 30–100 s and vary from run to run (the model sometimes adds `flow_source` to the tags anyway). So `--live` replays a recorded clean run through the compile cache. The default needs no key and answers at once. Use `--live-llm` only when you explicitly want the real model.
+
+```bash
+tools/demo flyway --fresh --live                # recorded clean compile via the cache; wait for the dev to confirm
+tools/demo flyway --fresh --live --confirm      # same, activate right away (rehearsals)
+tools/demo flyway --fresh --live-llm            # really call Nemotron (NVIDIA_API_KEY, 30-100 s, output varies)
+```
+
+1. **Compile.** `tools/demo` POSTs `specs/compile/flyway.json` to `POST /v1/apps/flyway/compile`. That file holds only the dev's intent, grid and raw inputs: `tags` (push track, "birds land and linger...") and `wind` (pull field). It has no tiers, operators or plausibility.
+   - With `--live`, the backend starts through `tools/demo_server.py`. That is the real app, but its compile cache (keyed by a hash of intent + inputs, `agents/compiler.py`) is seeded with the `finalize_app` spec from the recorded run `backend/tests/fixtures/llm/compiler_flyway.json`. `/compile` is then a cache hit: the same `finalize_app` guards and a Compiler trace entry ("cache hit, no LLM"), with no model call.
+   - With `--live-llm`, the backend is the plain app, and the Compiler (Super, reasoning on) runs for real.
+2. **What to show.** The terminal prints the proposal:
+   - `tags` becomes **dwell 0.7 + density 0.3**, with no `flow_source`. It is flexible, with bird plausibility: max 30 m/s, straight-line and constant-speed checks off.
+   - `wind` becomes a stiff `field` on the Open-Meteo preset.
+   - POI labels are on (watering hole, roost, feeding ground, stopover). `score` is authority-only and routing is off.
+
+   The point: **the same `tags` track input, with the meaning "phones stream GPS while their owners move away from a danger", compiles to `flow_source` 1.0 only** (recorded as `compiler_fleeing_tags.json`), just as Campus Alert's panic track does. The Compiler picks the operator from the meaning, not the shape.
+3. **Review and confirm.** The spec waits at `pending_confirmation`. Either:
+   - press Enter in the terminal to confirm the printed proposal; or
+   - to show the Builder UI, open `http://localhost:5173/` (app id `flyway`), enter the intent and inputs, and press **Compile**. The Builder form has no field descriptions, so this is a different request: not a cache hit, and a real LLM compile. Review each tier and visibility, press **Confirm and activate**, and paste the keys it shows into the terminal.
+
+   Either way, confirmation writes the `spec_confirm` Change with `actor=dev`.
+4. **Replay.** The Flyway sim runs at 20x with `--follow-clock`, exactly as in Demo 2.
+5. **POI Labeler (needs `NVIDIA_API_KEY`).** Once a dwell candidate has persisted 3 ticks (and at least every 60 s after that), the POI Labeler (Lightning) checks nearby map features and names the stopovers from the label set, for example "stopover" or "watering hole". Show its `create_poi` call in the console's agent trace. The POIs are authority-only, because their candidates come from authority-only tag layers. Without a key, it writes a skipped entry and the map demo carries on.
+
+**Fallbacks:**
+- **`--live-llm` fails** (no key, rate budget, timeout): use `tools/demo flyway --fresh --live` (the recorded compile) or plain `tools/demo flyway --fresh` (`specs/flyway.json`, the same spec).
+- **Show the whole recorded run offline:** compile, confirm, replay, then a POI labeled at a true stopover. Run `cd backend && .venv/Scripts/python -m pytest -q tests/test_e2e_live_path.py`.
 
 ## Phone over a tunnel (test before judging)
 
@@ -112,6 +146,5 @@ The end-user page must work on a phone over a tunnel.
 - **End-user instructions page:** step 6, #94/#95.
 - **Connector engine (RSS news, Open-Meteo wind):** #80.
 - **Critic agent and triggers:** #92, in review.
-- **Compiler and live compile:** #81.
 
 None of these blocks the core map demo above.
