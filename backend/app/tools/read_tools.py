@@ -186,9 +186,11 @@ def _concat(batches: list[Events]) -> Events:
 
 
 def get_suspicious_users(ctx: ToolContext, args: WindowArgs) -> dict[str, Any]:
-    """Spoof flags over all inputs with user ids in the window. Flags, not verdicts."""
-    events = _concat(list(_window_events(ctx, args.window_s).values()))
-    suspects = trust_mod.suspicious_users(events)
+    """Spoof flags per input (with that input's plausibility limits), merged per user. Flags, not verdicts."""
+    by_input = _window_events(ctx, args.window_s)
+    events = _concat(list(by_input.values()))
+    plaus = {inp.id: inp.plausibility for inp in ctx.spec.inputs}
+    suspects = trust_mod.suspicious_users_by_input(by_input, plaus)  # each input's own limits
     out = trust_mod.summarize(suspects)
     for s in out["top"]:
         s["trust"] = _r(guards.current_trust(ctx, s["user_id"])[0], 3)

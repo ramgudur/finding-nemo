@@ -264,12 +264,9 @@ def test_override_ttl_from_spec_bounds_its_history():
     assert tick_app(rt, src, now=T0 + 121, clock=SimClock(T0 + 121)).override.max() == 0.0
 
 
-def test_declared_operator_horizon_is_used(monkeypatch):
-    info = registry.OPERATORS["density"]
-    patched = type("Info", (), {**{k: getattr(info, k) for k in info.__dataclass_fields__}})()
-    patched.horizon_s = lambda p: 8 * p.half_life_s
-    monkeypatch.setitem(registry.OPERATORS, "density", patched)
-    rt = AppRuntime(spec())  # density half_life_s = 60
+def test_declared_operator_horizon_is_used():
+    rt = AppRuntime(spec())  # density: half_life_s = 60, max_age_half_lives default 8
+    assert rt.input_lookback("crowd", LOOKBACK_S) == registry.horizon_s("density", rt.op_params["crowd.density"])
     assert rt.input_lookback("crowd", LOOKBACK_S) == 480
 
 
