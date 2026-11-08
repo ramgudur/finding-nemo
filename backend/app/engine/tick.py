@@ -38,6 +38,7 @@ from app.core.models import AppSpec, Candidate, Hotspot, Visibility
 from app.engine.candidates import registry as candidates
 from app.engine.combine import combine
 from app.engine.grid import Grid
+from app.engine.layer_cache import DTYPE as CACHE_DTYPE
 from app.engine.layer_cache import LayerCache
 from app.engine.operators import field as field_op
 from app.engine.operators import registry
@@ -49,6 +50,11 @@ TICK_S = 2.0
 LOOKBACK_S = 900.0  # default read window for operators that don't declare a horizon
 ALL_HISTORY = -1e300  # 'since' for layers that need every event (finite, so any store can compare it)
 CACHE_TICKS = 300  # 10 min of 2 s ticks: the backtest replay window
+# Memory budget for one live app's layer cache. On a big grid with many layers, 300 full frames
+# would not fit (500 x 500 cells x 5 layers is ~1.7 GB), so the live engine keeps fewer frames,
+# spaced further apart, over the same 10-minute span. Backtest replays don't use this budget.
+CACHE_BUDGET_BYTES = 384 * 2**20
+MIN_CACHE_TICKS = 2
 HOTSPOT_MAX = 20
 HOTSPOT_MATCH_CELLS = 3.0  # a hotspot within this many cells of last tick's keeps its id (scales with cell_m)
 CONTRIBUTOR_SHARE = 0.10  # share of a hotspot's score mass to be listed in contributing_layers
@@ -144,7 +150,7 @@ class TickResult:
 class AppRuntime:
     """Everything the tick keeps for one app: grid, layer plan, weights, cache, last result."""
 
-    def __init__(self, spec: AppSpec, cache_ticks: int = CACHE_TICKS) -> None:
+    def __init__(self, spec: AppSpec, cache_ticks: int = CACHE_TICKS, cache_budget_bytes: int | None = None) -> None:
         if spec.status != "active":
             raise ValueError(f"app {spec.app_id!r} is {spec.status!r}; only active (dev-confirmed) specs tick")
         self.spec = spec
@@ -166,7 +172,10 @@ class AppRuntime:
                 self.weights[o.layer_id] = float(o.weight)
         self.weighted_ids = tuple(li.layer_id for li in self.layers if not li.is_override)
         self.noise_floors = {li.layer_id: li.noise_floor for li in self.layers}
-        self.cache = LayerCache(cache_ticks, self.weighted_ids, self.grid.shape)
+        self.cache_min_gap_s, capacity = cache_plan(
+            len(self.weighted_ids), self.grid.shape, cache_ticks, cache_budget_bytes
+        )
+        self.cache = LayerCache(capacity, self.weighted_ids, self.grid.shape)
         self.last: TickResult | None = None
         self._next_hotspot = 0
         self.candidate_tracker = candidates.CandidateTracker()
@@ -191,6 +200,23 @@ class AppRuntime:
         return f"h{self._next_hotspot}"
 
 
+def cache_frame_bytes(n_layers: int, shape: tuple[int, int]) -> int:
+    """Bytes one cached tick takes: the normalized stack, the override mask and its time."""
+    return (n_layers + 1) * int(shape[0]) * int(shape[1]) * np.dtype(CACHE_DTYPE).itemsize + 8
+
+
+def cache_plan(n_layers: int, shape: tuple[int, int], cache_ticks: int, budget_bytes: int | None) -> tuple[float, int]:
+    """``(min_gap_s, capacity)`` for a layer cache. Without a budget, or when ``cache_ticks`` frames
+    fit in it: every tick is kept (gap 0). Otherwise fewer frames, spaced so they still span
+    ``cache_ticks * TICK_S`` seconds."""
+    if budget_bytes is None:
+        return 0.0, cache_ticks
+    fit = max(MIN_CACHE_TICKS, budget_bytes // cache_frame_bytes(n_layers, shape))
+    if fit >= cache_ticks:
+        return 0.0, cache_ticks
+    return cache_ticks * TICK_S / fit, int(fit)
+
+
 def hotspot_visibility(spec: AppSpec, contributing: Sequence[str]) -> Visibility:
     """Public only if some layers contribute and every one of them is a public output layer;
     otherwise authority (the safe default: override-only or unknown provenance stays private)."""
@@ -199,27 +225,48 @@ def hotspot_visibility(spec: AppSpec, contributing: Sequence[str]) -> Visibility
 
 
 def _connected_components(mask: np.ndarray) -> list[np.ndarray]:
-    """8-connected components of a boolean [H, W] mask, as arrays of flat indices."""
+    """8-connected components of a boolean [H, W] mask, as arrays of flat indices (ascending).
+
+    Components come in row-major order of their first cell. Vectorized union-find (hook each
+    edge's larger root onto the smaller, then pointer-jump), so a grid-sized component at
+    250,000 cells costs a few numpy passes instead of a Python loop per cell.
+    """
+    mask = np.asarray(mask, dtype=bool)
     h, w = mask.shape
-    seen = np.zeros_like(mask, dtype=bool)
-    comps: list[np.ndarray] = []
-    for r0, c0 in zip(*np.nonzero(mask), strict=True):
-        if seen[r0, c0]:
-            continue
-        stack = [(int(r0), int(c0))]
-        seen[r0, c0] = True
-        cells = []
-        while stack:
-            r, c = stack.pop()
-            cells.append(r * w + c)
-            for dr in (-1, 0, 1):
-                for dc in (-1, 0, 1):
-                    rr, cc = r + dr, c + dc
-                    if 0 <= rr < h and 0 <= cc < w and mask[rr, cc] and not seen[rr, cc]:
-                        seen[rr, cc] = True
-                        stack.append((rr, cc))
-        comps.append(np.array(cells, dtype=np.intp))
-    return comps
+    cells = np.flatnonzero(mask)
+    if not len(cells):
+        return []
+    idx = np.arange(h * w, dtype=np.intp).reshape(h, w)
+    pairs = []
+    for a, b in (
+        (np.s_[:, :-1], np.s_[:, 1:]),  # right
+        (np.s_[:-1, :], np.s_[1:, :]),  # down
+        (np.s_[:-1, :-1], np.s_[1:, 1:]),  # down-right
+        (np.s_[:-1, 1:], np.s_[1:, :-1]),  # down-left
+    ):
+        both = mask[a] & mask[b]
+        pairs.append((idx[a][both], idx[b][both]))
+    ea = np.concatenate([p[0] for p in pairs])
+    eb = np.concatenate([p[1] for p in pairs])
+    parent = np.arange(h * w, dtype=np.intp)
+    while len(ea):
+        ra, rb = parent[ea], parent[eb]
+        lo, hi = np.minimum(ra, rb), np.maximum(ra, rb)
+        live = lo != hi
+        if not live.any():
+            break
+        np.minimum.at(parent, hi[live], lo[live])
+        while True:  # pointer jumping: every node points straight at its root
+            nxt = parent[parent]
+            if np.array_equal(nxt, parent):
+                break
+            parent = nxt
+        ea, eb = ea[live], eb[live]
+    roots = parent[cells]  # each component's root is its smallest flat index
+    order = np.argsort(roots, kind="stable")
+    roots, cells = roots[order], cells[order]
+    starts = np.flatnonzero(np.r_[True, roots[1:] != roots[:-1]])
+    return [np.asarray(c, dtype=np.intp) for c in np.split(cells, starts[1:])]
 
 
 def find_hotspots(
@@ -395,7 +442,9 @@ def tick_app(
         score, normalized, ov = override.copy(), np.zeros((0, *grid.shape)), override
 
     last = rt.cache.latest()
-    if last is None or now > float(last.t[0]):  # a paused clock doesn't duplicate ticks
+    # A paused clock doesn't duplicate ticks. Under a memory budget, frames are spaced
+    # cache_min_gap_s apart (half a tick of slack for loop jitter).
+    if last is None or (now > float(last.t[0]) and now - float(last.t[0]) >= rt.cache_min_gap_s - TICK_S / 2):
         rt.cache.push(now, normalized, ov)
 
     hotspots = find_hotspots(rt, score, normalized, w, override_layers=override_layers)
@@ -417,6 +466,15 @@ def tick_app(
         candidates=cands,
     )
     rt.last = result
+    if result.elapsed_ms > TICK_S * 1000.0:
+        log.warning(
+            "tick for app %s took %.0f ms (over the %.0f s tick); grid %s, %d layers",
+            rt.spec.app_id,
+            result.elapsed_ms,
+            TICK_S,
+            grid.shape,
+            len(rt.layers),
+        )
     return result
 
 
@@ -458,7 +516,7 @@ class TickEngine:
         return self._clock or clock_mod.get_clock()
 
     def add_app(self, spec: AppSpec) -> AppRuntime:
-        rt = AppRuntime(spec)
+        rt = AppRuntime(spec, cache_budget_bytes=CACHE_BUDGET_BYTES)
         self.apps[spec.app_id] = rt
         return rt
 
