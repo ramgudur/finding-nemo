@@ -11,7 +11,8 @@ Physics model for the point estimate: each track is fitted with constant velocit
 (least-squares x(t), y(t)), so the line's anchor and heading use every ping instead of only the first
 and last. That averages position noise and resists tracks whose end points are off. `uncertainty_m`
 is the 1-sigma semi-major axis of the estimate's covariance (residual variance x inverse normal matrix).
-Benchmark: tests/bench_flow_source.py.
+`estimator="consensus"` swaps the Cauchy fit for a consensus estimator (see consensus_intersection).
+Benchmark of both: tests/bench_flow_source.py.
 
 Needs tracks (several pings per entity), not single taps.
 """
@@ -44,8 +45,15 @@ class FlowSourceParams(OperatorParams):
     min_move_m: float = Field(default=20.0, ge=0)  # below this a user is stationary: no flow signal
     min_tracks: int = Field(default=3, ge=2)
     max_move_weight_m: float = Field(default=120.0, gt=0)  # caps "faster movers = stronger signal"
-    robust_scale_m: float = Field(default=40.0, gt=0)
+    robust_scale_m: float = Field(default=40.0, gt=0)  # "wls" only
     iters: int = Field(default=8, ge=1)
+    # "wls": Cauchy-reweighted least squares from the weighted mean (default).
+    # "consensus": consensus start + heading-spread noise model + Tukey refinement. Better against
+    # noisy coordinated fake tracks and with many tracks, but with a heavier tail when uniform fake
+    # flight reaches ~25% of tracks (tests/bench_flow_source.py), so it is opt-in.
+    estimator: Literal["wls", "consensus"] = "wls"
+    consensus_tracks: int = Field(default=60, ge=3)  # longest tracks whose pairwise crossings seed the start
+    opposite_weight: float = Field(default=0.1, ge=0, le=1)  # weight of tracks moving against the kind
 
 
 def _sorted_tracks(uid: np.ndarray, t: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -140,6 +148,137 @@ def backproject(
     return p, kind, spread, uncertainty
 
 
+# -- consensus estimator ------------------------------------------------------------------
+
+TUKEY_C = 4.685  # biweight cutoff (95% efficiency under Gaussian noise)
+CAUCHY_C = 2.385
+HEADING_Q = 0.5  # quantile of angular residuals used for the heading spread
+MAX_HEADING_RAD = np.radians(45.0)
+
+
+def _half_normal_quantile(q: float) -> float:
+    """z with P(|N(0,1)| < z) = q (bisection; no scipy)."""
+    from math import erf, sqrt
+
+    lo, hi = 0.0, 10.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if erf(mid / sqrt(2)) < q else (lo, mid)
+    return (lo + hi) / 2
+
+
+def track_stats(
+    x: np.ndarray, y: np.ndarray, t: np.ndarray, uidx: np.ndarray, users: np.ndarray, direction: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    """Per kept track: (centroid [N,2], pings n [N], along-track spread S [N] in m^2) and the pooled
+    perpendicular position-noise variance (m^2) of the constant-velocity fits."""
+    centroid = np.zeros((len(users), 2))
+    n = np.zeros(len(users))
+    spread = np.zeros(len(users))
+    perp_ss, dof = 0.0, 0
+    per_track = []
+    for i, u in enumerate(users):
+        m = uidx == u
+        px, py, pt = x[m], y[m], t[m]
+        c = np.array([px.mean(), py.mean()])
+        d = direction[i]
+        along = (px - c[0]) * d[0] + (py - c[1]) * d[1]
+        perp = -(px - c[0]) * d[1] + (py - c[1]) * d[0]
+        centroid[i], n[i], spread[i] = c, len(px), float(np.sum((along - along.mean()) ** 2))
+        if len(px) > 2:
+            per_track.append(float(np.sum(perp**2) / (len(px) - 2)))
+            perp_ss += float(np.sum(perp**2))
+            dof += len(px) - 2
+        del pt
+    sig2 = float(np.median(per_track)) if per_track else 25.0
+    return centroid, n, spread, max(sig2, 1.0)
+
+
+def _consensus_start(c, d, base, sig2, n, spread, m, kappa0=0.35):
+    """Best crossing of the longest tracks' lines by robust agreement, sources and sinks scored apart."""
+    idx = np.argsort(-base)[:m]
+    cand = [np.average(c, axis=0, weights=base)]
+    for a in range(len(idx)):
+        for b in range(a + 1, len(idx)):
+            i, j = idx[a], idx[b]
+            mat = np.c_[d[i], -d[j]]
+            if abs(np.linalg.det(mat)) < 0.17:  # lines within ~10 degrees: unstable crossing
+                continue
+            s_ = np.linalg.solve(mat, c[j] - c[i])
+            cand.append(c[i] + s_[0] * d[i])
+    cand = np.array(cand)
+    diff = cand[:, None, :] - c[None, :, :]
+    along = np.einsum("knj,nj->kn", diff, d)
+    r = np.linalg.norm(diff - along[..., None] * d[None], axis=2)
+    sd = np.sqrt(sig2 / n + along**2 * (sig2 / np.maximum(spread, 1e-6) + kappa0**2))
+    score = base / (1 + (r / sd / CAUCHY_C) ** 2)
+    radial = -along  # > 0: the track moves away from the candidate
+    best = np.maximum((score * (radial > 0)).sum(1), (score * (radial < 0)).sum(1))
+    return cand[int(np.argmax(best))]
+
+
+def consensus_intersection(
+    centroid: np.ndarray,
+    direction: np.ndarray,
+    base_w: np.ndarray,
+    n: np.ndarray,
+    spread: np.ndarray,
+    sig2: float,
+    params: FlowSourceParams,
+) -> tuple[np.ndarray, str, float, float] | None:
+    """Fake-resistant point where movement lines meet. Returns (xy, kind, spread_m, uncertainty_m).
+
+    Noise model per line: var = sig2/n + along^2 * (sig2/S + kappa^2), where along is the distance
+    back from the track to the foot point and kappa is the heading spread of entities around the
+    radial direction (estimated once, from tracks consistent with the consensus start, then held
+    fixed so a large group of decoy tracks can't inflate it). Refinement uses Tukey's biweight (zero
+    weight past the cutoff) and down-weights tracks moving against the detected kind.
+    uncertainty_m: 1-sigma semi-major axis of the sandwich covariance."""
+    if len(centroid) < params.min_tracks or base_w.sum() <= 0:
+        return None
+    eye = np.eye(2)
+    proj = eye[None] - direction[:, :, None] * direction[:, None, :]
+    a0 = np.einsum("n,nij->ij", base_w, proj)
+    ev = np.linalg.eigvalsh(a0)
+    if ev[0] <= 1e-3 * ev[1]:
+        return None  # all lines (nearly) parallel: no intersection
+    p = _consensus_start(centroid, direction, base_w, sig2, n, spread, params.consensus_tracks)
+    along = np.einsum("ij,ij->i", direction, p - centroid)
+    r = np.linalg.norm(np.einsum("nij,nj->ni", proj, p - centroid), axis=1)
+    kind_sign = 1.0 if np.average(np.sign(-along), weights=base_w) > 0 else -1.0
+    w_dir = np.where(np.sign(-along) == kind_sign, 1.0, params.opposite_weight)
+    ang = np.arctan2(r, np.maximum(np.abs(along), 1e-6))
+    excess = np.sqrt(np.maximum(ang**2 - sig2 / np.maximum(spread, 1e-6), 0.0))
+    ok = (ang < MAX_HEADING_RAD) & (w_dir == 1.0)
+    kappa = float(np.quantile(excess[ok], HEADING_Q) / _half_normal_quantile(HEADING_Q)) if ok.sum() >= 3 else 0.35
+    kappa = float(np.clip(kappa, np.radians(3.0), MAX_HEADING_RAD))
+    w = base_w * w_dir
+    for _ in range(max(params.iters, 12)):
+        along = np.einsum("ij,ij->i", direction, p - centroid)
+        r = np.linalg.norm(np.einsum("nij,nj->ni", proj, p - centroid), axis=1)
+        z = r / np.sqrt(sig2 / n + along**2 * (sig2 / np.maximum(spread, 1e-6) + kappa**2))
+        w_new = base_w * w_dir * np.where(z < TUKEY_C, (1 - (z / TUKEY_C) ** 2) ** 2, 0.0)
+        if w_new.sum() <= 0:
+            break
+        w = w_new
+        a = np.einsum("n,nij->ij", w, proj)
+        if np.linalg.eigvalsh(a)[0] <= 1e-9 * np.trace(a):
+            break
+        p = np.linalg.solve(a, np.einsum("n,nij,nj->i", w, proj, centroid))
+    r = np.linalg.norm(np.einsum("nij,nj->ni", proj, p - centroid), axis=1)
+    radial = np.einsum("ij,ij->i", direction, centroid - p)
+    kind = "source" if np.average(np.sign(radial), weights=w) > 0 else "sink"
+    spread_m = float(np.sqrt(np.average(r**2, weights=w)))
+    g = np.einsum("nij,nj->ni", proj, p - centroid)
+    a = np.einsum("n,nij->ij", w, proj)
+    b = np.einsum("n,ni,nj->ij", w**2, g, g)
+    ai = np.linalg.inv(a)
+    n_eff = float(w.sum() ** 2 / np.sum(w**2))
+    cov = ai @ b @ ai * n_eff / max(n_eff - 2.0, 1.0)
+    uncertainty = float(np.sqrt(max(np.linalg.eigvalsh(cov)[-1], 0.0)))
+    return p, kind, spread_m, uncertainty
+
+
 def flow_source(
     events: Events,
     params: FlowSourceParams,
@@ -166,7 +305,11 @@ def flow_source(
     line_w = np.minimum(dist, params.max_move_weight_m) * user_trust
 
     extras: dict = {"n_tracks": len(start), "point": None, "kind": None, "spread_m": None, "uncertainty_m": None}
-    est = backproject(start, direction, line_w, params)
+    if params.estimator == "consensus" and len(start):
+        cent, n_pings, spread, sig2 = track_stats(x, y, ev.t[order], uidx, users, direction)
+        est = consensus_intersection(cent, direction, line_w, n_pings, spread, sig2, params)
+    else:
+        est = backproject(start, direction, line_w, params)
     if est is not None:
         p, kind, spread, uncertainty = est
         lat, lon = grid.to_latlon(np.array([p[0]]), np.array([p[1]]))

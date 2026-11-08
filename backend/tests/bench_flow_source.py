@@ -30,14 +30,26 @@ DECOY = ORIGIN + np.array([-160.0, 150.0])
 WINDOW_S, NOW = 20.0, 30.0
 
 
-def scenario(n=80, spoof_frac=0.0, spoof_kind="dupes", gps=8.0, seed=0, hide=0.2, duration=60, dt=2.0):
+SOURCE_DIR = np.array([1.0, 0.0])
+
+
+def source_at(t, source_speed=0.0):
+    """True source position at time t (it drifts along SOURCE_DIR at source_speed m/s)."""
+    return ORIGIN + SOURCE_DIR * source_speed * t
+
+
+def scenario(
+    n=80, spoof_frac=0.0, spoof_kind="dupes", gps=8.0, seed=0, hide=0.2, duration=60, dt=2.0, source_speed=0.0
+):
     """Entities within 150 m of ORIGIN flee at 2-4 m/s (+-30 deg) after staggered starts, some stay put;
-    the rest drift. Spoofers either ping DECOY exactly or fake a straight, uniform flight from it."""
+    the rest drift. Spoofers either ping DECOY exactly or fake a straight, uniform flight from it.
+    With source_speed > 0 the source drifts, and each entity flees from where it was at its start."""
     rng = np.random.default_rng(seed)
     rows = []
     n_spoof = int(round(spoof_frac * n / max(1e-9, 1 - spoof_frac)))
     for i, s in enumerate(ORIGIN + rng.uniform(-150, 150, size=(n, 2))):
-        rel = s - ORIGIN
+        t0 = rng.uniform(0, 10)
+        rel = s - source_at(t0, source_speed)
         if np.linalg.norm(rel) < 150 and rng.random() > hide:
             ang = np.arctan2(rel[1], rel[0]) + np.radians(rng.uniform(-30, 30))
             v = rng.uniform(2.0, 4.0) * np.array([np.cos(ang), np.sin(ang)])
@@ -46,7 +58,6 @@ def scenario(n=80, spoof_frac=0.0, spoof_kind="dupes", gps=8.0, seed=0, hide=0.2
         else:
             ang = rng.uniform(0, 2 * np.pi)
             v = 1.2 * np.array([np.cos(ang), np.sin(ang)])
-        t0 = rng.uniform(0, 10)
         for t in np.arange(0, duration - t0 + 1e-9, dt):
             pos = s + v * t + rng.normal(0, gps, 2)
             rows.append((f"u{i}", float(t0 + t), pos[0], pos[1]))
@@ -59,9 +70,9 @@ def scenario(n=80, spoof_frac=0.0, spoof_kind="dupes", gps=8.0, seed=0, hide=0.2
     return rows
 
 
-def operator_estimate(rows):
+def operator_estimate(rows, estimator="consensus"):
     ev = events_from_xy(GRID, rows)
-    res = flow_source(ev, FlowSourceParams(window_s=WINDOW_S), None, FixedClock(NOW), GRID)
+    res = flow_source(ev, FlowSourceParams(window_s=WINDOW_S, estimator=estimator), None, FixedClock(NOW), GRID)
     pt = res.extras["point"]
     if pt is None:
         return None, None
@@ -76,14 +87,15 @@ def reference_estimate(rows):
     return p
 
 
-def evaluate(seeds, **kw):
+def evaluate(seeds, estimator="consensus", **kw):
     ref_err, op_err, covered = [], [], []
+    truth = source_at(NOW, kw.get("source_speed", 0.0))
     for s in seeds:
         rows = scenario(seed=s, **kw)
         p_ref = reference_estimate(rows)
-        p_op, unc = operator_estimate(rows)
-        ref_err.append(np.inf if p_ref is None else float(np.linalg.norm(p_ref - ORIGIN)))
-        e = np.inf if p_op is None else float(np.linalg.norm(p_op - ORIGIN))
+        p_op, unc = operator_estimate(rows, estimator)
+        ref_err.append(np.inf if p_ref is None else float(np.linalg.norm(p_ref - truth)))
+        e = np.inf if p_op is None else float(np.linalg.norm(p_op - truth))
         op_err.append(e)
         if unc is not None:
             covered.append(e <= 2 * unc)
@@ -98,6 +110,7 @@ CASES = [
         (f"80 + {f:.0%} fake-flight spoofers", {"n": 80, "spoof_frac": f, "spoof_kind": "flight"})
         for f in (0.1, 0.25, 0.4)
     ],
+    *[(f"80 tracks, source moving {v:.1f} m/s", {"n": 80, "source_speed": v}) for v in (1.5, 3.0)],
 ]
 
 
@@ -106,12 +119,14 @@ def main() -> None:
     ap.add_argument("--seeds", type=int, default=40)
     seeds = range(ap.parse_args().seeds)
     print(f"flow_source vs reference: error to the true source (m), {len(seeds)} seeds, {WINDOW_S:.0f} s window")
-    print(f"{'scenario':<34}{'reference med/p90':>20}{'operator med/p90':>20}{'within 2x unc':>16}")
+    print(f"{'scenario':<34}{'reference med/p90':>20}{'wls med/p90':>18}{'consensus med/p90':>20}{'2x unc':>8}")
     for label, kw in CASES:
-        r, o, cov = evaluate(seeds, **kw)
+        r, w, _ = evaluate(seeds, estimator="wls", **kw)
+        _, c, cov = evaluate(seeds, estimator="consensus", **kw)
         print(
             f"{label:<34}{np.median(r):>10.1f} /{np.percentile(r, 90):>7.1f}"
-            f"{np.median(o):>12.1f} /{np.percentile(o, 90):>7.1f}{cov:>15.0%}"
+            f"{np.median(w):>10.1f} /{np.percentile(w, 90):>6.1f}"
+            f"{np.median(c):>12.1f} /{np.percentile(c, 90):>6.1f}{cov:>8.0%}"
         )
 
 
