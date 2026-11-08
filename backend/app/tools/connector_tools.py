@@ -56,26 +56,41 @@ def check_url(url: str, *, allow_private: bool) -> str:
 
 
 def _get(ctx: ToolContext, url: str) -> httpx.Response:
-    check_url(url, allow_private=ctx.extra.get("allow_private_urls", url_guard.demo_allows_private()))
+    allow_private = ctx.extra.get("allow_private_urls", url_guard.demo_allows_private())
+    check_url(url, allow_private=allow_private)
     client = ctx.extra.get("http_client")
     own = client is None
     client = client or httpx.Client(timeout=FETCH_TIMEOUT_S, follow_redirects=False)
     try:
-        with client.stream("GET", url, timeout=FETCH_TIMEOUT_S, headers={"Accept": "*/*"}) as resp:
-            if 300 <= resp.status_code < 400:
-                raise GuardError("redirects are not followed; fetch the final URL directly")
-            ctype = resp.headers.get("content-type", "").lower()
-            if ctype and not any(t in ctype for t in TEXT_TYPES):
-                raise GuardError(f"not a text response ({ctype.split(';')[0]})")
-            body = b""
-            for chunk in resp.iter_bytes():
-                body += chunk
-                if len(body) > MAX_BYTES:
-                    raise GuardError(f"response is larger than {MAX_BYTES // 1000} KB")
-            return httpx.Response(resp.status_code, headers=resp.headers, content=body, request=resp.request)
+        for hops in range(url_guard.MAX_REDIRECTS + 1):
+            resp = _get_once(client, url)
+            if resp.status_code not in url_guard.REDIRECT_CODES:
+                return resp
+            try:  # follow by hand so every hop passes the same SSRF check
+                url = url_guard.next_hop(url, resp.headers.get("location"), allow_private=allow_private, hops=hops)
+            except url_guard.UnsafeUrl as e:
+                raise GuardError(f"redirect refused: {e}") from None
+        raise GuardError(f"more than {url_guard.MAX_REDIRECTS} redirects")
     finally:
         if own:
             client.close()
+
+
+def _get_once(client: httpx.Client, url: str) -> httpx.Response:
+    with client.stream("GET", url, timeout=FETCH_TIMEOUT_S, headers={"Accept": "*/*"}) as resp:
+        if resp.status_code in url_guard.REDIRECT_CODES:
+            return httpx.Response(resp.status_code, headers={"location": resp.headers.get("location", "")})
+        ctype = resp.headers.get("content-type", "").lower()
+        if ctype and not any(t in ctype for t in TEXT_TYPES):
+            raise GuardError(f"not a text response ({ctype.split(';')[0]})")
+        body = b""
+        for chunk in resp.iter_bytes():
+            body += chunk
+            if len(body) > MAX_BYTES:
+                raise GuardError(f"response is larger than {MAX_BYTES // 1000} KB")
+        # iter_bytes() already decoded gzip/deflate/br: drop the encoding headers, or httpx would decode twice
+        headers = {k: v for k, v in resp.headers.items() if k.lower() not in ("content-encoding", "content-length")}
+        return httpx.Response(resp.status_code, headers=headers, content=body, request=resp.request)
 
 
 def _text(html: str) -> str:

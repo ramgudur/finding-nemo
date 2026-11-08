@@ -169,7 +169,12 @@ def _request(conn: ConnectorConfig) -> tuple[str, dict[str, Any] | None]:
 async def fetch_raw(client: httpx.AsyncClient, conn: ConnectorConfig) -> Any:
     url, params = _request(conn)
     url_guard.check_url(url)  # every poll: an agent may have chosen this URL
-    resp = await client.get(url, params=params, timeout=FETCH_TIMEOUT_S)  # no redirects (httpx default)
+    resp = await client.get(url, params=params, timeout=FETCH_TIMEOUT_S)  # redirects followed by hand below
+    hops = 0
+    while resp.status_code in url_guard.REDIRECT_CODES:  # each hop re-checked (SSRF)
+        url = url_guard.next_hop(str(resp.url), resp.headers.get("location"), hops=hops)
+        hops += 1
+        resp = await client.get(url, timeout=FETCH_TIMEOUT_S)
     resp.raise_for_status()
     return resp.json() if conn.type == "json_api" else resp.text
 
@@ -179,7 +184,12 @@ def fetch_raw_sync(client: httpx.Client, conn: ConnectorConfig) -> Any:
     poll loop -- tool handlers are synchronous (`tools/registry.py`)."""
     url, params = _request(conn)
     url_guard.check_url(url)
-    resp = client.get(url, params=params, timeout=FETCH_TIMEOUT_S)  # no redirects (httpx default)
+    resp = client.get(url, params=params, timeout=FETCH_TIMEOUT_S)  # redirects followed by hand below
+    hops = 0
+    while resp.status_code in url_guard.REDIRECT_CODES:  # each hop re-checked (SSRF)
+        url = url_guard.next_hop(str(resp.url), resp.headers.get("location"), hops=hops)
+        hops += 1
+        resp = client.get(url, timeout=FETCH_TIMEOUT_S)
     resp.raise_for_status()
     return resp.json() if conn.type == "json_api" else resp.text
 
@@ -227,6 +237,10 @@ def check_connector_sync(client: httpx.Client, conn: ConnectorConfig, now: float
     """Fetch once and parse, without writing anything -- what `test_connector` needs to
     honestly say it saw at least one item."""
     raw = fetch_raw_sync(client, conn)
+    if conn.type == "rss":
+        # Count every parsed item, located or not: the live poller places items without a point via
+        # the locator (extract + geocode), so a normal news feed with no coordinates is a working source.
+        return rss.parse_items(raw, now, include_unlocated=True)
     return events_from_raw(conn, raw, now)
 
 
