@@ -219,7 +219,7 @@ def test_poll_once_json_api_open_meteo_writes_the_event():
     db = _db_with_app("app", [_wind_input()])
 
     def handler(request):
-        assert request.url.params["latitude"] == "32.8"
+        assert request.url.params["latitude"] == "0.005"  # the area's centre (a 1 km area: one point)
         return httpx.Response(200, json={"current": {"wind_speed_10m": 4.2, "wind_direction_10m": 200}})
 
     async def go():
