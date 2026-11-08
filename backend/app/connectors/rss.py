@@ -40,9 +40,10 @@ def _parse_date(raw: str | None, now: float) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
-def parse_items(xml_text: str, now: float) -> list[dict[str, Any]]:
+def parse_items(xml_text: str, now: float, include_unlocated: bool = False) -> list[dict[str, Any]]:
     """Each item becomes `{doc_id, title, description, ts, lat, lon}`. An item with no
-    `<georss:point>` (or an unparseable one) is skipped: never guess a location. `now`
+    `<georss:point>` (or an unparseable one) is skipped -- never guess a location -- unless
+    `include_unlocated`, which keeps it with lat/lon None for a locator to place (or drop). `now`
     (from `core/clock.py`, via the caller) is only the fallback for a missing/unparseable
     `pubDate` -- this module reads no clock itself, so it stays pure and sim runs line up."""
     root = ElementTree.fromstring(xml_text)  # noqa: S314 - a connector's own feed, not untrusted user input
@@ -50,9 +51,9 @@ def parse_items(xml_text: str, now: float) -> list[dict[str, Any]]:
     for item in root.iter("item"):
         point_el = item.find(f"{_GEORSS}point")
         point = _parse_point(point_el.text) if point_el is not None and point_el.text else None
-        if point is None:
+        if point is None and not include_unlocated:
             continue
-        lat, lon = point
+        lat, lon = point if point is not None else (None, None)
         guid = _text(item, "guid") or _text(item, "link") or _text(item, "title") or ""
         items.append(
             {

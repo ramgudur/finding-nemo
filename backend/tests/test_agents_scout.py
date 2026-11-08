@@ -182,3 +182,19 @@ def test_scout_rss_episode_configures_and_tests_a_connector():
     out = asyncio.run(run_scout(ctx, "local_news", "find a feed", _router("scout_rss")))
     assert out and "connector" in out.lower()
     assert any(t.action == "request_handled" for t in ctx.db.list_trace("scout-app"))
+
+
+def test_article_extractor_adapts_for_the_connector_locator():
+    from app.agents.scout import article_extractor
+    from app.connectors.engine import make_extract_locator
+
+    ctx, _ = _ctx()
+    extract = article_extractor(ctx.db, ctx.engine, _router("extract_article"))
+
+    async def no_geocode(place, spec):
+        return None
+
+    locate = make_extract_locator(extract, no_geocode)
+    inp = next(i for i in ctx.spec.inputs if i.id == "local_news")
+    found = asyncio.run(locate(ctx.spec, inp, {"title": "Report", "description": "At the hall."}))
+    assert found == (32.7796, -96.76, 0.8)

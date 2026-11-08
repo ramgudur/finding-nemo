@@ -8,12 +8,21 @@ without a restart or any separate cache to go stale.
 
 Poll scheduling is in-process and in-memory, the same safe-default philosophy as the tick
 engine's own state: a restart just starts polling again from "now".
+
+Locating documents without coordinates (optional): with a `locate` callable, RSS items that have
+no `<georss:point>` are kept, de-duplicated against documents already written (so nothing is
+extracted twice), capped at `MAX_LOCATE_PER_POLL` per poll (rate budget), and passed to
+`locate(app, input, item)`. It returns `(lat, lon, confidence)` or None; a location outside the
+app's bbox is dropped. `make_extract_locator` builds one from the Scout's per-article extraction and
+a geocoder, both injected, so this module never imports agents. Without `locate`, behavior is
+unchanged: items without a point are skipped, never guessed.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -24,13 +33,17 @@ from app.api.ingest import _check_fields
 from app.connectors import json_api, rss
 from app.core import clock as clock_mod
 from app.core.db import Db
-from app.core.models import ConnectorConfig, Event, InputSpec
+from app.core.models import AppSpec, ConnectorConfig, Event, InputSpec
 
 log = logging.getLogger(__name__)
 
 FETCH_TIMEOUT_S = 10.0
 CHECK_INTERVAL_S = 1.0
 DEFAULT_CONFIDENCE = 0.6
+MAX_LOCATE_PER_POLL = 5
+
+# (app spec, input, item {doc_id, title, description, ts}) -> (lat, lon, confidence) or None
+Locator = Callable[[AppSpec, InputSpec, dict[str, Any]], Awaitable[tuple[float, float, float] | None]]
 
 
 @dataclass
@@ -42,22 +55,79 @@ class PollResult:
     error: str | None = None
 
 
+def _rss_event(item: dict[str, Any], source_id: str, lat: float, lon: float, confidence: float) -> dict[str, Any]:
+    return {
+        "user_id": source_id,
+        "lat": lat,
+        "lon": lon,
+        "ts": item["ts"],
+        "doc_id": item["doc_id"],
+        "confidence": confidence,
+    }
+
+
 def _rss_events(raw_text: str, config: dict[str, Any], now: float) -> list[dict[str, Any]]:
     source_id = str(config.get("source_id", "rss"))
     confidence = float(config.get("default_confidence", DEFAULT_CONFIDENCE))
-    out = []
-    for item in rss.parse_items(raw_text, now):
-        out.append(
-            {
-                "user_id": source_id,
-                "lat": item["lat"],
-                "lon": item["lon"],
-                "ts": item["ts"],
-                "doc_id": item["doc_id"],
-                "confidence": confidence,
-            }
-        )
+    return [_rss_event(i, source_id, i["lat"], i["lon"], confidence) for i in rss.parse_items(raw_text, now)]
+
+
+def _in_bbox(spec: AppSpec, lat: float, lon: float) -> bool:
+    b = spec.grid.bbox
+    return b.min_lat <= lat <= b.max_lat and b.min_lon <= lon <= b.max_lon
+
+
+async def _located_rss_events(
+    db: Db, spec: AppSpec, inp: InputSpec, raw_text: str, now: float, locate: Locator
+) -> list[dict[str, Any]]:
+    """RSS events, plus items without a point that `locate` places inside the bbox."""
+    assert inp.connector is not None  # noqa: S101 - only called for pull inputs with a connector
+    config = inp.connector.config
+    source_id = str(config.get("source_id", "rss"))
+    confidence = float(config.get("default_confidence", DEFAULT_CONFIDENCE))
+    items = rss.parse_items(raw_text, now, include_unlocated=True)
+    out = [_rss_event(i, source_id, i["lat"], i["lon"], confidence) for i in items if i["lat"] is not None]
+    seen = {
+        e.model_extra["doc_id"]
+        for e in db.list_events(spec.app_id, inp.id)
+        if e.user_id == source_id and e.model_extra and e.model_extra.get("doc_id")
+    }
+    todo = [i for i in items if i["lat"] is None and i["doc_id"] and i["doc_id"] not in seen]
+    for item in todo[:MAX_LOCATE_PER_POLL]:
+        try:
+            found = await locate(spec, inp, item)
+        except Exception:  # noqa: BLE001 - one document must not drop the rest of the poll
+            log.exception("locating %s/%s doc %s failed", spec.app_id, inp.id, item["doc_id"])
+            continue
+        if found is None:
+            continue
+        lat, lon, conf = found
+        if _in_bbox(spec, lat, lon):
+            out.append(_rss_event(item, source_id, lat, lon, max(0.0, min(1.0, conf))))
     return out
+
+
+def make_extract_locator(
+    extract: Callable[[AppSpec, InputSpec, str, str], Awaitable[Any]],
+    geocode: Callable[[str, AppSpec], Awaitable[tuple[float, float] | None]],
+) -> Locator:
+    """A Locator from per-article extraction (returns an object with relevant / lat / lon / place /
+    confidence, e.g. agents.scout.ArticleExtract) and a geocoder for place names. Irrelevant
+    documents and unplaceable ones are dropped; coordinates are never guessed."""
+
+    async def locate(spec: AppSpec, inp: InputSpec, item: dict[str, Any]) -> tuple[float, float, float] | None:
+        ex = await extract(spec, inp, item.get("title", ""), item.get("description", ""))
+        if ex is None or not ex.relevant:
+            return None
+        if ex.lat is not None and ex.lon is not None:
+            return float(ex.lat), float(ex.lon), float(ex.confidence)
+        if ex.place:
+            point = await geocode(ex.place, spec)
+            if point is not None:
+                return float(point[0]), float(point[1]), float(ex.confidence)
+        return None
+
+    return locate
 
 
 def _json_api_events(
@@ -142,11 +212,22 @@ def check_connector_sync(client: httpx.Client, conn: ConnectorConfig, now: float
     return events_from_raw(conn, raw, now)
 
 
-async def poll_once(client: httpx.AsyncClient, db: Db, app_id: str, inp: InputSpec, now: float) -> PollResult:
+async def poll_once(
+    client: httpx.AsyncClient,
+    db: Db,
+    app_id: str,
+    inp: InputSpec,
+    now: float,
+    locate: Locator | None = None,
+    spec: AppSpec | None = None,
+) -> PollResult:
     assert inp.connector is not None  # noqa: S101 - callers only pass pull inputs with a connector
     try:
         raw = await fetch_raw(client, inp.connector)
-        raw_events = events_from_raw(inp.connector, raw, now)
+        if locate is not None and spec is not None and inp.connector.type == "rss":
+            raw_events = await _located_rss_events(db, spec, inp, raw, now, locate)
+        else:
+            raw_events = events_from_raw(inp.connector, raw, now)
     except Exception as e:  # noqa: BLE001 - a bad feed must not crash the poll loop
         return PollResult(app_id, inp.id, ok=False, error=f"{type(e).__name__}: {e}")
     return write_events(db, app_id, inp, raw_events, now)
@@ -156,9 +237,14 @@ class ConnectorEngine:
     """Polls every active app's pull inputs with a connector, each on its own `poll_s`."""
 
     def __init__(
-        self, db: Db, client: httpx.AsyncClient | None = None, check_interval_s: float = CHECK_INTERVAL_S
+        self,
+        db: Db,
+        client: httpx.AsyncClient | None = None,
+        check_interval_s: float = CHECK_INTERVAL_S,
+        locate: Locator | None = None,
     ) -> None:
         self.db = db
+        self.locate = locate  # optional: place RSS items that carry no coordinates
         self.client = client or httpx.AsyncClient()
         self.check_interval_s = check_interval_s
         self._last_polled_at: dict[tuple[str, str], float] = {}
@@ -180,7 +266,9 @@ class ConnectorEngine:
                     continue
                 self._last_polled_at[key] = now
                 try:
-                    results.append(await poll_once(self.client, self.db, spec.app_id, inp, now))
+                    results.append(
+                        await poll_once(self.client, self.db, spec.app_id, inp, now, locate=self.locate, spec=spec)
+                    )
                 except Exception:  # noqa: BLE001 - one connector must not stop the others
                     log.exception("connector poll failed for %s/%s", spec.app_id, inp.id)
         return results
