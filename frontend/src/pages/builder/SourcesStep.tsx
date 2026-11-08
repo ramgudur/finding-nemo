@@ -7,6 +7,7 @@ import { useNavigate } from "react-router-dom";
 import type { CompileInput, SourceSuggestion } from "../../api/types";
 import { api } from "../../api/client";
 import { BigInput } from "../../components/builder/BigInput";
+import { DraftAside } from "../../components/builder/DraftAside";
 import { FailurePanel, toFailure } from "../../components/builder/Failure";
 import type { Failure } from "../../components/builder/Failure";
 import { StepIntro } from "../../components/builder/Help";
@@ -86,6 +87,8 @@ export function SourcesStep() {
         lead="Describe one thing your app listens to, in plain words."
       />
 
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-8 lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-10">
+      <div className="flex min-w-0 flex-col gap-8">
       <BigInput
         id="source-description"
         label="Describe a data source"
@@ -116,10 +119,11 @@ export function SourcesStep() {
 
       {count > 0 && (
         <section aria-labelledby="added-h" className="flex flex-col gap-2.5">
-          <h2 id="added-h" className="bld-h2">
-            Your sources <span className="font-normal text-ink">({count})</span>
+          <h2 id="added-h" className="bld-h2 flex items-baseline gap-2.5">
+            Your sources{" "}
+            <span className="rounded-md bg-slate/[0.08] px-1.5 py-1 font-mono text-[13px] font-semibold leading-none text-ink">{count}</span>
           </h2>
-          <ul className="flex flex-col gap-2">
+          <ul className="wp-sheet flex flex-col divide-y divide-slate/[0.12] overflow-hidden">
             <AnimatePresence initial={false} mode="popLayout">
               {draft.sources.map((src, i) => {
                 const key = keys[i] ?? String(i);
@@ -148,6 +152,9 @@ export function SourcesStep() {
           </ul>
         </section>
       )}
+      </div>
+      <DraftAside intent={draft.intent} bbox={draft.bbox} cellM={draft.cellM} destinationPoints={draft.destinationPoints} />
+      </div>
 
       {toast}
 
@@ -157,6 +164,7 @@ export function SourcesStep() {
         problems={problems}
         readyText="Next, review everything and compile."
         next={{ label: "Next: Review", onClick: () => problems.length === 0 && navigate("/new/review") }}
+        wide
       />
     </>
   );

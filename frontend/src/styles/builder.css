@@ -6,33 +6,34 @@
    IBM Plex Mono for ids, paths and numbers.
    --------------------------------------------------------------------------------------------- */
 .bld {
-  --bld-ink: #35596b;
-  --bld-ink-2: #45606c;
-  --bld-ph: #5a747e; /* placeholders: 4.7:1 on the field paper, italic, so they never read as a value */
-  --bld-paper: #fbfaf6; /* field wells */
-  --bld-card: rgba(246, 243, 234, 0.82);
-  --bld-card-quiet: rgba(240, 235, 221, 0.5);
-  --bld-line: rgba(99, 143, 145, 0.32);
-  --bld-line-strong: rgba(99, 143, 145, 0.6);
-  --bld-focus: rgba(99, 143, 145, 0.28);
-  --bld-shadow: 0 1px 0 rgba(255, 255, 255, 0.75) inset, 0 14px 36px -22px rgba(53, 89, 107, 0.5);
-  --bld-danger: #8e4f3c;
-  --bld-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  /* Every value comes from the tokens in tokens.css (.wp is always an ancestor of .bld). */
+  --bld-ink: rgb(var(--c-slate));
+  --bld-ink-2: rgb(var(--c-ink));
+  --bld-ph: rgb(var(--c-ink-soft)); /* placeholders: 4.6:1 on the field paper, italic, so they never read as a value */
+  --bld-paper: #fcfaf4; /* field wells */
+  --bld-card: rgb(var(--c-sheet));
+  --bld-card-quiet: rgb(var(--c-sheet-2));
+  --bld-line: rgba(35, 69, 90, 0.18);
+  --bld-line-strong: rgba(35, 69, 90, 0.34);
+  --bld-focus: rgba(43, 86, 112, 0.2);
+  --bld-shadow: var(--shadow-1);
+  --bld-danger: rgb(var(--c-danger));
+  --bld-ease-out: var(--ease-out);
 }
 
 /* Type */
 :where(.bld) .bld-title {
   font-family: Fredoka, ui-rounded, sans-serif;
-  font-weight: 500;
-  font-size: clamp(1.75rem, 1.4rem + 1.4vw, 2.25rem);
+  font-weight: 600;
+  font-size: 32px;
   line-height: 1.1;
-  letter-spacing: -0.01em;
-  color: #2f5872;
+  letter-spacing: -0.015em;
+  color: rgb(var(--c-deep));
   text-wrap: balance;
 }
 :where(.bld) .bld-lead {
   max-width: 62ch;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.5;
   color: var(--bld-ink-2);
 }
@@ -41,7 +42,7 @@
   color: var(--bld-ink);
 }
 :where(.bld) .bld-h2 {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
   line-height: 1.3;
   color: var(--bld-ink);
@@ -105,7 +106,7 @@
 :where(.bld) .bld-field:focus,
 :where(.bld) .bld-field:focus-visible {
   outline: none;
-  border-color: #638f91;
+  border-color: rgb(var(--c-deep));
   box-shadow: 0 0 0 3px var(--bld-focus);
 }
 :where(.bld) .bld-field[aria-invalid="true"],
@@ -135,12 +136,8 @@
   padding: 0.55rem 1.1rem;
   font-size: 14px;
   font-weight: 700;
-  transition: transform 160ms var(--bld-ease-out), background-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
-}
-@media (hover: hover) and (pointer: fine) {
-  :where(.bld) .bld-btn:not(:disabled):hover {
-    transform: translateY(-1px);
-  }
+  transition: transform 160ms var(--bld-ease-out), background-color 150ms var(--bld-ease-out),
+    box-shadow 150ms var(--bld-ease-out), color 150ms var(--bld-ease-out);
 }
 /* Pressables answer the press: a small scale-down, never from or to nothing. */
 :where(.bld) .bld-btn:not(:disabled):active,
@@ -162,24 +159,24 @@
   cursor: not-allowed;
 }
 :where(.bld) .bld-btn-primary {
-  background: #3b6895;
-  color: #f0ebdd;
-  box-shadow: 0 8px 20px -10px rgba(47, 88, 114, 0.9);
+  background: rgb(var(--c-deep));
+  color: rgb(var(--c-cream));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 1px 2px rgba(23, 53, 71, 0.2), 0 6px 14px -8px rgba(23, 53, 71, 0.55);
 }
 :where(.bld) .bld-btn-primary:not(:disabled):hover {
-  background: #335c85;
+  background: rgb(var(--c-primary-hover));
 }
 :where(.bld) .bld-btn-primary:disabled {
-  background: rgba(69, 96, 108, 0.42);
+  background: rgba(69, 98, 111, 0.4);
   box-shadow: none;
 }
 :where(.bld) .bld-btn-secondary {
   background: var(--bld-paper);
   color: var(--bld-ink);
-  box-shadow: 0 0 0 1px var(--bld-line-strong) inset, 0 4px 12px -8px rgba(53, 89, 107, 0.5);
+  box-shadow: 0 0 0 1px var(--bld-line-strong) inset;
 }
 :where(.bld) .bld-btn-secondary:not(:disabled):hover {
-  background: #fff;
+  box-shadow: 0 0 0 1px var(--bld-ph) inset;
 }
 :where(.bld) .bld-btn-secondary:disabled {
   opacity: 0.5;
@@ -190,8 +187,7 @@
   padding-right: 0.75rem;
 }
 :where(.bld) .bld-btn-quiet:not(:disabled):hover {
-  background: rgba(255, 255, 255, 0.55);
-  transform: none;
+  background: rgba(35, 69, 90, 0.07);
 }
 :where(.bld) .bld-btn-quiet:disabled {
   opacity: 0.45;
@@ -202,13 +198,13 @@
 }
 :where(.bld) .bld-link {
   font-weight: 700;
-  color: #3b6895;
+  color: rgb(var(--c-deep));
   text-decoration: underline;
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;
 }
 :where(.bld) .bld-link:hover {
-  color: #335c85;
+  color: rgb(var(--c-primary-hover));
   text-decoration-thickness: 2px;
 }
 
@@ -220,7 +216,7 @@
   width: 22px;
   height: 22px;
   border-radius: 9999px;
-  color: #638f91;
+  color: rgb(var(--c-muted-teal));
   transition: background-color 0.15s, color 0.15s;
 }
 :where(.bld) .bld-help-btn:hover,
@@ -231,12 +227,12 @@
 :where(.bld) .bld-help-panel {
   max-width: 68ch;
   border-radius: 12px;
-  background: rgba(169, 210, 213, 0.28);
+  background: rgb(var(--c-sheet-2));
   padding: 0.6rem 0.85rem;
   font-size: 13px;
   line-height: 1.5;
   color: var(--bld-ink);
-  animation: bld-help-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: bld-help-in 0.2s var(--ease-out) both;
 }
 @keyframes bld-help-in {
   from { opacity: 0; transform: translateY(-2px); }
@@ -255,16 +251,16 @@
   border-radius: 12px;
   padding: 0.55rem 0.7rem;
   text-align: left;
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(252, 250, 244, 0.6);
   box-shadow: 0 0 0 1px var(--bld-line) inset;
-  transition: background-color 0.15s, box-shadow 0.15s;
+  transition: background-color 150ms var(--ease-out), box-shadow 150ms var(--ease-out);
 }
 :where(.bld) .bld-choice:hover {
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--bld-paper);
 }
 :where(.bld) .bld-choice[aria-checked="true"] {
-  background: var(--bld-paper);
-  box-shadow: 0 0 0 2px #35596b inset, 0 6px 16px -12px rgba(53, 89, 107, 0.6);
+  background: rgba(43, 86, 112, 0.07);
+  box-shadow: 0 0 0 1.5px rgb(var(--c-deep)) inset;
 }
 :where(.bld) .bld-choice-dot {
   margin-top: 1px;
@@ -276,25 +272,25 @@
   justify-content: center;
   border-radius: 9999px;
   border: 1.5px solid rgba(79, 106, 116, 0.6);
-  color: #f0ebdd;
+  color: rgb(var(--c-cream));
 }
 :where(.bld) .bld-choice[aria-checked="true"] .bld-choice-dot {
-  border-color: #35596b;
-  background: #35596b;
+  border-color: rgb(var(--c-deep));
+  background: rgb(var(--c-deep));
 }
 
 /* Callouts: warning (warm) and note (water). */
 :where(.bld) .bld-warn {
   border-radius: 12px;
-  background: rgba(217, 147, 126, 0.17);
+  background: rgb(var(--c-attn-bg));
   padding: 0.6rem 0.85rem;
   font-size: 13px;
   line-height: 1.45;
-  color: #7a4232;
+  color: rgb(var(--c-attn));
 }
 :where(.bld) .bld-note {
   border-radius: 12px;
-  background: rgba(169, 210, 213, 0.3);
+  background: rgba(188, 221, 228, 0.45);
   padding: 0.6rem 0.85rem;
   font-size: 13px;
   line-height: 1.45;
@@ -314,6 +310,9 @@
   }
   .bld .bld-btn {
     min-height: 44px;
+  }
+  .bld .bld-title {
+    font-size: 27px;
   }
 }
 

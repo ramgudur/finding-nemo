@@ -9,19 +9,13 @@ import { Link } from "react-router-dom";
 export function AppShell({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return (
     <MotionConfig reducedMotion="user">
-      <div className="watercolor-grain relative min-h-screen overflow-x-hidden">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0"
-          style={{
-            background:
-              "radial-gradient(1200px 520px at 12% -6%, rgba(240,235,221,0.75), transparent 60%), radial-gradient(900px 600px at 100% 30%, rgba(169,210,213,0.45), transparent 65%), linear-gradient(180deg, #DCEEF1 0%, #D5E8EB 55%, #DCEEF1 100%)",
-          }}
-        />
+      <div className="wp-ground relative min-h-screen overflow-x-hidden">
+        {/* Caustic light across the top of the page only. */}
+        <div aria-hidden className="wp-caustic" />
         <motion.main
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
           className={`relative mx-auto flex flex-col gap-5 px-4 pb-12 pt-24 sm:px-8 ${wide ? "max-w-[1440px]" : "max-w-[1180px]"}`}
         >
           {children}
@@ -73,13 +67,13 @@ export function Breadcrumb({ appId, page, appHref }: { appId: string; page?: str
 /** The two app states as the dev sees them: Proposed (before confirmation) and Live (after). */
 export function StatusChip({ live }: { live: boolean }) {
   return live ? (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-seaGlass/35 px-2.5 py-0.5 text-xs font-semibold text-slate ring-1 ring-seaGlass/70">
-      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-mutedTeal" />
+    <span className="inline-flex h-7 items-center gap-2.5 rounded-full bg-live/10 px-3 text-[13px] font-bold text-live">
+      <span aria-hidden className="wp-dot is-live" />
       Live
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-cream px-2.5 py-0.5 text-xs font-semibold text-slate ring-1 ring-softStone">
-      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-coral" />
+    <span className="inline-flex h-7 items-center gap-2.5 rounded-full bg-attnBg px-3 text-[13px] font-bold text-attn">
+      <span aria-hidden className="wp-dot is-attn" />
       Proposed
     </span>
   );
@@ -100,9 +94,9 @@ export function CopyButton({ value, label = "Copy", className = "" }: { value: s
     <button
       type="button"
       onClick={() => void copy()}
-      className={`tap inline-flex shrink-0 items-center justify-center gap-1 rounded-lg bg-white/75 px-2.5 py-1 text-[12px] font-semibold text-slate ring-1 ring-paleWater transition-[background-color,box-shadow] duration-150 hover:bg-white hover:shadow-sm ${className}`}
+      className={`tap wp-press inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-sheet px-3 py-1 text-[12.5px] font-bold text-slate shadow-[inset_0_0_0_1px_rgb(var(--c-slate)/0.24)] hover:shadow-[inset_0_0_0_1px_rgb(var(--c-ink-soft))] ${className}`}
     >
-      {copied ? <Check aria-hidden className="h-3.5 w-3.5 text-mutedTeal" /> : <Copy aria-hidden className="h-3.5 w-3.5" />}
+      {copied ? <Check aria-hidden className="h-3.5 w-3.5 text-live" /> : <Copy aria-hidden className="h-3.5 w-3.5" />}
       <span aria-live="polite">{copied ? "Copied" : label}</span>
     </button>
   );
@@ -110,15 +104,17 @@ export function CopyButton({ value, label = "Copy", className = "" }: { value: s
 
 export function Centered({ children }: { children: ReactNode }) {
   return (
-    <main className="watercolor-grain flex min-h-screen flex-col items-center justify-center px-6 pt-20 text-center">{children}</main>
+    <main className="wp-ground flex min-h-screen flex-col items-center justify-center px-6 pt-20 text-center">{children}</main>
   );
 }
 
+// One button vocabulary for the per-app pages (matches the builder's .bld-btn): deep primary, sheet secondary
+// with a hairline ring, quiet ghost. Every one answers a press with scale(0.97) (.wp-press).
 export const primaryBtn =
-  "tap inline-flex items-center justify-center gap-1.5 rounded-full bg-[#4F80B0] px-5 py-2 text-sm font-semibold text-cream shadow-[0_4px_14px_rgba(79,128,176,0.28)] ring-1 ring-white/40 transition-[transform,box-shadow,opacity] duration-150 hover:-translate-y-px hover:shadow-[0_8px_20px_rgba(79,128,176,0.32)] active:translate-y-0 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none";
+  "tap wp-press inline-flex h-10 items-center justify-center gap-2 rounded-full bg-deep px-5 text-sm font-bold text-cream shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_1px_2px_rgba(23,53,71,0.2),0_6px_14px_-8px_rgba(23,53,71,0.55)] hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none";
 
 export const secondaryBtn =
-  "tap inline-flex items-center justify-center gap-1.5 rounded-full bg-white/80 px-4 py-2 text-sm font-semibold text-slate ring-1 ring-seaGlass transition-[transform,box-shadow,opacity] duration-150 hover:-translate-y-px hover:shadow-sm disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none";
+  "tap wp-press inline-flex h-10 items-center justify-center gap-2 rounded-full bg-sheet px-4 text-sm font-bold text-slate shadow-[inset_0_0_0_1px_rgb(var(--c-slate)/0.24)] hover:shadow-[inset_0_0_0_1px_rgb(var(--c-ink-soft))] disabled:cursor-not-allowed disabled:opacity-45";
 
 export const ghostBtn =
-  "tap inline-flex items-center justify-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold text-ink transition-colors duration-150 hover:bg-white/50 hover:text-slate disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent";
+  "tap wp-press inline-flex h-10 items-center justify-center gap-2 rounded-full px-3 text-sm font-bold text-slate hover:bg-slate/[0.07] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent";

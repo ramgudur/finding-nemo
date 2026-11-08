@@ -434,7 +434,7 @@ function ExplainCard({
     <aside className="w-full shrink-0 rounded-2xl border border-softAqua/70 bg-cream/70 p-4 text-sm text-ink shadow-[0_2px_12px_rgba(53,89,107,0.06)] xl:w-72">
       {!selected ? (
         <div className="flex flex-col gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-inkSoft">How the score is made</p>
+          <p className="text-[13px] font-bold text-ink">How the score is made</p>
           <p>
             {counts.sources} source{counts.sources === 1 ? "" : "s"} feed {counts.layers} layer{counts.layers === 1 ? "" : "s"}. Each operator turns its
             input into a grid layer; weighted layers are normalised and summed, then clamped.

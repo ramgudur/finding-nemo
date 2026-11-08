@@ -54,7 +54,7 @@ export function BigInput({
   return (
     <div className={`flex flex-col gap-2 ${disabled ? "opacity-60" : ""}`}>
       <div
-        className="relative cursor-text rounded-[20px] border border-[rgba(99,143,145,0.32)] bg-[#FBFAF6]/95 px-5 py-4 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset,0_16px_40px_-26px_rgba(53,89,107,0.6)] transition-[border-color,box-shadow] duration-200 hover:border-[rgba(99,143,145,0.6)] focus-within:border-mutedTeal focus-within:shadow-[0_0_0_3px_rgba(99,143,145,0.28),0_16px_40px_-26px_rgba(53,89,107,0.6)] sm:px-6 sm:py-5"
+        className="relative cursor-text rounded-[20px] bg-sheet px-5 py-4 shadow-[var(--shadow-2),inset_0_0_0_1px_rgba(255,255,255,0.6)] transition-shadow duration-200 ease-wp focus-within:shadow-[0_0_0_2px_rgb(var(--c-deep)),var(--shadow-2)] sm:px-7 sm:py-6"
         onClick={() => ref.current?.focus()}
       >
         {/* One grid cell holds both, so a long placeholder grows the box instead of spilling out of it. */}
@@ -62,10 +62,10 @@ export function BigInput({
         {empty && (
           <div
             aria-hidden
-            className="pointer-events-none col-start-1 row-start-1 select-none text-[18px] italic leading-[1.45] text-[#5A747E] sm:text-[20px]"
+            className="pointer-events-none col-start-1 row-start-1 select-none text-[18px] italic leading-[1.45] text-inkSoft sm:text-[20px]"
           >
             {placeholder}
-            <span className="ml-[2px] inline-block animate-cursor-blink not-italic font-light text-mutedTeal">|</span>
+            <span className="ml-[2px] inline-block animate-cursor-blink not-italic font-light text-deep">|</span>
           </div>
         )}
         <textarea
@@ -86,7 +86,7 @@ export function BigInput({
           spellCheck
           style={{ caretColor: empty ? "transparent" : undefined }}
           // The container draws the focus ring (focus-within), so the bare textarea needs none of its own.
-          className="col-start-1 row-start-1 block w-full resize-none overflow-hidden bg-transparent text-[18px] font-medium leading-[1.45] text-slate focus-visible:outline-none disabled:cursor-not-allowed sm:text-[20px]"
+          className="col-start-1 row-start-1 block w-full resize-none overflow-hidden bg-transparent text-[18px] font-semibold leading-[1.45] text-slate focus-visible:outline-none disabled:cursor-not-allowed sm:text-[20px]"
         />
         </div>
       </div>
@@ -101,9 +101,9 @@ export function BigInput({
               <button
                 type="button"
                 onClick={onSubmit}
-                className="tap flex items-center gap-1.5 rounded-full px-2 py-0.5 font-semibold text-slate transition-colors duration-150 hover:bg-white/55"
+                className="tap wp-press flex items-center gap-2 rounded-full bg-deep py-1 pl-1.5 pr-3 font-semibold text-cream shadow-[0_6px_14px_-8px_rgb(var(--c-deep-2)/0.7)] hover:bg-primaryHover"
               >
-                <kbd className="flex items-center gap-1 rounded-md border border-inkSoft/40 bg-white/50 px-1.5 py-px font-mono text-[11px]">
+                <kbd className="flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 font-mono text-[11px]">
                   Enter <CornerDownLeft size={11} />
                 </kbd>
                 {submitHint}

@@ -55,18 +55,18 @@ export function LayerRow({ layer, info, weight, maxWeight, status, tone, selecte
         type="button"
         onClick={onToggle}
         aria-pressed={selected}
-        className={`group relative w-full overflow-hidden rounded-2xl border px-3.5 py-3 text-left shadow-[0_1px_2px_rgba(53,89,107,0.06)] transition-[box-shadow,transform] duration-200 hover:-translate-y-px hover:shadow-[0_6px_18px_-8px_rgba(53,89,107,0.35)] ${TIER_SURFACE[tier]}`}
+        className={`wp-press group relative w-full overflow-hidden rounded-xl border px-3.5 py-3 text-left hover:shadow-[var(--shadow-1)] ${TIER_SURFACE[tier]}`}
       >
         {selected && (
           <motion.span
             layoutId="layer-selection"
             aria-hidden
-            className="pointer-events-none absolute inset-0 rounded-2xl ring-2 ring-mutedTeal/70 [background:linear-gradient(100deg,rgba(240,235,221,0.75),rgba(240,235,221,0.15))]"
+            className="pointer-events-none absolute inset-0 rounded-xl bg-deep/[0.06] ring-[1.5px] ring-inset ring-deep/50"
             transition={{ type: "spring", stiffness: 420, damping: 36 }}
           />
         )}
         <span className="relative flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="min-w-0 break-all font-mono text-[13px] font-medium text-slate">{layerId}</span>
+          <span className="min-w-0 break-all font-mono text-[13.5px] font-semibold text-slate">{layerId}</span>
           <TierBadge tier={tier} />
           {status && (
             <span className={`ml-auto inline-flex items-center gap-1.5 text-[11px] ${tone === "error" ? "font-semibold text-danger" : "text-inkSoft"}`} title="When this layer's input last received data">
@@ -88,7 +88,7 @@ export function LayerRow({ layer, info, weight, maxWeight, status, tone, selecte
           <span className="ml-auto inline-flex items-center gap-1.5">
             {tier === "locked" && <Lock aria-label="locked weight" className="h-3 w-3 text-slate/70" />}
             <span className="text-inkSoft">{isOverride ? "after Σ" : shiftOnly ? "before Σ" : "w"}</span>
-            <span className="font-mono tabular-nums text-slate">{isOverride ? "override" : shiftOnly ? "moves a layer" : fmtWeight(weight)}</span>
+            <span className="font-mono text-[14px] font-semibold tabular-nums text-slate">{isOverride ? "override" : shiftOnly ? "moves a layer" : fmtWeight(weight)}</span>
           </span>
         </span>
 
@@ -104,14 +104,14 @@ export function LayerRow({ layer, info, weight, maxWeight, status, tone, selecte
           </span>
         )}
 
-        <span aria-hidden className={`relative mt-2 h-1 ${shiftOnly ? "hidden" : "block"} overflow-hidden rounded-full bg-white/50`}>
+        <span aria-hidden className={`relative mt-2 h-1 ${shiftOnly ? "hidden" : "block"} overflow-hidden rounded-full bg-slate/10`}>
           <span
             className={`block h-full rounded-full transition-[width] duration-500 ${
               tier === "locked"
-                ? "bg-[repeating-linear-gradient(135deg,#A79F88_0_4px,#C9C2AE_4px_8px)]"
+                ? "bg-[repeating-linear-gradient(90deg,rgb(var(--c-tier-locked)/0.45)_0_2px,transparent_2px_6px)]"
                 : tier === "stiff"
-                  ? "bg-seaGlass"
-                  : "bg-[#7FC3C8]"
+                  ? "bg-tierStiff"
+                  : "bg-tierFlex"
             }`}
             style={{ width: `${pct}%` }}
           />
@@ -126,7 +126,7 @@ export function LayerRow({ layer, info, weight, maxWeight, status, tone, selecte
           initial={{ opacity: 0, y: -4 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.18 }}
-          className="mx-2 -mt-2 rounded-b-2xl border border-t-0 border-paleWater bg-cream/60 px-3.5 pb-3 pt-4"
+          className="mx-2 -mt-2 rounded-b-xl bg-sheet2 px-3.5 pb-3 pt-4"
         >
           {children}
         </motion.div>

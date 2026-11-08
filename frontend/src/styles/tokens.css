@@ -1,0 +1,170 @@
+/* ---------------------------------------------------------------------------------------------
+   Colour tokens: the one place the palette lives (DESIGN.md §8, "sunlit surface over deep water").
+   Tailwind's colours read these as RGB triplets (tailwind.config.js), so `bg-slate/40` still works.
+
+   :root keeps the original values, so Home (the pond) and the EndUser page look exactly as before.
+   .wp ("working pages": the builder, review, keys and console) switches to the working palette:
+     water (the ground) · sunlit sheets (where the dev works) · deep water (action, selection, the dock)
+     · koi coral for heat and risk only · ochre for "needs attention".
+   --------------------------------------------------------------------------------------------- */
+:root {
+  --c-mist: 220 238 241;
+  --c-pale-water: 187 220 227;
+  --c-washed-sky: 213 232 235;
+  --c-soft-aqua: 169 210 213;
+  --c-sage: 169 188 165;
+  --c-sea-glass: 141 185 183;
+  --c-muted-teal: 99 143 145;
+  --c-soft-stone: 215 209 192;
+  --c-slate: 53 89 107;
+  --c-ink: 69 96 108;
+  --c-ink-soft: 79 106 116;
+  --c-coral: 217 147 126;
+  --c-danger: 142 79 60;
+  --c-primary: 59 104 149;
+  --c-primary-hover: 51 92 133;
+  --c-cream: 240 235 221;
+
+  /* Working-page tokens (also defined here so a stray use outside .wp still renders sensibly). */
+  --c-sheet: 248 244 234;
+  --c-sheet-2: 240 234 219;
+  --c-deep: 43 86 112;
+  --c-deep-2: 31 67 87;
+  --c-attn: 143 98 32;
+  --c-attn-bg: 243 229 198;
+  --c-live: 47 122 106;
+  --c-tier-locked: 35 69 90;
+  --c-tier-stiff: 62 124 126;
+  --c-tier-flex: 95 138 85;
+  --c-heat-5: 158 68 48;
+  --c-on-deep: 244 239 226;
+  --c-on-deep-2: 199 216 222;
+  --c-attn-on-deep: 242 210 156;
+  --c-ok-on-deep: 185 220 207;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --shadow-1: 0 1px 2px rgba(23, 53, 71, 0.06), 0 8px 24px -14px rgba(23, 53, 71, 0.28);
+  --shadow-2: 0 2px 4px rgba(23, 53, 71, 0.06), 0 18px 40px -20px rgba(23, 53, 71, 0.38);
+  --caustic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240' fill='none' stroke='%23ffffff' stroke-width='1.6' stroke-linecap='round'%3E%3Cpath d='M0 40C30 30 50 52 80 38S130 20 160 44S210 60 240 40M0 120C25 105 55 132 90 112S150 95 175 125S220 140 240 120M0 200C35 190 60 212 95 196S150 180 180 205S225 215 240 200M40 0C55 30 30 60 50 90S70 140 45 170S30 220 40 240M130 0C120 25 150 55 135 85S115 140 140 165S150 220 130 240M200 0C215 30 190 70 205 100S225 150 200 180S190 225 200 240'/%3E%3C/svg%3E");
+}
+
+.wp {
+  --c-mist: 212 233 237;
+  --c-pale-water: 188 221 228;
+  --c-washed-sky: 230 242 244;
+  --c-muted-teal: 62 124 126;
+  --c-soft-stone: 228 222 205;
+  --c-slate: 35 69 90;
+  --c-ink: 69 98 111;
+  --c-ink-soft: 88 115 128;
+  --c-primary: 43 86 112;
+  --c-primary-hover: 35 74 98;
+  --c-cream: 248 244 234;
+  color: rgb(var(--c-slate));
+  caret-color: rgb(var(--c-deep));
+}
+.wp :focus-visible {
+  outline-color: rgb(var(--c-deep));
+}
+.wp ::selection {
+  background: rgba(222, 148, 120, 0.32);
+  color: rgb(var(--c-slate));
+}
+
+/* The working-page ground: pond water, lighter where the sun comes in at the upper left. */
+.wp-ground {
+  background:
+    radial-gradient(1100px 520px at 12% -8%, rgba(255, 252, 240, 0.85), transparent 70%),
+    linear-gradient(180deg, #e6f2f4 0%, #d4e9ed 55%, #cce4e9 100%);
+  background-attachment: fixed;
+}
+/* Caustic light: only the top band of a page (and inside maps), fading out downward. */
+.wp-caustic {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 380px;
+  pointer-events: none;
+  background-image: var(--caustic);
+  background-size: 320px 320px;
+  opacity: 0.26;
+  -webkit-mask-image: linear-gradient(180deg, #000, transparent);
+  mask-image: linear-gradient(180deg, #000, transparent);
+}
+
+/* A sunlit sheet: one per region, shadow only (no border on top of a shadow), no nested cards. */
+.wp-sheet {
+  border-radius: 16px;
+  background: rgb(var(--c-sheet));
+  box-shadow: var(--shadow-1);
+}
+
+/* Tags: square-shouldered, never pills (pills are for buttons). */
+.wp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Status dot with the koi ripple ring. */
+.wp-dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 9999px;
+  background: rgb(var(--c-live));
+}
+.wp-dot::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  border: 1.5px solid currentColor;
+  color: rgb(var(--c-live));
+  opacity: 0.35;
+}
+.wp-dot.is-off { background: rgb(var(--c-coral)); }
+.wp-dot.is-off::after { color: rgb(var(--c-coral)); }
+.wp-dot.is-attn { background: #c08a33; }
+.wp-dot.is-attn::after { color: #c08a33; }
+@media (prefers-reduced-motion: no-preference) {
+  .wp-dot.is-live::after { animation: wp-ripple 2.4s var(--ease-out) infinite; }
+}
+@keyframes wp-ripple {
+  from { transform: scale(0.6); opacity: 0.6; }
+  to { transform: scale(1.9); opacity: 0; }
+}
+
+/* Everything pressable answers the press (Emil): a small scale-down, ease-out, under 200 ms. */
+.wp-press {
+  transition: transform 160ms var(--ease-out), background-color 150ms var(--ease-out), color 150ms var(--ease-out),
+    box-shadow 150ms var(--ease-out);
+}
+.wp-press:not(:disabled):active { transform: scale(0.97); }
+
+/* The action dock: deep water under the sunlit work, with the logo's wave as its top edge. */
+.wp-dock {
+  position: relative;
+  background: rgb(var(--c-deep-2));
+  color: rgb(var(--c-on-deep));
+  box-shadow: 0 -12px 30px -18px rgba(23, 53, 71, 0.6);
+}
+.wp-dock::before {
+  content: "";
+  position: absolute;
+  inset: -9px 0 auto 0;
+  height: 10px;
+  pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='10'%3E%3Cpath d='M0 10V6C10 2 20 2 30 6S50 10 60 6S75 2 80 6V10Z' fill='%231F4357'/%3E%3C/svg%3E") repeat-x;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wp-press:not(:disabled):active { transform: none; }
+}

@@ -31,7 +31,7 @@ export function VerificationScores({ view }: { view: VerificationView }) {
           })}
         </ol>
       )}
-      <p className={`text-[12px] ${view.cold_start ? "text-[#8A5A3C]" : "text-ink"}`}>
+      <p className={`text-[12px] ${view.cold_start ? "text-attn" : "text-ink"}`}>
         {view.cold_start
           ? "Cold start: flexible weight changes are rejected until two methods have data."
           : `${view.ticks} ticks in the last ${Math.round(view.window_s)} s`}

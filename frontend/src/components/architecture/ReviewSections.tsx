@@ -861,7 +861,7 @@ export function RoutingSection({ d }: { d: SpecDraft }) {
               onChange={(e) => setRouting({ fallback_text: e.target.value })}
               className={`${field} block w-full max-w-[70ch] resize-y`}
             />
-            <span className={`block text-[12px] tabular-nums ${over ? "font-semibold text-[#8A4B39]" : "text-ink"}`}>
+            <span className={`block text-[12px] tabular-nums ${over ? "font-semibold text-danger" : "text-ink"}`}>
               {fallback.length} / {FALLBACK_TEXT_MAX}
             </span>
           </label>

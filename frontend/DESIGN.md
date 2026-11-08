@@ -71,7 +71,7 @@ The reference is a painted overhead view of a koi pond. The original screenshot 
 - **Avoid:** pure white or black backgrounds, neon, saturated pastels, purple AI gradients, heavy glassmorphism, dark-mode dashboards.
 - **Texture:** subtle watercolor grain, atmospheric gradients, mist, organic edges and soft shadows, always keeping text readable.
 - **Type:**
-  - Fredoka for the hero and logo only.
+  - Fredoka for the hero, the logo and page titles (the builder's step titles) only.
   - Nunito Sans for the UI.
   - IBM Plex Mono for technical values: coordinates, weights, layer ids and traces.
   - Technical pages stay restrained and use no oversized type.
@@ -138,3 +138,26 @@ The reference is a painted overhead view of a koi pond. The original screenshot 
   - Show a static fallback without WebGL.
   - On mobile, render fewer decorative objects.
 - **Screen targets:** desktop first, then tablet with stacked or resized panels, then mobile with stacked panels and every function still available.
+
+## 8. Working pages: "sunlit surface over deep water"
+
+The builder (`/new/*`), proposal review, keys and console share one system. Home and the EndUser page keep their own look.
+
+- **Where the tokens live:** `src/styles/tokens.css` is the only place colours are defined. Tailwind's colour names read them as CSS variables (`tailwind.config.js`). `:root` holds the original values; `.wp`, set by `MainLayout` on working routes, swaps in the working palette. Components never use a raw hex.
+- **Layers of depth:**
+  - **Water** is the ground, lighter where the sun comes in at the upper left (`.wp-ground`). Caustic light (`.wp-caustic`) appears only across the top band of a page.
+  - **Sunlit sheets** (`.wp-sheet`, `#F8F4EA`, radius 16, shadow only) are where the dev works: one per region, never nested. A list is one sheet with hairline dividers.
+  - **Deep water** (`deep #2B5670`, `deep2 #1F4357`) marks action and selection: primary buttons, the current step, the selected tab underline, the bottom dock and the map's bezel.
+- **Colour roles:** deep blue is the only accent. Koi coral is for heat and risk only. "Needs attention" is ochre (`attn`, `attnBg`), so it's never confused with a hotspot. Tiers are distinct: locked is solid deep with a lock, stiff is teal, flexible is reed green.
+- **Type:**
+  - Fredoka is for page titles (32/600, 27 on phones) and the logo.
+  - Nunito Sans is for the UI: section titles 18/700, body 15, help 13. Labels are sentence case; no tiny uppercase labels.
+  - IBM Plex Mono is only for real data: ids, weights, coordinates, URLs and ticks.
+  - Placeholders are italic and lighter, so they never read as a value.
+- **Signature:** the logo's double wave is the path between builder steps (solid once walked, dotted ahead) and the top edge of the bottom dock (`.wp-dock`).
+- **Shapes:** buttons are pills; tags are square-shouldered chips (`.wp-chip`, radius 6); sheets have radius 16; the hero input and the map bezel have radius 20.
+- **Motion (Emil Kowalski's rules):**
+  - Every pressable element scales to 0.97 on press (`.wp-press`, `.bld-btn`).
+  - Use `cubic-bezier(0.23, 1, 0.32, 1)`, 150–250 ms, transform and opacity only.
+  - The only constant motion is the Live dot's ripple and the input caret.
+  - All motion respects `prefers-reduced-motion`.

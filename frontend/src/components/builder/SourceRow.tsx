@@ -126,7 +126,9 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, transition: { duration: 0.15 } }}
       transition={{ duration: reduce ? 0 : 0.22, ease: EASE_OUT }}
-      className={`bld-card flex flex-col gap-2 px-4 py-3 sm:px-5 ${idBad ? "!bg-[#F6E6DD]/85" : ""}`}
+      className={`flex flex-col gap-2 px-4 py-3.5 sm:px-5 ${
+        idBad ? "bg-danger/[0.07]" : attention ? "bg-gradient-to-r from-attnBg/75 to-attnBg/25" : ""
+      }`}
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 sm:flex-nowrap">
         {editing ? (
@@ -151,7 +153,7 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
             type="button"
             onClick={() => setEditing(true)}
             title="Rename: this id appears in the source's address"
-            className="hit group relative flex min-w-0 max-w-[14rem] shrink-0 items-center gap-1 rounded-md px-1 font-mono text-[13px] font-semibold text-slate transition-colors duration-150 hover:bg-white/60"
+            className="hit wp-press group relative flex min-w-0 max-w-[14rem] shrink-0 items-center gap-1.5 rounded-md px-1 font-mono text-[14.5px] font-semibold text-slate hover:bg-slate/[0.06]"
           >
             <span className="truncate">{source.id}</span>
             <Pencil size={11} className="shrink-0 text-ink opacity-60 transition-opacity duration-150 group-hover:opacity-100" aria-hidden />
@@ -172,9 +174,9 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
             aria-controls={panelId}
             onClick={() => setOpen((o) => !o)}
             title={attention ?? undefined}
-            className="bld-btn bld-btn-quiet bld-btn-sm gap-1 font-semibold"
+            className={`bld-btn bld-btn-sm gap-1.5 font-semibold ${attention ? "bld-btn-secondary" : "bld-btn-quiet"}`}
           >
-            {attention && <span className="h-1.5 w-1.5 rounded-full bg-danger" aria-hidden />}
+            {attention && <span className="wp-dot is-attn !h-1.5 !w-1.5" aria-hidden />}
             Options
             {attention && <span className="sr-only"> (needs attention)</span>}
             <ChevronDown size={13} aria-hidden className={`bld-chevron ${open ? "is-open" : ""}`} />
@@ -183,7 +185,7 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
             type="button"
             onClick={onRemove}
             title="Remove"
-            className="bld-press hit relative flex items-center justify-center rounded-full p-1.5 text-ink transition-colors duration-150 hover:bg-white/60 hover:text-slate"
+            className="bld-press hit relative flex items-center justify-center rounded-full p-1.5 text-ink hover:bg-slate/[0.07] hover:text-slate"
           >
             <X size={14} aria-hidden />
             <span className="sr-only">Remove {source.id}</span>

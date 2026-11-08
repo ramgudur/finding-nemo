@@ -16,9 +16,12 @@ interface Props {
   next?: { label: string; onClick: () => void };
   /** Announce status changes (off when another live region already narrates them). */
   live?: boolean;
+  /** Match a wide step's content width (Sources). */
+  wide?: boolean;
 }
 
-export function StepFooter({ back, summary, problems, readyText, action, next, live = true }: Props) {
+export function StepFooter({ back, summary, problems, readyText, action, next, live = true, wide = false }: Props) {
+  const width = wide ? "max-w-[1120px]" : "max-w-3xl";
   const blocked = problems.length > 0;
   const more = problems.length - 1;
   const [open, setOpen] = useState(false);
@@ -29,7 +32,7 @@ export function StepFooter({ back, summary, problems, readyText, action, next, l
   }, [more]);
   return (
     <div
-      className="fixed inset-x-0 bottom-0 z-20 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-5"
+      className="fixed inset-x-0 bottom-0 z-20"
       onKeyDown={(e) => {
         if (e.key === "Escape" && showList) {
           e.stopPropagation();
@@ -38,7 +41,7 @@ export function StepFooter({ back, summary, problems, readyText, action, next, l
       }}
     >
       {showList && (
-        <div className="mx-auto mb-2 max-w-3xl rounded-2xl bg-[#F6F3EA]/95 px-4 py-3 shadow-[0_18px_44px_-22px_rgba(53,89,107,0.65)] backdrop-blur-md">
+        <div className={`mx-4 mb-4 rounded-2xl bg-sheet px-4 py-3 shadow-[var(--shadow-2)] sm:mx-auto ${width}`}>
           <p className="text-xs font-semibold text-slate">Still to fix before you continue</p>
           <ul id={listId} className="mt-1.5 max-h-[40vh] list-disc space-y-1 overflow-y-auto pl-4 text-[13px] text-ink marker:text-inkSoft">
             {problems.map((x) => (
@@ -49,11 +52,13 @@ export function StepFooter({ back, summary, problems, readyText, action, next, l
           </ul>
         </div>
       )}
-      <div className="mx-auto flex max-w-3xl items-center gap-3 rounded-[20px] bg-[#F6F3EA]/95 px-2 py-2 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset,0_18px_44px_-22px_rgba(53,89,107,0.65)] backdrop-blur-md sm:px-3 sm:py-2.5">
+      {/* The dock: deep water under the sunlit work, the logo's wave along its top edge. */}
+      <div className="wp-dock pb-[env(safe-area-inset-bottom)]">
+      <div className={`mx-auto flex items-center gap-3 px-3 py-3 sm:px-6 sm:py-3.5 ${width}`}>
         {back ? (
           <Link
             to={back.to}
-            className="bld-btn bld-btn-quiet tap shrink-0"
+            className="bld-btn tap shrink-0 px-3 text-onDeep hover:bg-white/10"
           >
             <ArrowLeft size={16} aria-hidden /> <span className="hidden sm:inline">{back.label}</span>
             <span className="sr-only sm:hidden">{back.label}</span>
@@ -62,9 +67,9 @@ export function StepFooter({ back, summary, problems, readyText, action, next, l
           <span className="w-2" />
         )}
         <div className="flex min-w-0 flex-1 flex-col">
-          {summary && <span className="truncate text-sm font-semibold text-slate">{summary}</span>}
+          {summary && <span className="truncate text-[15px] font-extrabold text-onDeep">{summary}</span>}
           <p
-            className={`truncate text-xs max-sm:line-clamp-2 max-sm:whitespace-normal ${blocked ? "text-ink" : "text-mutedTeal"} ${summary ? "" : "text-sm"}`}
+            className={`truncate text-[13px] max-sm:line-clamp-2 max-sm:whitespace-normal ${blocked ? "text-attnOnDeep" : "text-okOnDeep"} ${summary ? "" : "text-sm"}`}
             title={blocked ? problems[0] : readyText}
             aria-live={live ? "polite" : "off"}
           >
@@ -76,7 +81,7 @@ export function StepFooter({ back, summary, problems, readyText, action, next, l
               aria-expanded={showList}
               aria-controls={showList ? listId : undefined}
               onClick={() => setOpen((o) => !o)}
-              className="hit relative flex w-fit items-center gap-0.5 rounded-md text-xs font-semibold text-slate underline underline-offset-[3px] hover:text-primaryHover"
+              className="hit relative flex w-fit items-center gap-0.5 rounded-md text-xs font-semibold text-onDeep2 underline underline-offset-[3px] hover:text-onDeep"
             >
               {showList ? "Hide the list" : `+${more} more`}
               <ChevronDown
@@ -93,11 +98,12 @@ export function StepFooter({ back, summary, problems, readyText, action, next, l
             type="button"
             disabled={blocked}
             onClick={next.onClick}
-            className="bld-btn bld-btn-primary tap shrink-0 px-5 py-2.5 max-sm:px-4"
+            className="bld-btn tap shrink-0 bg-cream px-5 py-3 text-[15px] text-deep2 shadow-[0_6px_16px_-8px_rgba(0,0,0,0.5)] hover:bg-onDeep disabled:bg-cream/30 disabled:text-onDeep/70 disabled:shadow-none max-sm:px-4"
           >
             {next.label} <ArrowRight size={16} aria-hidden />
           </button>
         )}
+      </div>
       </div>
     </div>
   );

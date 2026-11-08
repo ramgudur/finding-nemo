@@ -49,14 +49,14 @@ function Row({ spec, input, ingestKey }: { spec: AppSpec; input: InputSpec; inge
     setBusy(false);
   };
   return (
-    <li className="space-y-2 rounded-2xl bg-white/50 px-4 py-3 ring-1 ring-paleWater/70">
+    <li className="space-y-2 rounded-xl bg-sheet px-4 py-3 shadow-[inset_0_0_0_1px_rgb(var(--c-slate)/0.12)]">
       <div className="flex flex-wrap items-center gap-3">
         <span className="min-w-0 flex-1 font-mono text-[14px] font-semibold text-slate">{input.id}</span>
         <button
           type="button"
           onClick={() => void run()}
           disabled={!ingestKey || busy}
-          className="keys-press tap inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-[13px] font-semibold text-cream shadow-[0_4px_14px_rgba(59,104,149,0.25)] hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
+          className="keys-press tap inline-flex items-center gap-1.5 rounded-full bg-deep px-4 py-2 text-[13.5px] font-bold text-cream hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
         >
           {busy ? <Loader2 aria-hidden className="h-3.5 w-3.5 animate-spin" /> : <Send aria-hidden className="h-3.5 w-3.5" />}
           Send a test event
@@ -65,16 +65,16 @@ function Row({ spec, input, ingestKey }: { spec: AppSpec; input: InputSpec; inge
       {res && (
         <div role="status" className="keys-reveal space-y-1.5">
           {"error" in res ? (
-            <p className="text-[12.5px] text-danger">{res.error}</p>
+            <p className="text-[13.5px] text-danger">{res.error}</p>
           ) : (
-            <p className="flex flex-wrap items-baseline gap-2 font-mono text-[12.5px]">
+            <p className="flex flex-wrap items-baseline gap-2 font-mono text-[13.5px]">
               <span className={`rounded-md px-1.5 py-0.5 font-semibold ${ok ? "bg-seaGlass/40 text-slate" : "bg-coral/30 text-danger"}`}>{res.status}</span>
               <span className="min-w-0 break-all text-slate">{res.body}</span>
             </p>
           )}
-          {res && "status" in res && !ok && HINTS[res.status] && <p className="text-[12.5px] text-ink">{HINTS[res.status]}</p>}
+          {res && "status" in res && !ok && HINTS[res.status] && <p className="text-[13.5px] text-ink">{HINTS[res.status]}</p>}
           {ok && (
-            <p className="text-[12.5px] text-ink">
+            <p className="text-[13.5px] text-ink">
               Accepted at the centre of your area as <span className="font-mono">setup-test</span>. It shows on the console map within a tick.
             </p>
           )}
@@ -89,7 +89,7 @@ export function TryIt(props: { spec: AppSpec; inputs: InputSpec[]; ingestKey: st
   return (
     <div className="space-y-2">
       {!ingestKey && (
-        <p className="max-w-[68ch] rounded-xl bg-white/50 px-3 py-2 text-[13px] text-ink">
+        <p className="max-w-[68ch] rounded-xl bg-sheet2 px-3 py-2 text-[13.5px] text-ink">
           The ingest key is no longer in this tab, so the page can't send for you. Use an example above with your saved key.
         </p>
       )}
@@ -101,11 +101,11 @@ export function TryIt(props: { spec: AppSpec; inputs: InputSpec[]; ingestKey: st
       <button
         type="button"
         onClick={onOpenConsole}
-        className="keys-press inline-flex items-center gap-1 rounded-full px-1 text-[13px] font-semibold text-primary underline-offset-2 hover:underline"
+        className="keys-press inline-flex items-center gap-1 rounded-full px-1 text-[13px] font-bold text-deep underline-offset-2 hover:underline"
       >
         See it land in the console <ArrowRight aria-hidden className="h-3.5 w-3.5" />
       </button>
-      {ingestKey && <p className="text-[12px] text-ink">Save your keys first: leaving this page hides them for good.</p>}
+      {ingestKey && <p className="text-[13.5px] text-ink">Save your keys first: leaving this page hides them for good.</p>}
     </div>
   );
 }
