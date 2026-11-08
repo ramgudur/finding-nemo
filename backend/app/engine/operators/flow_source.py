@@ -7,7 +7,13 @@ Ported from reference/flowsource.py (the lead's reference). Two outputs from the
   2. extras["point"]: weighted least-squares intersection of back-extended movement lines,
      with Cauchy robust reweighting, plus whether the flow is a source or a sink.
 
-Needs tracks (several pings per user), not single taps.
+Physics model for the point estimate: each track is fitted with constant velocity over the window
+(least-squares x(t), y(t)), so the line's anchor and heading use every ping instead of only the first
+and last. That averages position noise and resists tracks whose end points are off. `uncertainty_m`
+is the 1-sigma semi-major axis of the estimate's covariance (residual variance x inverse normal matrix).
+Benchmark: tests/bench_flow_source.py.
+
+Needs tracks (several pings per entity), not single taps.
 """
 
 from __future__ import annotations
@@ -65,34 +71,51 @@ def divergence(x: np.ndarray, y: np.ndarray, uidx: np.ndarray, w: np.ndarray, gr
     return div
 
 
-def displacements(
-    x: np.ndarray, y: np.ndarray, uidx: np.ndarray, min_move_m: float
+def track_fits(
+    x: np.ndarray, y: np.ndarray, t: np.ndarray, uidx: np.ndarray, min_move_m: float
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """First -> last ping per user (a long baseline beats position jitter).
-    Returns (start_xy [N,2], unit_dir [N,2], dist [N], user index [N]) for users who moved."""
+    """Constant-velocity least-squares fit per track (inputs sorted by (user, time)).
+    Returns (start_xy [N,2] = fitted position at the track's first time, unit_dir [N,2],
+    dist [N] = fitted distance covered, user index [N]) for tracks that moved at least min_move_m."""
+    empty = np.zeros((0, 2))
     if len(x) == 0:
-        empty = np.zeros((0, 2))
         return empty, empty, np.zeros(0), np.zeros(0, dtype=int)
-    users, first = np.unique(uidx, return_index=True)
-    last = np.r_[first[1:], len(uidx)] - 1
-    keep = last > first
-    first, last, users = first[keep], last[keep], users[keep]
-    start = np.c_[x[first], y[first]]
-    d = np.c_[x[last], y[last]] - start
-    dist = np.linalg.norm(d, axis=1)
-    moved = dist >= max(min_move_m, 1e-9)
-    return start[moved], d[moved] / dist[moved, None], dist[moved], users[moved]
+    users, first, counts = np.unique(uidx, return_index=True, return_counts=True)
+    k = np.searchsorted(users, uidx)
+    tau = t - t[first][k]
+    n = counts.astype(float)
+
+    def s(v: np.ndarray) -> np.ndarray:
+        return np.bincount(k, weights=v, minlength=len(users))
+
+    st, stt = s(tau), s(tau * tau)
+    sx, sy, stx, sty = s(x), s(y), s(tau * x), s(tau * y)
+    denom = n * stt - st * st
+    span = np.zeros(len(users))
+    np.maximum.at(span, k, tau)
+    ok = (counts >= 2) & (denom > 1e-9) & (span > 0)
+    safe = np.where(ok, denom, 1.0)
+    vx, vy = (n * stx - st * sx) / safe, (n * sty - st * sy) / safe
+    x0, y0 = (sx - vx * st) / n, (sy - vy * st) / n
+    speed = np.hypot(vx, vy)
+    dist = speed * span
+    keep = ok & (dist >= max(min_move_m, 1e-9))
+    start = np.c_[x0, y0][keep]
+    direction = np.c_[vx, vy][keep] / speed[keep, None]
+    return start, direction, dist[keep], users[keep]
 
 
 def backproject(
     start: np.ndarray, direction: np.ndarray, w: np.ndarray, params: FlowSourceParams
-) -> tuple[np.ndarray, str, float] | None:
+) -> tuple[np.ndarray, str, float, float] | None:
     """Weighted least-squares point closest to all back-extended lines, robustly reweighted.
-    Returns (xy, kind, spread_m), or None if there are too few tracks or the lines are near-parallel."""
+    Returns (xy, kind, spread_m, uncertainty_m), or None if there are too few tracks or the lines
+    are near-parallel."""
     if len(start) < params.min_tracks or w.sum() <= 0:
         return None
     eye = np.eye(2)
     proj = eye[None] - direction[:, :, None] * direction[:, None, :]  # [N,2,2], orthogonal to each line
+    w0 = w
     p = start.mean(axis=0)
     r = np.zeros(len(start))
     for _ in range(params.iters):
@@ -103,11 +126,18 @@ def backproject(
         b = np.einsum("n,nij,nj->i", w, proj, start)
         p = np.linalg.solve(a, b)
         r = np.linalg.norm(np.einsum("nij,nj->ni", proj, p - start), axis=1)
-        w = w / (1.0 + (r / params.robust_scale_m) ** 2)
+        w = w0 / (1.0 + (r / params.robust_scale_m) ** 2)
     radial = np.einsum("ij,ij->i", direction, start - p)  # > 0: moving away from p
     kind = "source" if np.average(np.sign(radial), weights=w) > 0 else "sink"
     spread = float(np.sqrt(np.average(r**2, weights=w)))
-    return p, kind, spread
+    # covariance of p: residual variance x inverse normal matrix, with weights scaled to sum to the
+    # effective number of tracks so the estimate tightens as independent tracks agree
+    n_eff = float(w.sum() ** 2 / np.sum(w**2))
+    wn = w * (n_eff / w.sum())
+    a = np.einsum("n,nij->ij", wn, proj)
+    sigma2 = float(np.sum(wn * r**2) / max(n_eff - 2.0, 1.0))
+    uncertainty = float(np.sqrt(sigma2 * np.linalg.eigvalsh(np.linalg.inv(a))[-1]))
+    return p, kind, spread, uncertainty
 
 
 def flow_source(
@@ -130,15 +160,20 @@ def flow_source(
     sign = 1.0 if params.polarity == "source" else -1.0
     layer = np.maximum(sign * gaussian_smooth(div, params.sigma_m / grid.cell_m), 0.0)
 
-    start, direction, dist, users = displacements(x, y, uidx, params.min_move_m)
+    start, direction, dist, users = track_fits(x, y, ev.t[order], uidx, params.min_move_m)
     first_of_user = np.unique(uidx, return_index=True)[1]
     user_trust = w[first_of_user][users] if len(users) else np.zeros(0)
     line_w = np.minimum(dist, params.max_move_weight_m) * user_trust
 
-    extras: dict = {"n_tracks": len(start), "point": None, "kind": None, "spread_m": None}
+    extras: dict = {"n_tracks": len(start), "point": None, "kind": None, "spread_m": None, "uncertainty_m": None}
     est = backproject(start, direction, line_w, params)
     if est is not None:
-        p, kind, spread = est
+        p, kind, spread, uncertainty = est
         lat, lon = grid.to_latlon(np.array([p[0]]), np.array([p[1]]))
-        extras.update(point={"lat": float(lat[0]), "lon": float(lon[0])}, kind=kind, spread_m=spread)
+        extras.update(
+            point={"lat": float(lat[0]), "lon": float(lon[0])},
+            kind=kind,
+            spread_m=spread,
+            uncertainty_m=uncertainty,
+        )
     return OperatorResult(layer=layer, extras=extras)
