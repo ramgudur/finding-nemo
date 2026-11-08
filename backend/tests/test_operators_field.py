@@ -3,7 +3,7 @@ import pytest
 from pydantic import ValidationError
 from synthetic import FixedClock, LocalGrid, events_from_xy
 
-from app.engine.operators.field import FieldParams, advect, field, vector_uv
+from app.engine.operators.field import FieldParams, advect, default_diffusion, field, vector_uv
 
 GRID = LocalGrid()
 FIELDS = ("value", "speed", "dir")
@@ -84,3 +84,60 @@ def test_to_convention_reverses_the_shift():
     assert np.unravel_index(np.argmax(west), west.shape) == (10, 8)  # coming from the east
     with pytest.raises(ValidationError):
         FieldParams(vector_dir_convention="sideways")
+
+
+def _centroid(layer):
+    rows, cols = np.indices(layer.shape)
+    m = layer.sum()
+    return float((cols * layer).sum() / m), float((rows * layer).sum() / m)
+
+
+def test_rotation_follows_the_curved_field():
+    """Solid-body rotation about the grid center: a quarter turn lands where the analytic answer is.
+    A single straight back-trace (the old scheme) would miss by several cells."""
+    h, w = 40, 40
+    c = (w - 1) / 2
+    rows, cols = np.indices((h, w), dtype=float)
+    cell_m, omega = 10.0, 0.01  # rad/s
+    u = -omega * (rows - c) * cell_m  # m/s
+    v = omega * (cols - c) * cell_m
+    layer = np.zeros((h, w))
+    layer[int(c), int(c) + 12] = 1.0  # 12 cells east of center
+    out = advect(layer, u, v, cell_m, horizon_s=(np.pi / 2) / omega)
+    x, y = _centroid(out)
+    rx, ry = (int(c) + 12) - c, int(c) - c  # start relative to the center
+    ex, ey = c - ry, c + rx  # a quarter turn counter-clockwise
+    assert abs(x - ex) < 0.6 and abs(y - ey) < 0.6
+    assert out.sum() == pytest.approx(1.0)
+
+
+def test_mass_is_conserved_in_converging_and_diverging_flow():
+    h, w = 30, 30
+    c = (w - 1) / 2
+    rows, cols = np.indices((h, w), dtype=float)
+    layer = np.zeros((h, w))
+    layer[10:20, 10:20] = 1.0
+    for k in (-0.004, 0.004):  # converging, diverging (per second)
+        out = advect(layer, k * (cols - c) * 10.0, k * (rows - c) * 10.0, 10.0, horizon_s=100.0)
+        assert out.sum() == pytest.approx(layer.sum())
+    conv = advect(layer, -0.004 * (cols - c) * 10.0, -0.004 * (rows - c) * 10.0, 10.0, horizon_s=100.0)
+    assert conv.max() > 1.0  # mass piles up where flow converges
+
+
+def test_long_horizon_is_stable_and_loses_only_outflow():
+    layer = np.zeros(GRID.shape)
+    layer[10, 10] = 1.0
+    gone = advect(layer, 5.0, 0.0, GRID.cell_m, horizon_s=3600.0)  # 18 km east: leaves the grid
+    assert np.isfinite(gone).all() and gone.sum() == 0.0
+    back = advect(layer, 1e-4, 0.0, GRID.cell_m, horizon_s=3600.0)  # 0.36 m: stays put
+    assert back.sum() == pytest.approx(1.0) and np.argmax(back) == np.argmax(layer)
+
+
+def test_unset_diffusion_defaults_to_half_a_cell_of_spread():
+    rows = [("p1", 90.0, 250.0, 250.0, 1.0, 0.5, 90.0)]
+    r = _run(rows, vector_speed_field="speed", vector_dir_field="dir", shift_layer="x.y", shift_horizon_s=200.0)
+    d = r.extras["shift"]["args"]["diffusion_m2_s"]
+    assert d == pytest.approx(default_diffusion(GRID.cell_m, 200.0))
+    assert np.sqrt(2 * d * 200.0) == pytest.approx(GRID.cell_m / 2)  # sigma scales with cell_m
+    sharp = _run(rows, vector_speed_field="speed", vector_dir_field="dir", shift_layer="x.y", diffusion_m2_s=0.0)
+    assert sharp.extras["shift"]["args"]["diffusion_m2_s"] == 0.0
