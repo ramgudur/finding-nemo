@@ -461,3 +461,11 @@ export interface OperatorInfo {
   role: "layer" | "override";
   params: Record<string, unknown>;
 }
+
+// --- Architecture right panel additions (LayerStackPanel) ---
+
+/** Change gains `reverts` (POST /v1/apps/{app}/changes/{id}/revert returns the new Change). Declaration
+ * merging keeps this block separate from the original Change interface above. */
+export interface Change {
+  reverts?: string | null; // id of the Change this one reverts; null otherwise
+}

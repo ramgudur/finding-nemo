@@ -103,6 +103,9 @@ export const api = {
   verification: (appId: string, key: string) => get<VerificationView>(`${app(appId)}/verification`, key),
   pin: (appId: string, key: string, layerId: string, body: PinRequest) =>
     request<WeightsView>("POST", `${app(appId)}/weights/${encodeURIComponent(layerId)}/pin`, key, body),
+  // dev revert of one Change through the same tools and guards; 409 stale, 422 not revertible / guard rejected
+  revertChange: (appId: string, key: string, changeId: string) =>
+    request<Change>("POST", `${app(appId)}/changes/${encodeURIComponent(changeId)}/revert`, key),
   // DEMO_MODE only: these 404 otherwise
   debugClock: () => get<ClockState>("/debug/clock"),
   controlClock: (appId: string, key: string, body: ClockControl) =>

@@ -1,5 +1,8 @@
 // Current layer weights with tier and pin state; the dev can pin/unpin (recorded as a Change).
+// Locked weights show a lock and no pin control: nothing can move them.
+import { Lock, Pin, PinOff } from "lucide-react";
 import type { WeightsView } from "../../api/types";
+import { TierBadge } from "../architecture/TierBadge";
 
 interface Props {
   view: WeightsView;
@@ -9,43 +12,41 @@ interface Props {
 
 export function WeightsPanel({ view, busy, onPin }: Props) {
   return (
-    <fieldset style={{ border: "1px solid #ddd", borderRadius: 4, padding: "8px 12px" }}>
-      <legend>Weights</legend>
-      <table style={{ borderCollapse: "collapse", fontSize: 14 }}>
-        <thead>
-          <tr style={{ color: "#666", textAlign: "left" }}>
-            <th style={{ padding: "2px 8px 2px 0" }}>layer</th>
-            <th style={{ padding: "2px 8px" }}>tier</th>
-            <th style={{ padding: "2px 8px", textAlign: "right" }}>weight</th>
-            <th style={{ padding: "2px 0 2px 8px" }}>pin</th>
-          </tr>
-        </thead>
-        <tbody>
-          {view.layers.map((l) => (
-            <tr key={l.layer_id}>
-              <td style={{ padding: "2px 8px 2px 0" }}>{l.layer_id}</td>
-              <td style={{ padding: "2px 8px", color: "#444" }}>{l.tier}</td>
-              <td style={{ padding: "2px 8px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{l.weight.toFixed(3)}</td>
-              <td style={{ padding: "2px 0 2px 8px" }}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={l.pinned}
-                    disabled={busy}
-                    onChange={(e) => onPin(l.layer_id, e.target.checked)}
-                    aria-label={`pin ${l.layer_id}`}
-                  />{" "}
-                  {l.pinned ? "pinned" : ""}
-                </label>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p style={{ margin: "6px 0 0", color: "#444", fontSize: 14 }}>
-        Total flexible weight: <strong style={{ fontVariantNumeric: "tabular-nums" }}>{view.flexible_total.toFixed(3)}</strong>{" "}
-        <span style={{ color: "#666" }}>(stays fixed when flexible weights are renormalized)</span>
+    <div className="space-y-2">
+      <ul className="divide-y divide-paleWater/80 overflow-hidden rounded-2xl border border-paleWater bg-white/35">
+        {view.layers.map((l) => (
+          <li key={l.layer_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+            <span className="min-w-[9rem] flex-1 break-all font-mono text-[12.5px] text-slate">{l.layer_id}</span>
+            <TierBadge tier={l.tier} compact />
+            <span className="w-14 text-right font-mono text-[12.5px] tabular-nums text-slate">{l.weight.toFixed(3)}</span>
+            {l.tier === "locked" ? (
+              <span className="inline-flex w-[76px] items-center justify-center gap-1 text-[11px] text-inkSoft" title="Locked: nothing can move this weight">
+                <Lock aria-hidden className="h-3 w-3" /> fixed
+              </span>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                aria-pressed={l.pinned}
+                aria-label={`${l.pinned ? "unpin" : "pin"} ${l.layer_id}`}
+                onClick={() => onPin(l.layer_id, !l.pinned)}
+                className={`inline-flex w-[76px] items-center justify-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold transition-[transform,box-shadow,background-color] duration-150 hover:-translate-y-px disabled:opacity-50 ${
+                  l.pinned
+                    ? "bg-coral/25 text-[#8A4B39] ring-1 ring-coral/60"
+                    : "bg-white/60 text-ink ring-1 ring-paleWater hover:shadow-sm"
+                }`}
+              >
+                {l.pinned ? <PinOff aria-hidden className="h-3 w-3" /> : <Pin aria-hidden className="h-3 w-3" />}
+                {l.pinned ? "unpin" : "pin"}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="text-[12px] text-ink">
+        Total flexible weight <span className="font-mono tabular-nums text-slate">{view.flexible_total.toFixed(3)}</span>{" "}
+        <span className="text-inkSoft">stays fixed when flexible weights are renormalized. A pinned weight is never moved by an agent.</span>
       </p>
-    </fieldset>
+    </div>
   );
 }
