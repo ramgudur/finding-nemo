@@ -289,7 +289,8 @@ The engine reads time only from `core/clock.py`. Use fixed seeds in tests.
 - **Rate limits:** a token bucket per provider (`NVIDIA_RPM`, `OPENROUTER_RPM`), with backoff and retries on 429/5xx.
 - **Reasoning switch:** `extra_body={"chat_template_kwargs": {"enable_thinking": bool, "low_effort"?: bool}}`. When on, reasoning comes back in `message.reasoning_content`. Check on the first call that each provider honors this.
 - **Inputs to the model:** never send raw event arrays. Tools return compact summaries.
-- **Output validation:** every agent output must validate against a Pydantic model. On failure, retry once with `REPAIR_MODEL`, then log and give up.
+- **Output validation:** agents change state only through tool calls, and every tool call's arguments are validated (Pydantic, extra keys rejected) before guards run. An agent's closing message is a free-text summary for the trace. When an agent's final answer *is* the structured output (e.g. the Scout's per-article extraction), it must validate against a Pydantic model; on failure retry once with `REPAIR_MODEL`, then log and give up.
+- **Trigger cooldown:** triggered agent runs (new hotspot, override, verification drop) are at least 15 s apart per app, on top of the scheduled interval, so a moving hotspot can't burn the rate budget.
 
 | Agent | Model | When it runs | Max iterations | Tools | Output |
 |---|---|---|---|---|---|
@@ -439,3 +440,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-07:** Spoof defaults are neutral: with no `plausibility`, no speed limit and no constant-speed/straight-line checks; entity-agnostic checks still run. Guard against silent weak detection: the Compiler proposes `plausibility` for every point/track input, `validate_spec` warns when a flexible point/track input lacks it, and the builder shows it at confirmation. Campus Alert pins its own values (#62).
 - **2026-11-07:** WS: malformed or unknown frames get `{type: "error", reason}` with a fixed reason, and the socket stays open. Key checks never raise: non-string, empty or non-ASCII keys are just wrong keys (fixed once in `db.py`). Hotspots stay authority-only until #67 lands the contributor fix (rule 8 fail-safe).
 - **2026-11-07:** `flow_source` extras gain `uncertainty_m` (1-sigma semi-major axis of the point estimate, from the WLS covariance; calibration checked in the #84 benchmark). Internal extras, not a `models.py` contract. Debug API shapes in PR #90 approved (DEMO_MODE only).
+- **2026-11-07:** Agent output validation: state changes only via validated tool calls; a structured final answer (e.g. Scout extraction) still validates with one repair retry; closing messages are free text (PR #92). Triggered runs are at least 15 s apart per app.
