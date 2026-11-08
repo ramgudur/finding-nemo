@@ -10,6 +10,7 @@ Flow for a weight change (CLAUDE.md rule 1):
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.core.models import Change
 from app.engine import backtest as bt_mod
 from app.engine.operators.base import Events
+from app.engine.tick import ALL_HISTORY
 from app.tools import guards
 from app.tools.context import TestedCandidate, ToolContext
 from app.tools.guards import GuardError
@@ -52,9 +54,15 @@ class PinWeightArgs(_Args):
 
 
 def _events_for_backtest(ctx: ToolContext, params: bt_mod.BacktestParams) -> dict[str, Events]:
+    """Each input's events over the backtest window plus the history its operators need before it
+    (all history for override inputs), so the replay sees what the live tick sees."""
     now = ctx.now()
-    since = now - params.window_s - ctx.engine.lookback_s  # operators need decay history before the window
-    return {inp.id: ctx.engine.source.events(ctx.app_id, inp.id, since, now) for inp in ctx.spec.inputs}
+    out = {}
+    for inp in ctx.spec.inputs:
+        back = ctx.runtime.input_lookback(inp.id, ctx.engine.lookback_s)
+        since = now - params.window_s - back if math.isfinite(back) else ALL_HISTORY
+        out[inp.id] = ctx.engine.source.events(ctx.app_id, inp.id, since, now)
+    return out
 
 
 def run_backtest(ctx: ToolContext, args: RunBacktestArgs) -> dict[str, Any]:
