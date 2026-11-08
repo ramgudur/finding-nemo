@@ -191,3 +191,35 @@ def test_routing_with_dev_points_but_no_destination_label_passes_finalize():
     ok = call_tool(ctx, "finalize_app", {"spec": raw})  # the model sent none; the dev's are written in
     assert ok["ok"], ok
     assert [d.model_dump() for d in ctx.db.get_app("campus-alert").routing.destination_points] == DEV_POINTS
+
+
+def test_recorded_live_neutral_compile_meets_the_164_bar():
+    """A real Nemotron run (recorded live on build.nvidia.com) of a neutral example app, replayed:
+    it finalizes in 3 model calls (catalogue in the task, no list_operators round trip), names the
+    places the intent asks about, and proposes every verification method its inputs can feed."""
+    fixture = _json.loads(
+        (_Path(__file__).parent / "fixtures" / "llm" / "compiler_neutral_fleet_live.json").read_text(encoding="utf-8")
+    )
+    req = fixture["input"]
+    fake = FakeAsyncOpenAI(fixture)
+    llm = LlmRouter(Settings(_env_file=None), clients={"nvidia": fake, "openrouter": fake})
+    ctx = _ctx(req["app_id"])
+    spec = asyncio.run(
+        run_compiler(
+            ctx,
+            app_id=req["app_id"],
+            intent=req["intent"],
+            grid=req["grid"],
+            inputs=req["inputs"],
+            llm=llm,
+            cache=CompilerCache(),
+        )
+    )
+    assert spec is not None and spec.status == "pending_confirmation"
+    assert len(fake.calls) == 3
+    assert spec.outputs.poi_labels.mode != "off" and spec.outputs.poi_labels.label_set
+    assert len(spec.verification) >= 2
+    assert [i.meaning for i in spec.inputs] == [i["meaning"] for i in req["inputs"]]  # pinned verbatim
+    from app.tools.compiler_tools import _spec_warnings
+
+    assert not any("leaves out" in w for w in _spec_warnings(spec))

@@ -1,0 +1,286 @@
+{
+  "scenario": "compiler_neutral_fleet_live",
+  "description": "RECORDED LIVE run (real Nemotron on build.nvidia.com, model nvidia/nemotron-3.5-super-vl-120b-a12b, #164 prompt) of a neutral example app ('fleet', not a demo app). Replay with the input block's request.",
+  "input": {
+    "app_id": "neutral-fleet",
+    "intent": "See where our delivery vans get stuck or sit idle, and where dispatch has marked roads as blocked.",
+    "grid": {
+      "cell_m": 25,
+      "bbox": {
+        "min_lat": 40.0,
+        "min_lon": -100.0,
+        "max_lat": 40.018,
+        "max_lon": -99.9765
+      }
+    },
+    "inputs": [
+      {
+        "id": "vans",
+        "kind": "push",
+        "shape": "track",
+        "meaning": "Each van sends its GPS position every ten seconds while on shift; vans drive on roads at city speeds and stop at deliveries.",
+        "fields": [
+          {
+            "name": "van_id",
+            "type": "string",
+            "required": false,
+            "description": "Van identifier."
+          }
+        ]
+      },
+      {
+        "id": "blocked",
+        "kind": "push",
+        "shape": "fixed_point",
+        "meaning": "A dispatcher marks a spot where a road is blocked; it stays until they clear it.",
+        "fields": [
+          {
+            "name": "cleared",
+            "type": "boolean",
+            "required": false,
+            "description": "True when cleared."
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call-48cc5294-a1bd-4103-90d4-a11992b2fc8f",
+            "name": "validate_spec",
+            "arguments": {
+              "spec": {
+                "app_id": "neutral-fleet",
+                "intent": "See where our delivery vans get stuck or sit idle, and where dispatch has marked roads as blocked.",
+                "grid": {
+                  "cell_m": 25,
+                  "bbox": {
+                    "min_lat": 40.0,
+                    "min_lon": -100.0,
+                    "max_lat": 40.018,
+                    "max_lon": -99.9765
+                  }
+                },
+                "inputs": [
+                  {
+                    "id": "vans",
+                    "kind": "push",
+                    "shape": "track",
+                    "tier": "stiff",
+                    "visibility": "authority",
+                    "meaning": "Each van sends its GPS position every ten seconds while on shift; vans drive on roads at city speeds and stop at deliveries.",
+                    "fields": [
+                      {
+                        "name": "van_id",
+                        "type": "string",
+                        "required": false,
+                        "description": "Van identifier."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "dwell",
+                        "weight": 0.7
+                      }
+                    ],
+                    "plausibility": {
+                      "max_speed_mps": 15.0,
+                      "jitter_m": 10.0,
+                      "flag_constant_speed": true,
+                      "flag_straight_line": true
+                    }
+                  },
+                  {
+                    "id": "blocked",
+                    "kind": "push",
+                    "shape": "fixed_point",
+                    "tier": "locked",
+                    "visibility": "authority",
+                    "meaning": "A dispatcher marks a spot where a road is blocked; it stays until they clear it.",
+                    "fields": [
+                      {
+                        "name": "cleared",
+                        "type": "boolean",
+                        "required": false,
+                        "description": "True when cleared."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "override",
+                        "weight": 1.0
+                      }
+                    ],
+                    "plausibility": null
+                  }
+                ],
+                "verification": [
+                  {
+                    "method": "authority_confirmation",
+                    "priority": 1
+                  },
+                  {
+                    "method": "predictive_check",
+                    "priority": 2
+                  }
+                ],
+                "outputs": {
+                  "layers": [
+                    {
+                      "id": "score",
+                      "visibility": "authority"
+                    }
+                  ],
+                  "poi_labels": {
+                    "mode": "auto",
+                    "min_confidence": 0.5,
+                    "label_set": [
+                      {
+                        "label": "idle_van",
+                        "sensitive": false,
+                        "destination": false
+                      },
+                      {
+                        "label": "blocked_road",
+                        "sensitive": false,
+                        "destination": false
+                      }
+                    ]
+                  }
+                },
+                "routing": {
+                  "enabled": false,
+                  "destination_points": []
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call-d8038379-5ba4-467b-a90a-87b081c7f07a",
+            "name": "finalize_app",
+            "arguments": {
+              "spec": {
+                "app_id": "neutral-fleet",
+                "intent": "See where our delivery vans get stuck or sit idle, and where dispatch has marked roads as blocked.",
+                "grid": {
+                  "cell_m": 25,
+                  "bbox": {
+                    "min_lat": 40.0,
+                    "min_lon": -100.0,
+                    "max_lat": 40.018,
+                    "max_lon": -99.9765
+                  }
+                },
+                "inputs": [
+                  {
+                    "id": "vans",
+                    "kind": "push",
+                    "shape": "track",
+                    "tier": "stiff",
+                    "visibility": "authority",
+                    "meaning": "Each van sends its GPS position every ten seconds while on shift; vans drive on roads at city speeds and stop at deliveries.",
+                    "fields": [
+                      {
+                        "name": "van_id",
+                        "type": "string",
+                        "required": false,
+                        "description": "Van identifier."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "dwell",
+                        "weight": 0.7
+                      }
+                    ],
+                    "plausibility": {
+                      "max_speed_mps": 15.0,
+                      "jitter_m": 10.0,
+                      "flag_constant_speed": true,
+                      "flag_straight_line": true
+                    }
+                  },
+                  {
+                    "id": "blocked",
+                    "kind": "push",
+                    "shape": "fixed_point",
+                    "tier": "locked",
+                    "visibility": "authority",
+                    "meaning": "A dispatcher marks a spot where a road is blocked; it stays until they clear it.",
+                    "fields": [
+                      {
+                        "name": "cleared",
+                        "type": "boolean",
+                        "required": false,
+                        "description": "True when cleared."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "override",
+                        "weight": 1.0
+                      }
+                    ],
+                    "plausibility": null
+                  }
+                ],
+                "verification": [
+                  {
+                    "method": "authority_confirmation",
+                    "priority": 1
+                  },
+                  {
+                    "method": "predictive_check",
+                    "priority": 2
+                  }
+                ],
+                "outputs": {
+                  "layers": [
+                    {
+                      "id": "score",
+                      "visibility": "authority"
+                    }
+                  ],
+                  "poi_labels": {
+                    "mode": "auto",
+                    "min_confidence": 0.5,
+                    "label_set": [
+                      {
+                        "label": "idle_van",
+                        "sensitive": false,
+                        "destination": false
+                      },
+                      {
+                        "label": "blocked_road",
+                        "sensitive": false,
+                        "destination": false
+                      }
+                    ]
+                  }
+                },
+                "routing": {
+                  "enabled": false,
+                  "destination_points": []
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "content": "Proposed spec is complete and pending your confirmation:\n\n**App:** `neutral-fleet` — see where delivery vans get stuck/idle and where dispatch marked roads blocked.\n\n**Inputs:**\n- `vans` (track, push, stiff, authority) — dwell operator at 0.7 weight; plausibility: max 15 m/s, 10 m jitter, flag constant speed & straight line (vans stop at deliveries, so neither should normally hold).\n- `blocked` (fixed_point, push, locked, authority) — override operator at 1.0 weight; no plausibility (fixed point).\n\n**Verification:** authority_confirmation (priority 1), predictive_check (priority 2) — both triggered by the weighted dwell layer and the locked blocked input.\n\n**Outputs:** `score` layer authority-only; POI labels `auto` with `idle_van` and `blocked_road` (neither sensitive, neither a destination); routing disabled (no directive to guide users anywhere).\n\nConfirm to activate."
+      }
+    }
+  ]
+}
