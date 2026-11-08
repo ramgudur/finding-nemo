@@ -269,7 +269,11 @@ def set_connector(
     if config is not None:
         _check_connector_url(ctx, config)
     new_inputs = [i.model_copy(update={"connector": config}) if i.id == input_id else i for i in spec.inputs]
-    _save(ctx, spec.model_copy(update={"inputs": new_inputs}))
+    new_spec = spec.model_copy(update={"inputs": new_inputs})
+    _save(ctx, new_spec)
+    rt = getattr(ctx.engine, "apps", {}).get(ctx.app_id)
+    if rt is not None:  # keep the running engine's copy in step (tools read ctx.spec = the runtime's spec)
+        rt.spec = new_spec
     change = Change(
         id=str(uuid.uuid4()),
         app_id=ctx.app_id,
@@ -301,10 +305,26 @@ def test_connector(ctx: ToolContext, args: TestConnectorArgs) -> dict[str, Any]:
             with httpx.Client() as client:
                 events = check_connector_sync(client, inp.connector, ctx.now())
     except Exception as e:  # noqa: BLE001 - reported to the agent, not raised past the tool
-        raise GuardError(f"connector test failed: {type(e).__name__}: {e}") from None
+        _drop_failed(ctx, args.connector_id, f"connector test failed: {type(e).__name__}")
+        raise GuardError(f"connector test failed: {type(e).__name__}: {e}; the connector was removed") from None
     if not events:
-        raise GuardError("connector returned no items")
-    return {"connector_id": args.connector_id, "config_valid": True, "items_parsed": len(events)}
+        _drop_failed(ctx, args.connector_id, "connector returned no items")
+        raise GuardError("connector returned no items; the connector was removed")
+    located = sum(1 for e in events if e.get("lat") is not None)
+    return {
+        "connector_id": args.connector_id,
+        "config_valid": True,
+        "items_parsed": len(events),
+        "items_located": located,  # the rest are placed by the locator (extract + geocode) when polled
+    }
+
+
+def _drop_failed(ctx: ToolContext, input_id: str, why: str) -> None:
+    """An agent's connector that fails its test is removed, so a run never leaves a broken source
+    polling; the removal is a Change like any other (revertible)."""
+    if ctx.actor == "dev":
+        return
+    set_connector(ctx, input_id, None, reason=f"removed after a failed test: {why}")
 
 
 def request_scout(ctx: ToolContext, args: RequestScoutArgs) -> dict[str, Any]:
@@ -368,6 +388,16 @@ def finalize_app(ctx: ToolContext, args: FinalizeAppArgs) -> dict[str, Any]:
                 for i in raw["inputs"]
             ],
         }
+    dev_webhooks: dict[str, Any] = ctx.extra.get("dev_webhooks") or {}
+    if dev_webhooks and isinstance(raw, dict) and isinstance(raw.get("inputs"), list):
+        # the dev's webhook mapping, verbatim: the model can't change it (#222)
+        raw = {
+            **raw,
+            "inputs": [
+                {**i, "webhook": dev_webhooks[i["id"]]} if isinstance(i, dict) and i.get("id") in dev_webhooks else i
+                for i in raw["inputs"]
+            ],
+        }
     try:
         spec = AppSpec.model_validate(raw)
     except Exception as e:  # noqa: BLE001 - surfaced to the agent, not raised past the tool
@@ -397,6 +427,23 @@ def finalize_app(ctx: ToolContext, args: FinalizeAppArgs) -> dict[str, Any]:
                     before=prev.model_dump(mode="json") if prev is not None else None,
                     after=inp.connector.model_dump(mode="json"),
                     reason=f"the dev's chosen source for {inp.id!r}, copied at compile",
+                    actor="dev",
+                    t=ctx.now_dt(),
+                )
+            )
+    before_webhooks = {i.id: i.webhook for i in existing.inputs} if existing is not None else {}
+    for inp in spec.inputs:
+        if inp.id in dev_webhooks and inp.webhook is not None and before_webhooks.get(inp.id) != inp.webhook:
+            prev = before_webhooks.get(inp.id)
+            ctx.db.add_change(
+                Change(
+                    id=str(uuid.uuid4()),
+                    app_id=ctx.app_id,
+                    kind="webhook",
+                    target=inp.id,
+                    before=prev.model_dump(mode="json") if prev is not None else None,
+                    after=inp.webhook.model_dump(mode="json"),
+                    reason=f"the dev's webhook mapping for {inp.id!r}, copied at compile",
                     actor="dev",
                     t=ctx.now_dt(),
                 )

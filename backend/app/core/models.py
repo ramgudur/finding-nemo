@@ -30,7 +30,7 @@ PoiLabelMode = Literal["auto", "on", "off"]
 PoiStatus = Literal["active", "retired"]
 LabelProposalStatus = Literal["open", "accepted", "dismissed"]
 AgentName = Literal["compiler", "scout", "critic", "poi_labeler", "message_guard"]
-ChangeKind = Literal["weight", "trust", "poi", "connector", "spec_confirm", "spec_edit"]
+ChangeKind = Literal["weight", "trust", "poi", "connector", "webhook", "spec_confirm", "spec_edit"]
 Actor = Literal["agent", "dev"]
 Device = Literal["cpu", "gpu"]
 
@@ -135,6 +135,22 @@ class ConnectorConfig(Model):
     )
 
 
+TsFormat = Literal["iso", "epoch_s", "epoch_ms"]
+
+
+class WebhookMapping(Model):
+    """Push-input webhook: data only (rule 10), never code. Every path is a dotted field name with
+    optional list indices (e.g. "geometry.coordinates.1"), read from one JSON item at a time."""
+
+    items_path: str = Field(default="", description='Path to a list or one object; "" is the body itself.')
+    lat: str = Field(min_length=1)
+    lon: str = Field(min_length=1)
+    ts: str | None = Field(default=None, description="None means the item's receive time.")
+    ts_format: TsFormat = "iso"
+    user_id: str | None = None
+    fields: dict[str, str] = Field(default_factory=dict, description="Declared field name -> path.")
+
+
 class Plausibility(Model):
     """Per-input bounds for the spoof checks in `engine/trust.py` (tracks/points only).
 
@@ -157,6 +173,7 @@ class InputSpec(Model):
     meaning: str = Field(description="The dev's words, verbatim.")
     fields: list[InputField] = Field(default_factory=list)
     connector: ConnectorConfig | None = None
+    webhook: WebhookMapping | None = None
     operators: list[OperatorConfig] = Field(default_factory=list)
     plausibility: Plausibility | None = None
 
@@ -164,6 +181,8 @@ class InputSpec(Model):
     def _defaults_and_shape(self) -> InputSpec:
         if self.kind == "push" and self.connector is not None:
             raise ValueError(f"push input {self.id!r} must not have a connector")
+        if self.kind == "pull" and self.webhook is not None:
+            raise ValueError(f"pull input {self.id!r} must not have a webhook mapping")
         for o in self.operators:
             if not o.layer_id:
                 o.layer_id = f"{self.id}.{o.op}"
@@ -186,11 +205,16 @@ class CompileInput(Model):
         default=None,
         description="Pull only: the dev's chosen connector (URL or preset). Copied verbatim into the spec.",
     )
+    webhook: WebhookMapping | None = Field(
+        default=None, description="Push only: the dev's webhook mapping. Copied verbatim into the spec."
+    )
 
     @model_validator(mode="after")
     def _push_has_no_connector(self) -> CompileInput:
         if self.kind == "push" and self.connector is not None:
             raise ValueError(f"push input {self.id!r} must not have a connector")
+        if self.kind == "pull" and self.webhook is not None:
+            raise ValueError(f"pull input {self.id!r} must not have a webhook mapping")
         return self
 
 
@@ -601,3 +625,20 @@ class ScoutJobAccepted(Model):
     job_id: str
     app_id: str
     input_id: str
+
+
+# --- Webhook receiver (POST /v1/apps/{app}/webhooks/{input}) -------------------------
+
+
+class WebhookRejection(Model):
+    index: int
+    reason: str
+
+
+class WebhookReceipt(Model):
+    """202 response: each mapped item was validated like one `/events` body. The raw request
+    body is never stored (rule 8) -- only these per-item outcomes."""
+
+    received: int
+    accepted: int
+    rejected: list[WebhookRejection] = Field(default_factory=list, description="First 20 rejections only.")

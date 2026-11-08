@@ -152,7 +152,7 @@ def create_app(
     fastapi_app.include_router(trace_api.router)  # authority-only console reads + dev pin
     fastapi_app.include_router(scout_api.router)  # dev-requested Scout runs (authority only)
     fastapi_app.include_router(labels_api.router)  # authority-only label proposals (accept/dismiss)
-    fastapi_app.include_router(webhooks_api.router)  # 501 stub (CLAUDE.md Scope)
+    fastapi_app.include_router(webhooks_api.router)  # real webhook receiver (#222)
     fastapi_app.include_router(catalog_api.router)  # public operator catalogue
     if get_settings().demo_mode:  # /v1/debug/* exists only in demo mode; it alone reads sim ground truth (rule 9)
         debug_api.install(fastapi_app, engine)

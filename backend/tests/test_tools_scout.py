@@ -110,7 +110,7 @@ def test_fetch_url_returns_capped_text(ctx):
 @pytest.mark.parametrize(
     ("resp", "msg"),
     [
-        (httpx.Response(302, headers={"location": "http://127.0.0.1/"}), "redirects"),
+        (httpx.Response(302, headers={"location": "http://127.0.0.1/"}), "redirect refused"),
         (httpx.Response(200, content=b"\x89PNG", headers={"content-type": "image/png"}), "not a text"),
         (httpx.Response(200, content=b"a" * 600_000, headers={"content-type": "text/plain"}), "larger than"),
     ],
@@ -119,6 +119,33 @@ def test_fetch_url_refuses_redirects_binary_and_huge_bodies(ctx, resp, msg):
     ctx.extra["http_client"] = _client(lambda r: resp)
     out = call(ctx, "fetch_url", url=f"{PUBLIC}/x")
     assert out["ok"] is False and msg in out["error"]
+
+
+def test_fetch_url_follows_a_public_redirect_and_caps_hops(ctx):
+    def handler(r):
+        if r.url.path == "/old":
+            return httpx.Response(301, headers={"location": "/new"})
+        if r.url.path.startswith("/loop"):
+            return httpx.Response(302, headers={"location": f"/loop{len(r.url.path)}"})
+        return httpx.Response(200, text="<p>moved here</p>", headers={"content-type": "text/html"})
+
+    ctx.extra["http_client"] = _client(handler)
+    out = call(ctx, "fetch_url", url=f"{PUBLIC}/old")
+    assert out["ok"] and out["result"]["text"] == "moved here"
+    looped = call(ctx, "fetch_url", url=f"{PUBLIC}/loop")
+    assert looped["ok"] is False and "redirect" in looped["error"]
+
+
+def test_fetch_url_reads_compressed_bodies_once(ctx):
+    import gzip
+
+    body = gzip.compress(b"<p>compressed page</p>")
+    ctx.extra["http_client"] = _client(
+        lambda r: httpx.Response(200, content=body, headers={"content-type": "text/html", "content-encoding": "gzip"})
+    )
+    out = call(ctx, "fetch_url", url=f"{PUBLIC}/gz")
+    assert out["ok"], out  # was DecodingError: the body was decompressed twice
+    assert out["result"]["text"] == "compressed page"
 
 
 # -- probe_feed -------------------------------------------------------------------------------
@@ -187,3 +214,17 @@ def test_source_reliability_only_lowers_and_records_a_change(ctx):
 def test_scout_tools_are_scout_only(ctx):
     critic_names = {t["function"]["name"] for t in registry.tool_schemas("critic")}
     assert not {"web_search", "fetch_url", "probe_feed", "geocode", "set_source_reliability"} & critic_names
+
+
+def test_a_new_connector_is_visible_to_the_running_engine_at_once(ctx, monkeypatch):
+    """create_connector saved only to the DB, so tools reading the running spec (set_source_reliability)
+    said the input had no connector right after the Scout configured one (live run, #164 follow-on)."""
+    from app.connectors import url_guard
+
+    monkeypatch.setattr(url_guard, "check_url", lambda url, **kw: url)
+    pull = next(i for i in ctx.spec.inputs if i.kind == "pull")
+    r = call(ctx, "create_connector", input_id=pull.id, type="rss", url=f"{PUBLIC}/feed.xml")
+    assert r["ok"], r
+    assert ctx.spec.inputs[[i.id for i in ctx.spec.inputs].index(pull.id)].connector.url == f"{PUBLIC}/feed.xml"
+    rel = call(ctx, "set_source_reliability", input_id=pull.id, reliability=0.8, reason="regional outlet")
+    assert rel["ok"], rel

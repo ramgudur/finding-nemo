@@ -82,6 +82,22 @@ def test_push_input_with_connector_rejected():
         AppSpec.model_validate(bad)
 
 
+def test_pull_input_with_webhook_rejected():
+    bad = _spec()
+    bad["inputs"][0]["kind"] = "pull"
+    bad["inputs"][0]["webhook"] = {"lat": "lat", "lon": "lon"}
+    with pytest.raises(ValidationError, match="must not have a webhook mapping"):
+        AppSpec.model_validate(bad)
+
+
+def test_push_input_webhook_round_trips():
+    good = _spec()
+    good["inputs"][0]["webhook"] = {"items_path": "items", "lat": "lat", "lon": "lon"}
+    s = AppSpec.model_validate(good)
+    wh = s.inputs[0].webhook
+    assert wh is not None and wh.items_path == "items" and wh.ts_format == "iso" and wh.fields == {}
+
+
 def test_html_connector_type_rejected():
     bad = _spec()
     bad["inputs"][0].update(kind="pull", connector={"type": "html", "url": "https://example.com"})

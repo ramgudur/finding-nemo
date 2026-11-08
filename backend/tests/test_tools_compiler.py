@@ -411,6 +411,42 @@ def test_test_connector_reports_a_failed_fetch(ctx):
     assert r["ok"] is False and "connector test failed" in r["error"]
 
 
+def test_a_failed_agent_connector_test_removes_the_connector(ctx):
+    import httpx
+
+    _call(ctx, "create_input", {"id": "weather", "kind": "pull", "shape": "field", "tier": "stiff", "meaning": "wind"})
+    _call(ctx, "create_connector", {"input_id": "weather", "type": "json_api", "preset": "open_meteo"})
+    ctx.extra["http_client"] = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
+    r = _call(ctx, "test_connector", {"connector_id": "weather"})
+    assert r["ok"] is False and "removed" in r["error"]
+    assert next(i for i in ctx.db.get_app("draft-app").inputs if i.id == "weather").connector is None
+    removal = ctx.db.list_changes("draft-app", kind="connector")[-1]
+    assert removal.after is None and "failed test" in removal.reason
+
+
+def test_test_connector_counts_rss_items_without_coordinates(ctx):
+    """A normal news feed has no georss points; the live poller places its items with the locator,
+    so the test must count them (it used to report 'no items' and fail every such feed)."""
+    import httpx
+
+    _call(ctx, "create_input", {"id": "news", "kind": "pull", "shape": "document", "tier": "stiff", "meaning": "news"})
+    _call(ctx, "create_connector", {"input_id": "news", "type": "rss", "url": "https://feeds.example.org/a.xml"})
+    xml = (
+        '<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>'
+        "<item><title>Road closed on Main St</title><guid>1</guid></item>"
+        "<item><title>Another item</title><guid>2</guid></item>"
+        "</channel></rss>"
+    )
+    ctx.extra["http_client"] = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, text=xml, headers={"content-type": "application/rss+xml"})
+        )
+    )
+    r = _call(ctx, "test_connector", {"connector_id": "news"})
+    assert r["ok"] is True, r
+    assert r["result"]["items_parsed"] == 2 and r["result"]["items_located"] == 0
+
+
 def test_create_connector_writes_a_change(ctx):
     _call(
         ctx,
@@ -651,6 +687,38 @@ def test_finalize_app_refuses_an_unsafe_dev_connector_url(ctx, monkeypatch):
     r = _call(ctx, "finalize_app", {"spec": _pull_spec_dict()})
     assert r["ok"] is False and "connector URL refused" in r["error"]
     assert ctx.db.get_app("draft-app").status == "draft"
+
+
+# -- #222: the dev's chosen webhook mapping (CompileInput.webhook) is copied verbatim ----
+
+
+def test_finalize_app_copies_the_devs_webhook_mapping_over_the_models(ctx):
+    dev = {
+        "items_path": "items",
+        "lat": "lat",
+        "lon": "lon",
+        "ts": None,
+        "ts_format": "iso",
+        "user_id": None,
+        "fields": {},
+    }
+    ctx.extra["dev_webhooks"] = {"pings": dev}
+    spec = _good_spec_dict()
+    spec["inputs"][0]["webhook"] = {"items_path": "x", "lat": "a", "lon": "b"}  # the model's own guess
+    r = _call(ctx, "finalize_app", {"spec": spec})
+    assert r["ok"] is True, r
+    pings = next(i for i in ctx.db.get_app("draft-app").inputs if i.id == "pings")
+    assert pings.webhook.model_dump(mode="json") == dev
+    (change,) = ctx.db.list_changes("draft-app", kind="webhook")
+    assert change.actor == "dev" and change.target == "pings" and change.after == dev
+
+
+def test_finalize_app_adds_the_devs_webhook_mapping_when_the_model_left_it_out(ctx):
+    ctx.extra["dev_webhooks"] = {"pings": {"items_path": "", "lat": "lat", "lon": "lon"}}
+    r = _call(ctx, "finalize_app", {"spec": _good_spec_dict()})
+    assert r["ok"] is True, r
+    pings = next(i for i in ctx.db.get_app("draft-app").inputs if i.id == "pings")
+    assert pings.webhook.lat == "lat" and pings.webhook.lon == "lon"
 
 
 # -- the dev's declarations are pinned at finalize (#164) -----------------------------------------
