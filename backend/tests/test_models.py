@@ -42,6 +42,17 @@ def test_minimal_spec_fills_defaults():
     assert s.routing.rephrase is False
 
 
+def test_operator_params_feed_the_registry():
+    from app.engine.operators import registry
+
+    s = AppSpec.model_validate(_spec())
+    op = s.inputs[0].operators[0]
+    assert op.params() == {"half_life_s": 60}
+    assert registry.parse_params(op.op, op.params()).half_life_s == 60
+    op.noise_floor = 2.0
+    assert registry.parse_params(op.op, op.params()).noise_floor == 2.0
+
+
 def test_spec_round_trips_through_json():
     s = AppSpec.model_validate(_spec())
     assert AppSpec.model_validate_json(s.model_dump_json()) == s

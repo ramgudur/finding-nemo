@@ -84,6 +84,13 @@ class OperatorConfig(BaseModel):
     noise_floor: float | None = Field(default=None, gt=0)
     layer_id: str = Field(default="", description="Defaults to '<input_id>.<op>'.")
 
+    def params(self) -> dict[str, Any]:
+        """The operator's own params (extras, plus noise_floor when set): what `registry.run` takes."""
+        out = dict(self.model_extra or {})
+        if self.noise_floor is not None:
+            out["noise_floor"] = self.noise_floor
+        return out
+
 
 class ConnectorConfig(Model):
     """Pull-input connector. Config only: never code."""
