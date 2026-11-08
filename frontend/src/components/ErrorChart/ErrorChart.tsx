@@ -7,10 +7,10 @@ const W = 640;
 const H = 220;
 const PAD = { top: 12, right: 16, bottom: 28, left: 44 };
 const SERIES = [
-  { key: "hotspot_error_m", label: "Top hotspot", color: "#2a78d6" },
-  { key: "point_error_m", label: "Point estimate", color: "#eb6834" },
+  { key: "hotspot_error_m", label: "Top hotspot", color: "#4F80B0" },
+  { key: "point_error_m", label: "Point estimate", color: "#D9937E" },
 ] as const;
-const INK = { primary: "#0b0b0b", secondary: "#52514e", muted: "#8a8984", grid: "#e6e5e1", marker: "#8a8984" };
+const INK = { primary: "#35596B", secondary: "#526F7C", muted: "#8199A0", grid: "#BBDCE3", marker: "#638F91" };
 
 type Key = (typeof SERIES)[number]["key"];
 
@@ -56,7 +56,7 @@ export function ErrorChart({ data }: { data: ErrorSeries | null }) {
   if (!data) return null;
   if (!geo) {
     return (
-      <p style={{ color: INK.secondary, margin: 0 }}>
+      <p className="rounded-2xl border border-dashed border-softAqua bg-washedSky/50 p-4 text-sm text-ink">
         {data.truth_file ? "No ticks recorded inside the ground-truth window yet." : "No ground truth for this app yet (run the simulator)."}
       </p>
     );
@@ -78,12 +78,12 @@ export function ErrorChart({ data }: { data: ErrorSeries | null }) {
   };
 
   return (
-    <figure style={{ margin: 0 }}>
-      <figcaption style={{ color: INK.primary, fontWeight: 600, marginBottom: 4 }}>
+    <figure className="m-0 rounded-2xl border border-softAqua/70 bg-cream/60 p-4">
+      <figcaption className="mb-1 text-sm font-semibold text-slate">
         Error vs ground truth (m){" "}
-        <span style={{ color: INK.muted, fontWeight: 400, fontSize: 13 }}>demo only · {data.truth_file}</span>
+        <span className="font-mono text-[11px] font-normal text-inkSoft">demo only · {data.truth_file}</span>
       </figcaption>
-      <div style={{ display: "flex", gap: 16, fontSize: 13, color: INK.secondary, marginBottom: 4, flexWrap: "wrap" }}>
+      <div className="mb-1 flex flex-wrap gap-4 text-xs text-ink">
         {SERIES.map((s) => (
           <span key={s.key} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <svg width="16" height="4" aria-hidden="true">
@@ -99,18 +99,18 @@ export function ErrorChart({ data }: { data: ErrorSeries | null }) {
           Applied change
         </span>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: W, height: "auto", display: "block" }} role="img"
+      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" style={{ maxWidth: W }} role="img"
         aria-label={`Error over ${Math.round(span)} seconds, ${geo.markers.length} applied changes`}>
         {ticksY.map((v) => (
           <g key={v}>
             <line x1={PAD.left} x2={W - PAD.right} y1={geo.y(v)} y2={geo.y(v)} stroke={INK.grid} strokeWidth="1" />
-            <text x={PAD.left - 6} y={geo.y(v) + 4} textAnchor="end" fontSize="11" fill={INK.muted}>
+            <text x={PAD.left - 6} y={geo.y(v) + 4} textAnchor="end" fontSize="11" fontFamily="IBM Plex Mono, monospace" fill={INK.muted}>
               {Math.round(v)}
             </text>
           </g>
         ))}
         {ticksX.map((t, i) => (
-          <text key={t} x={geo.x(t)} y={H - 8} textAnchor={i === 0 ? "start" : i === ticksX.length - 1 ? "end" : "middle"} fontSize="11" fill={INK.muted}>
+          <text key={t} x={geo.x(t)} y={H - 8} textAnchor={i === 0 ? "start" : i === ticksX.length - 1 ? "end" : "middle"} fontSize="11" fontFamily="IBM Plex Mono, monospace" fill={INK.muted}>
             {new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
           </text>
         ))}
@@ -129,7 +129,7 @@ export function ErrorChart({ data }: { data: ErrorSeries | null }) {
             {SERIES.map((s) => {
               const v = hp[s.key as Key];
               return v === null ? null : (
-                <circle key={s.key} cx={geo.x(geo.ts[hover]!)} cy={geo.y(v)} r="4" fill={s.color} stroke="#fcfcfb" strokeWidth="2" />
+                <circle key={s.key} cx={geo.x(geo.ts[hover]!)} cy={geo.y(v)} r="4" fill={s.color} stroke="#F0EBDD" strokeWidth="2" />
               );
             })}
           </g>
@@ -137,7 +137,7 @@ export function ErrorChart({ data }: { data: ErrorSeries | null }) {
         <rect x={PAD.left} y={PAD.top} width={W - PAD.left - PAD.right} height={H - PAD.top - PAD.bottom}
           fill="transparent" onMouseMove={onMove} onMouseLeave={() => setHover(null)} />
       </svg>
-      <div style={{ minHeight: 20, fontSize: 13, color: INK.secondary }}>
+      <div className="min-h-[20px] font-mono text-[11px] text-ink">
         {hp
           ? `${new Date(hp.t).toLocaleTimeString()} · hotspot ${hp.hotspot_error_m ?? "-"} m · point ${hp.point_error_m ?? "-"} m`
           : `${geo.markers.length} applied change${geo.markers.length === 1 ? "" : "s"} in view`}

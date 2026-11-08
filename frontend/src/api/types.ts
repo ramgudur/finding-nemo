@@ -13,7 +13,7 @@ export type ConnectorType = "rss" | "json_api";
 export type PoiLabelMode = "auto" | "on" | "off";
 export type PoiStatus = "active" | "retired";
 export type AgentName = "compiler" | "scout" | "critic" | "poi_labeler" | "message_guard";
-export type ChangeKind = "weight" | "trust" | "poi" | "connector" | "spec_confirm" | "spec_edit";
+export type ChangeKind = "weight" | "trust" | "poi" | "connector" | "webhook" | "spec_confirm" | "spec_edit";
 export type Actor = "agent" | "dev";
 export type Device = "cpu" | "gpu";
 export type IsoDateTime = string;
@@ -77,8 +77,29 @@ export interface InputSpec {
   meaning: string;
   fields?: InputField[];
   connector?: ConnectorConfig | null;
+  webhook?: WebhookMapping | null; // push only
   operators?: OperatorConfig[];
   plausibility?: Plausibility | null;
+}
+
+export type TsFormat = "iso" | "epoch_s" | "epoch_ms";
+
+/** Push-input webhook mapping: data only (rule 10). Paths are dotted field names with optional list indices. */
+export interface WebhookMapping {
+  items_path?: string; // "" = the body itself
+  lat: string;
+  lon: string;
+  ts?: string | null; // null = the item's receive time
+  ts_format?: TsFormat; // default "iso"
+  user_id?: string | null;
+  fields?: Record<string, string>; // declared field name -> path
+}
+
+/** 202 from POST /v1/apps/{app}/webhooks/{input}. */
+export interface WebhookReceipt {
+  received: number;
+  accepted: number;
+  rejected: { index: number; reason: string }[]; // first 20 only
 }
 
 export interface VerificationSpec {
@@ -400,6 +421,8 @@ export interface CompileInput {
   fields?: InputField[];
   /** Pull only: the dev's chosen source (URL or preset), copied verbatim into the spec. */
   connector?: ConnectorConfig | null;
+  /** Push only: the dev's webhook mapping, copied verbatim into the spec. */
+  webhook?: WebhookMapping | null;
 }
 
 /** "Add a source" option types. No HTML scraper (rule 10). */
@@ -449,4 +472,46 @@ export interface ActivateResponse {
   app_id: string;
   ingest_key: string;
   authority_key: string;
+}
+
+// --- Public operator catalogue (api/catalog.py) ---
+
+/** One entry of GET /v1/operators: platform data only (names/descriptions/params schema), no app data. */
+export interface OperatorInfo {
+  name: string;
+  description: string;
+  shapes: InputShape[];
+  role: "layer" | "override";
+  params: Record<string, unknown>;
+}
+
+// --- Architecture right panel additions (LayerStackPanel) ---
+
+/** Change gains `reverts` (POST /v1/apps/{app}/changes/{id}/revert returns the new Change). Declaration
+ * merging keeps this block separate from the original Change interface above. */
+export interface Change {
+  reverts?: string | null; // id of the Change this one reverts; null otherwise
+}
+
+// --- Compile progress and failure (api/apps.py; added for the Sources page) ---
+
+/** Errors and warnings from the platform's spec checks, as plain strings. */
+export interface ValidateResult {
+  errors: string[];
+  warnings: string[];
+}
+
+/** GET /v1/apps/{app}/compile/status: public-safe progress (apps not active only; 404 otherwise). */
+export interface CompileStatus {
+  running: boolean;
+  step: number; // Compiler trace entries (model steps) since this compile started
+  elapsed_s: number; // 0 when not running
+  last_validate?: ValidateResult | null;
+}
+
+/** `detail` of the 422 from POST /v1/apps/{app}/compile when the Compiler never finalized. */
+export interface CompileFailure {
+  reason: string;
+  errors: string[];
+  warnings: string[];
 }

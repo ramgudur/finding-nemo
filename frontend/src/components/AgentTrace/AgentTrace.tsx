@@ -10,41 +10,46 @@ const FIELDS: [keyof TraceEntry, string][] = [
   ["why", "why"],
 ];
 
-export function AgentTrace({ entries }: { entries: TraceEntry[] }) {
+export function AgentTrace({ entries, empty = "No agent runs yet." }: { entries: TraceEntry[]; empty?: string }) {
   const newest = [...entries].reverse();
+  if (newest.length === 0) return <p className="text-[12.5px] text-inkSoft">{empty}</p>;
   return (
-    <fieldset style={{ border: "1px solid #ddd", borderRadius: 4, padding: "8px 12px", minWidth: 0 }}>
-      <legend>Agent trace</legend>
-      {newest.length === 0 ? (
-        <p style={{ margin: 0, color: "#666" }}>No agent runs yet.</p>
-      ) : (
-        <ul style={{ listStyle: "none", margin: 0, padding: 0, maxHeight: 360, overflowY: "auto" }}>
-          {newest.map((e, i) => (
-            <li key={`${e.t}-${i}`} style={{ borderTop: i ? "1px solid #eee" : "none", padding: "6px 0", fontSize: 14 }}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
-                <strong>{e.agent}</strong>
-                <span style={{ color: "#666" }}>{new Date(e.t).toLocaleTimeString()}</span>
-                {e.model && <span style={{ color: "#666" }}>{e.model}</span>}
-                {e.tool_calls.length > 0 && (
-                  <span style={{ color: "#666" }}>tools: {e.tool_calls.map((c) => c.name + (c.ok ? "" : " (failed)")).join(", ")}</span>
-                )}
-              </div>
-              {e.skipped_reason ? (
-                <div style={{ color: "#8a5a00" }}>skipped: {e.skipped_reason}</div>
-              ) : (
-                <dl style={{ margin: "2px 0 0", display: "grid", gridTemplateColumns: "max-content 1fr", gap: "0 8px" }}>
-                  {FIELDS.filter(([k]) => e[k]).map(([k, label]) => (
-                    <div key={k} style={{ display: "contents" }}>
-                      <dt style={{ color: "#666" }}>{label}</dt>
-                      <dd style={{ margin: 0, overflowWrap: "anywhere" }}>{String(e[k])}</dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </fieldset>
+    <ul className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+      {newest.map((e, i) => (
+        <li key={`${e.t}-${i}`} className="rounded-xl border border-paleWater bg-white/35 px-3 py-2 text-[12.5px]">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="font-semibold text-slate">{e.agent}</span>
+            <span className="font-mono text-[11px] text-inkSoft">{new Date(e.t).toLocaleTimeString()}</span>
+            {e.model && <span className="break-all font-mono text-[11px] text-inkSoft">{e.model}</span>}
+          </div>
+          {e.tool_calls.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {e.tool_calls.map((c, n) => (
+                <span
+                  key={n}
+                  title={c.result_summary}
+                  className={`rounded-full px-1.5 py-px font-mono text-[10.5px] ${c.ok ? "bg-seaGlass/25 text-[#2F6265]" : "bg-coral/25 text-[#8A4B39]"}`}
+                >
+                  {c.name}
+                  {c.ok ? "" : " (failed)"}
+                </span>
+              ))}
+            </div>
+          )}
+          {e.skipped_reason ? (
+            <div className="mt-1 text-[#8A5A3C]">skipped: {e.skipped_reason}</div>
+          ) : (
+            <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5">
+              {FIELDS.filter(([k]) => e[k]).map(([k, label]) => (
+                <div key={k} className="contents">
+                  <dt className="text-inkSoft">{label}</dt>
+                  <dd className="text-ink [overflow-wrap:anywhere]">{String(e[k])}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -1,35 +1,60 @@
-import { useEffect, useState } from "react";
-import { AppPage } from "./pages/AppPage";
-import { Builder } from "./pages/Builder";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
+import { MainLayout } from "./components/layout/MainLayout";
+import AppConsole from "./pages/AppConsole";
+import AppKeys from "./pages/AppKeys";
+import AppReview from "./pages/AppReview";
 import { EndUser } from "./pages/EndUser";
+import { Home } from "./pages/Home";
+import { PastProjects } from "./pages/PastProjects";
+import { AboutStep } from "./pages/builder/AboutStep";
+import { AreaStep } from "./pages/builder/AreaStep";
+import { BuilderLayout } from "./pages/builder/BuilderLayout";
+import { NewEntry } from "./pages/builder/NewEntry";
+import { ReviewStep } from "./pages/builder/ReviewStep";
+import { SourcesStep } from "./pages/builder/SourcesStep";
 
-// Minimal path routing (no router dependency):
-//   /                  -> Builder
-//   /apps/:appId       -> AppPage (dev console, authority view)
-//   /apps/:appId/go    -> EndUser (public instructions only)
-function route(path: string) {
-  const m = path.match(/^\/apps\/([^/]+)(\/go)?\/?$/);
-  if (!m?.[1]) return <Builder />;
-  const appId = decodeURIComponent(m[1]);
-  return m[2] ? <EndUser appId={appId} /> : <AppPage appId={appId} />;
+function EndUserRoute() {
+  // EndUser.tsx predates the router and takes its appId as a prop.
+  const { appId } = useParams<{ appId: string }>();
+  return <EndUser appId={appId ?? ""} />;
+}
+
+/** Old /architecture/:appId links (bookmarks, Past Projects records) now live at /apps/:appId. */
+function LegacyArchitectureRedirect() {
+  const { appId } = useParams<{ appId: string }>();
+  return <Navigate to={`/apps/${encodeURIComponent(appId ?? "")}`} replace />;
 }
 
 export function App() {
-  const [health, setHealth] = useState("checking");
-
-  useEffect(() => {
-    fetch("/v1/health")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((b: { status: string }) => setHealth(b.status))
-      .catch(() => setHealth("backend unreachable"));
-  }, []);
-
   return (
-    <>
-      <header style={{ padding: "8px 16px", borderBottom: "1px solid #ddd", fontFamily: "system-ui" }}>
-        Geo heat-map platform · API: {health}
-      </header>
-      <main style={{ padding: 16, fontFamily: "system-ui" }}>{route(window.location.pathname)}</main>
-    </>
+    <Routes>
+      {/* No MainLayout: EndUser is public-only, phone-first, and keeps its own chrome. */}
+      <Route path="/apps/:appId/go" element={<EndUserRoute />} />
+
+      <Route element={<MainLayout />}>
+        <Route path="/" element={<Home />} />
+
+        {/* The stepped builder: 1 About · 2 Area · 3 Sources · 4 Review & compile. */}
+        <Route path="/new" element={<BuilderLayout />}>
+          <Route index element={<NewEntry />} />
+          <Route path="about" element={<AboutStep />} />
+          <Route path="area" element={<AreaStep />} />
+          <Route path="sources" element={<SourcesStep />} />
+          <Route path="review" element={<ReviewStep />} />
+          <Route path="*" element={<Navigate to="/new" replace />} />
+        </Route>
+
+        <Route path="/projects" element={<PastProjects />} />
+        <Route path="/apps/:appId/review" element={<AppReview />} />
+        <Route path="/apps/:appId/keys" element={<AppKeys />} />
+        <Route path="/apps/:appId" element={<AppConsole />} />
+
+        {/* Old routes. */}
+        <Route path="/sources" element={<Navigate to="/new" replace />} />
+        <Route path="/architecture" element={<Navigate to="/new" replace />} />
+        <Route path="/architecture/:appId" element={<LegacyArchitectureRedirect />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
   );
 }
