@@ -7,7 +7,6 @@ from app.core.clock import SimClock
 from app.core.models import AppSpec
 from app.engine.grid import Grid
 from app.engine.operators import registry
-from app.engine.operators.base import OperatorParams, OperatorResult
 from app.engine.tick import AppRuntime, InMemoryEventSource, TickEngine, tick_app
 
 # Synthetic ~500 m box; nothing app-specific.
@@ -110,24 +109,7 @@ def test_bad_or_missing_operators_dont_kill_the_tick(monkeypatch):
     assert not np.isnan(res.score).any()
 
 
-class _OverrideParams(OperatorParams):
-    noise_floor: float = 1.0
-    radius_m: float = 30.0
-
-
-def _fake_override(events, params, trust, clock, grid):
-    layer = np.zeros(grid.shape)
-    for la, lo in zip(events.lat, events.lon, strict=True):
-        layer[Grid.cells_within(grid, la, lo, params.radius_m)] = 1.0
-    return OperatorResult(layer=layer, extras={"kind": "override"})
-
-
-def test_override_wins_after_weighted_sum(monkeypatch):
-    monkeypatch.setitem(
-        registry.OPERATORS,
-        "override",
-        registry.OperatorInfo("override", _fake_override, _OverrideParams, ("fixed_point",), "test override"),
-    )
+def test_override_wins_after_weighted_sum_and_clears():
     crowd = spec().inputs[0].model_dump()
     marker = {
         "id": "marker",
@@ -148,6 +130,61 @@ def test_override_wins_after_weighted_sum(monkeypatch):
     assert res.override.max() == 1.0
     assert len(res.hotspots) == 1 and res.hotspots[0].contributing_layers == ()
     assert rt.cache.latest().overrides.max() == 1.0
+    # the declared 'cleared' field reaches the operator through the event source
+    src.add("test-app", "marker", [{"t": T0 + 1, "lat": float(lat), "lon": float(lon), "cleared": True}])
+    res = tick_app(rt, src, now=T0 + 2, clock=SimClock(T0 + 2))
+    assert res.override.max() == 0.0 and res.score.max() == 0.0
+
+
+def _wind_spec(shift_layer: str) -> AppSpec:
+    crowd = spec().inputs[0].model_dump()
+    wind = {
+        "id": "wind",
+        "kind": "pull",
+        "shape": "field",
+        "tier": "stiff",
+        "meaning": "wind stations",
+        "operators": [
+            {
+                "op": "field",
+                "weight": 0.0,
+                "wind_speed_field": "speed",
+                "wind_dir_field": "dir",
+                "shift_layer": shift_layer,
+                "shift_horizon_s": 20,
+            }
+        ],
+    }
+    return spec(inputs=[crowd, wind])
+
+
+def test_field_shift_carries_target_layer_downwind():
+    rt = AppRuntime(_wind_spec("crowd.density"))
+    still = AppRuntime(spec())
+    src = InMemoryEventSource()
+    src.add("test-app", "crowd", cluster(rt.grid, 200, 250, 30, T0))
+    # 5 m/s from the west: blows east, so the crowd layer moves ~100 m east over 20 s
+    lat, lon = rt.grid.to_latlon(250.0, 250.0)
+    src.add(
+        "test-app", "wind", [{"t": T0 - 1, "lat": float(lat), "lon": float(lon), "value": 1, "speed": 5, "dir": 270}]
+    )
+    res = tick_app(rt, src, now=T0, clock=SimClock(T0))
+    base = tick_app(still, src, now=T0, clock=SimClock(T0))
+    assert res.errors == []
+    x_shift, _ = rt.grid.to_xy(res.hotspots[0].lat, res.hotspots[0].lon)
+    x_base, _ = rt.grid.to_xy(base.hotspots[0].lat, base.hotspots[0].lon)
+    assert 80 < float(x_shift - x_base) < 120
+
+
+def test_field_shift_to_unknown_layer_is_an_error_not_a_crash():
+    rt = AppRuntime(_wind_spec("nope.density"))
+    src = InMemoryEventSource()
+    lat, lon = rt.grid.to_latlon(250.0, 250.0)
+    src.add(
+        "test-app", "wind", [{"t": T0 - 1, "lat": float(lat), "lon": float(lon), "value": 1, "speed": 5, "dir": 270}]
+    )
+    res = tick_app(rt, src, now=T0, clock=SimClock(T0))
+    assert any("shift target 'nope.density'" in e for e in res.errors)
 
 
 def test_set_weights_changes_score_and_validates():

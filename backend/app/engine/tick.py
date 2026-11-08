@@ -10,8 +10,14 @@ Rules this module keeps (CLAUDE.md):
 - App-agnostic: everything app-specific comes from the ``AppSpec``.
 - One bad operator never kills the tick: it contributes a zero layer and an error string.
 
-Layers from the ``override`` operator don't enter the weighted sum; their layer (clipped to
-[0, 1]) is max-ed into the override mask, which ``combine`` applies after the weighted sum.
+Layers whose operator has ``role == "override"`` in the registry don't enter the weighted sum;
+their layer (clipped to [0, 1]) is max-ed into the override mask, which ``combine`` applies
+after the weighted sum.
+
+Downwind shift: when an operator's extras carry ``shift = {layer, args}`` plus ``wind_u`` /
+``wind_v`` (the ``field`` operator), the named raw layer is replaced by
+``field.advect(layer, wind_u, wind_v, cell_m, **args)`` after all operators ran and before
+normalizing.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ from app.core.models import AppSpec
 from app.engine.combine import combine
 from app.engine.grid import Grid
 from app.engine.layer_cache import LayerCache
+from app.engine.operators import field as field_op
 from app.engine.operators import registry
 from app.engine.operators.base import Events
 
@@ -67,26 +74,21 @@ class InMemoryEventSource:
     store can replace it as long as it implements ``EventSource``."""
 
     def __init__(self) -> None:
-        self._data: dict[tuple[str, str], list[tuple[str, float, float, float]]] = {}
+        self._data: dict[tuple[str, str], list[dict[str, Any]]] = {}
 
     def add(self, app_id: str, input_id: str, records: Sequence[Mapping[str, Any]]) -> None:
-        """``records``: ``{user_id?, t (POSIX s) or ts, lat, lon}``."""
+        """``records``: ``{user_id?, t (POSIX s) or ts, lat, lon, ...declared fields}``."""
         rows = self._data.setdefault((app_id, input_id), [])
         for r in records:
-            t = r["t"] if "t" in r else clock_mod.to_seconds(r["ts"])
-            rows.append((str(r.get("user_id") or ""), float(t), float(r["lat"]), float(r["lon"])))
+            row = {k: v for k, v in r.items() if k != "ts"}
+            row["t"] = float(r["t"]) if "t" in r else clock_mod.to_seconds(r["ts"])
+            rows.append(row)
 
     def events(self, app_id: str, input_id: str, since: float, until: float) -> Events:
-        rows = [r for r in self._data.get((app_id, input_id), ()) if since < r[1] <= until]
+        rows = [r for r in self._data.get((app_id, input_id), ()) if since < r["t"] <= until]
         if not rows:
             return empty_events()
-        u, t, la, lo = zip(*rows, strict=True)
-        return Events(
-            user_id=np.array(u, dtype=object),
-            t=np.array(t, dtype=float),
-            lat=np.array(la, dtype=float),
-            lon=np.array(lo, dtype=float),
-        )
+        return Events.from_records(rows)
 
 
 TrustProvider = Callable[[str], Mapping[str, float]]
@@ -152,7 +154,7 @@ class AppRuntime:
             for o in inp.operators:
                 params = o.params()
                 nf = o.noise_floor
-                is_override = o.op == "override"
+                is_override = o.op in registry.OPERATORS and registry.get(o.op).role == "override"
                 if nf is None and o.op in registry.OPERATORS:
                     nf = registry.parse_params(o.op, params).noise_floor
                 self.layers.append(LayerInfo(o.layer_id, inp.id, o.op, float(nf or 1.0), is_override))
@@ -266,6 +268,28 @@ def find_hotspots(
     return out
 
 
+def _apply_shifts(
+    rt: AppRuntime, raw: dict[str, np.ndarray], extras: Mapping[str, Mapping[str, Any]], errors: list[str]
+) -> None:
+    """Carry target layers downwind, in place, for every operator result that asks for it."""
+    for src_id, ex in extras.items():
+        shift = ex.get("shift")
+        if not shift:
+            continue
+        target = shift.get("layer")
+        if target not in raw:
+            errors.append(f"{src_id}: shift target {target!r} is not a weighted layer of this app; not shifted")
+            continue
+        try:
+            shifted = field_op.advect(raw[target], ex["wind_u"], ex["wind_v"], rt.grid.cell_m, **shift.get("args", {}))
+            shifted = np.asarray(shifted, dtype=float)
+            if shifted.shape != rt.grid.shape:
+                raise ValueError(f"shifted shape {shifted.shape} != grid {rt.grid.shape}")
+            raw[target] = shifted
+        except Exception as e:  # noqa: BLE001 - a bad shift leaves the layer unshifted
+            errors.append(f"{src_id}: shift of {target} failed: {type(e).__name__}: {e}")
+
+
 def tick_app(
     rt: AppRuntime,
     source: EventSource,
@@ -311,6 +335,8 @@ def tick_app(
             override = np.maximum(override, np.clip(np.nan_to_num(layer), 0.0, 1.0))
         else:
             raw[li.layer_id] = layer
+
+    _apply_shifts(rt, raw, extras, errors)
 
     ids = rt.weighted_ids
     w = np.array([rt.weights[i] for i in ids], dtype=float)
