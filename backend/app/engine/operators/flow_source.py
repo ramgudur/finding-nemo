@@ -14,6 +14,10 @@ is the 1-sigma semi-major axis of the estimate's covariance (residual variance x
 `estimator="consensus"` swaps the Cauchy fit for a consensus estimator (see consensus_intersection).
 Benchmark of both: tests/bench_flow_source.py.
 
+A moving source: the estimate shows where the source was when entities left, so it trails a moving
+source by about its speed x the information's age. `source_speed_mps` (set by the spec; 0 = static)
+widens `uncertainty_m` by that drift so downstream radii stay honest; the point itself is unchanged.
+
 Needs tracks (several pings per entity), not single taps.
 """
 
@@ -54,6 +58,10 @@ class FlowSourceParams(OperatorParams):
     estimator: Literal["wls", "consensus"] = "wls"
     consensus_tracks: int = Field(default=60, ge=3)  # longest tracks whose pairwise crossings seed the start
     opposite_weight: float = Field(default=0.1, ge=0, le=1)  # weight of tracks moving against the kind
+    # How fast the source itself may move (m/s; the spec sets it, 0 = static). Headings only show where
+    # the source was when entities left, so the estimate is stale by the information's age; with a
+    # moving source uncertainty_m grows by source_speed_mps x age.
+    source_speed_mps: float = Field(default=0.0, ge=0)
 
 
 def _sorted_tracks(uid: np.ndarray, t: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -312,6 +320,12 @@ def flow_source(
         est = backproject(start, direction, line_w, params)
     if est is not None:
         p, kind, spread, uncertainty = est
+        if params.source_speed_mps > 0 and len(users):
+            # information age: since the median first ping of the tracks used (a lower bound on when
+            # their headings were set)
+            first_t = ev.t[order][np.unique(uidx, return_index=True)[1]][users]
+            age_s = max(now - float(np.median(first_t)), 0.0)
+            uncertainty = float(np.hypot(uncertainty, params.source_speed_mps * age_s))
         lat, lon = grid.to_latlon(np.array([p[0]]), np.array([p[1]]))
         extras.update(
             point={"lat": float(lat[0]), "lon": float(lon[0])},
