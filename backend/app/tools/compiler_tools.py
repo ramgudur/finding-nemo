@@ -17,8 +17,10 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.connectors.engine import check_connector_sync
 from app.core.models import (
     SLUG,
     AppSpec,
@@ -226,13 +228,18 @@ def test_connector(ctx: ToolContext, args: TestConnectorArgs) -> dict[str, Any]:
         raise GuardError(f"connector {args.connector_id!r} does not exist")
     if inp.connector is None:
         raise GuardError(f"input {args.connector_id!r} has no connector configured yet")
-    # connectors/engine.py (the live poller, #80) isn't built yet: this validates the
-    # config's shape only. It never claims to have fetched anything.
-    return {
-        "connector_id": args.connector_id,
-        "config_valid": True,
-        "detail": "connector config is valid; live-fetch testing lands with the connector engine",
-    }
+    injected = ctx.extra.get("http_client")  # tests inject an httpx.Client on a MockTransport
+    try:
+        if injected is not None:
+            events = check_connector_sync(injected, inp.connector, ctx.now())
+        else:
+            with httpx.Client() as client:
+                events = check_connector_sync(client, inp.connector, ctx.now())
+    except Exception as e:  # noqa: BLE001 - reported to the agent, not raised past the tool
+        raise GuardError(f"connector test failed: {type(e).__name__}: {e}") from None
+    if not events:
+        raise GuardError("connector returned no items")
+    return {"connector_id": args.connector_id, "config_valid": True, "items_parsed": len(events)}
 
 
 def request_scout(ctx: ToolContext, args: RequestScoutArgs) -> dict[str, Any]:
