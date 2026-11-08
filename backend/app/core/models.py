@@ -172,6 +172,25 @@ class InputSpec(Model):
         return self
 
 
+class CompileInput(Model):
+    """One raw input the dev hands the Compiler: everything about it except tier,
+    operators and plausibility, which are the Compiler's own job to propose."""
+
+    id: str = Field(pattern=SLUG)
+    kind: InputKind
+    shape: InputShape
+    meaning: str = Field(description="The dev's words, verbatim.")
+    fields: list[InputField] = Field(default_factory=list)
+
+
+class CompileRequest(Model):
+    """Body of `POST /v1/apps/{app}/compile`."""
+
+    intent: str
+    grid: GridSpec
+    inputs: list[CompileInput] = Field(default_factory=list)
+
+
 class VerificationSpec(Model):
     method: VerificationMethod
     priority: int = Field(ge=1, description="1 is the highest priority; unique within a spec.")

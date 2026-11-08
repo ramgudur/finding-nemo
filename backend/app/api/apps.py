@@ -1,9 +1,10 @@
-"""`api/apps.py`: create an app from a hand-written spec and activate it.
+"""`api/apps.py`: create, compile, and activate an app.
 
-The Compiler (step 4) will propose specs later; for now a dev (or the campus-alert spec
-file) posts the whole `AppSpec` hand-written. Activation is what dev confirmation means
-until the Compiler lands: it generates the ingest/authority keys (shown once) and starts
-the app ticking.
+A spec reaches `pending_confirmation` either hand-written (`POST /{app}`, e.g. the
+campus-alert spec file) or via the Compiler (`POST /{app}/compile`, `agents.compiler`).
+Either way, only `POST /{app}/activate` is dev confirmation: it generates the
+ingest/authority keys (shown once), starts the app ticking, and is the only place that
+writes the `spec_confirm` Change.
 """
 
 from __future__ import annotations
@@ -13,12 +14,15 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.deps import authority_key_header, get_db, get_engine
+from app.agents.compiler import CompilerCache, run_compiler
+from app.agents.llm import LlmRouter
+from app.api.deps import authority_key_header, get_compiler_cache, get_db, get_engine, get_llm
 from app.core import clock as clock_mod
 from app.core.access import is_authority
 from app.core.db import Db
-from app.core.models import AppSpec, Change, Model
+from app.core.models import AppSpec, Change, CompileRequest, Model
 from app.engine.tick import TickEngine
+from app.tools.context import ToolContext
 
 router = APIRouter(prefix="/v1/apps", tags=["apps"])
 
@@ -84,3 +88,37 @@ def activate_app(
         )
     )
     return ActivateResponse(app_id=app, ingest_key=keys.ingest_key, authority_key=keys.authority_key)
+
+
+@router.post("/{app}/compile", response_model=AppSpec)
+async def compile_app(
+    app: str,
+    body: CompileRequest,
+    db: Db = Depends(get_db),
+    engine: TickEngine = Depends(get_engine),
+    llm: LlmRouter = Depends(get_llm),
+    cache: CompilerCache = Depends(get_compiler_cache),
+) -> AppSpec:
+    existing = db.get_app(app)
+    if existing is not None and existing.status == "active":
+        raise HTTPException(status_code=409, detail="app is already active")
+
+    start_t = clock_mod.now()
+    ctx = ToolContext(app_id=app, db=db, engine=engine, actor="agent", agent="compiler")
+    spec = await run_compiler(
+        ctx,
+        app_id=app,
+        intent=body.intent,
+        grid=body.grid.model_dump(mode="json"),
+        inputs=[i.model_dump(mode="json") for i in body.inputs],
+        llm=llm,
+        cache=cache,
+    )
+    if spec is not None:
+        return spec
+
+    traces = [t for t in db.list_trace(app, since=start_t - 1e-6) if t.agent == "compiler"]
+    last = traces[-1] if traces else None
+    if last is not None and last.skipped_reason:
+        raise HTTPException(status_code=503, detail=last.skipped_reason)
+    raise HTTPException(status_code=422, detail=last.why if last is not None else "compile did not finalize")
