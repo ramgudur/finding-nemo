@@ -190,3 +190,50 @@ def test_activate_after_edit_activates_the_edited_spec(client, db):
     assert got["inputs"][0]["tier"] == "stiff"
     assert got["inputs"][0]["visibility"] == "public"
     assert [c.kind for c in db.list_changes("edit-app")] == ["spec_edit", "spec_confirm"]
+
+
+def test_edit_declares_a_new_connectors_implied_fields(client, monkeypatch):
+    """#259: the fields a connector's events carry are declared; the dev's own are kept as written."""
+    from app.connectors import url_guard
+
+    monkeypatch.setattr(url_guard, "check_url", lambda url, **kw: url)
+    spec = _pending(client)
+    edited = copy.deepcopy(spec)
+    edited["inputs"].append(
+        {
+            "id": "docs",
+            "kind": "pull",
+            "shape": "document",
+            "tier": "stiff",
+            "meaning": "documents that mention the area",
+            "fields": [{"name": "confidence", "type": "number", "required": True}],
+            "connector": {"type": "rss", "url": "https://feed.example.org/rss"},
+            "operators": [{"op": "event_points", "weight": 0.3}],
+        }
+    )
+    r = client.put("/v1/apps/edit-app/spec", json=edited)
+    assert r.status_code == 200, r.text
+    docs = next(i for i in r.json()["spec"]["inputs"] if i["id"] == "docs")
+    assert [(f["name"], f["required"]) for f in docs["fields"]] == [("confidence", True), ("doc_id", False)]
+
+
+def test_edit_refuses_a_bad_custom_json_config(client, monkeypatch):
+    from app.connectors import url_guard
+
+    monkeypatch.setattr(url_guard, "check_url", lambda url, **kw: url)
+    spec = _pending(client)
+    edited = copy.deepcopy(spec)
+    edited["inputs"].append(
+        {
+            "id": "site",
+            "kind": "pull",
+            "shape": "field",
+            "tier": "stiff",
+            "meaning": "readings",
+            "connector": {"type": "json_api", "url": "https://a.example.org", "config": {"fields": {"a": 5}}},
+            "operators": [{"op": "field", "weight": 0.0}],
+        }
+    )
+    r = client.put("/v1/apps/edit-app/spec", json=edited)
+    assert r.status_code == 422
+    assert any("connector config refused" in e for e in r.json()["detail"])

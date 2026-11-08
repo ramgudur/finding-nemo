@@ -52,3 +52,52 @@ def test_extract_fields_without_lat_lon_config_omits_them():
     spec = {"response_path": "", "fields": ["x"]}
     event = json_api.extract_fields({"x": 1}, spec, {})
     assert "lat" not in event and "lon" not in event
+
+
+# -- #259: custom (non-preset) response_path / fields, data only ----------------------------
+
+
+def test_custom_fields_list_reads_names_from_the_response_path():
+    data = {"result": {"a": 1.0, "b": 2.0, "ignored": 3}}
+    event = json_api.extract_fields(data, {}, {"response_path": "result", "fields": ["a", "b", "missing"]})
+    assert event == {"a": 1.0, "b": 2.0}
+
+
+def test_custom_fields_map_uses_dotted_paths_with_list_indices():
+    data = {"rows": [{"v": {"x": 4}}, {"v": {"x": 5}}]}
+    event = json_api.extract_fields(data, {}, {"fields": {"first": "rows.0.v.x", "second": "rows.1.v.x"}})
+    assert event == {"first": 4, "second": 5}
+
+
+def test_a_preset_ignores_custom_read_keys_in_config():
+    data = {"current": {"wind_speed_10m": 1.0, "wind_direction_10m": 2.0}, "other": {"z": 9}}
+    config = {"response_path": "other", "fields": ["z"]}
+    assert json_api.extract_fields(data, PRESETS["open_meteo"], config) == {
+        "wind_speed_10m": 1.0,
+        "wind_direction_10m": 2.0,
+    }
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"fields": "a,b"},
+        {"fields": [1, 2]},
+        {"fields": ["not a name"]},
+        {"fields": ["lat"]},
+        {"fields": {"ts": "x"}},
+        {"fields": {"a": 5}},
+        {"fields": {"a": "x..y"}},
+        {"response_path": 3},
+        {"response_path": "a" * 500},
+    ],
+)
+def test_custom_config_is_validated_as_data(config):
+    with pytest.raises(ValueError):
+        json_api.check_custom_config(config)
+
+
+def test_field_names_for_presets_and_custom_sources():
+    assert json_api.field_names("open_meteo", {}) == ["wind_speed_10m", "wind_direction_10m"]
+    assert json_api.field_names(None, {"fields": {"level": "a.b"}}) == ["level"]
+    assert json_api.field_names(None, {}) == []

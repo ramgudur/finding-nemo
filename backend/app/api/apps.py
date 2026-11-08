@@ -25,7 +25,8 @@ from app.agents.source_suggester import suggest_source
 from app.api.compile_gate import CompileGate
 from app.api.deps import authority_key_header, get_compile_gate, get_compiler_cache, get_db, get_engine, get_llm
 from app.connectors import engine as connector_engine
-from app.connectors import url_guard
+from app.connectors import fields as connector_fields
+from app.connectors import json_api, url_guard
 from app.core import clock as clock_mod
 from app.core.access import is_authority
 from app.core.db import Db
@@ -130,12 +131,24 @@ class ActivateResponse(Model):
     authority_key: str
 
 
+def _custom_config_error(conn: Any) -> str | None:
+    """Why a custom JSON source's read config (`response_path`, `fields`) is refused, or None."""
+    if conn is None or conn.type != "json_api" or conn.preset is not None:
+        return None
+    try:
+        json_api.check_custom_config(conn.config)
+    except ValueError as e:
+        return f"connector config refused: {e}"
+    return None
+
+
 @router.post("", response_model=AppSpec, status_code=201)
 def create_app(spec: AppSpec, db: Db = Depends(get_db)) -> AppSpec:
     if db.get_app(spec.app_id) is not None:
         raise HTTPException(status_code=409, detail=f"app {spec.app_id!r} already exists")
     if spec.status == "active":
         raise HTTPException(status_code=422, detail="a new app cannot be created already active")
+    spec = connector_fields.declare_spec(spec)  # a connector's own fields are declared (#259)
     db.upsert_app(spec, t=clock_mod.now())
     return spec
 
@@ -238,7 +251,12 @@ def edit_spec(app: str, body: dict[str, Any] = Body(...), db: Db = Depends(get_d
         raise HTTPException(status_code=422, detail=errors) from None
     if spec.status != "active":  # an "active" body is reported by _spec_errors below
         spec.status = "pending_confirmation"
+    spec = connector_fields.declare_spec(spec)  # a connector's own fields are declared (#259)
     errors = _spec_errors(spec)
+    for inp in spec.inputs:
+        reason = _custom_config_error(inp.connector)
+        if reason is not None:
+            errors.append(f"input {inp.id!r}: {reason}")
     old_urls = {
         connector_engine.connector_url(i.connector) for i in current.inputs if i.connector is not None
     }  # already checked when they entered the spec; re-check only new or changed URLs
@@ -287,7 +305,13 @@ async def compile_app(
     if existing is not None and existing.status == "active":
         raise HTTPException(status_code=409, detail="app is already active")
 
+    # A connector's own fields (an RSS document's doc_id/confidence, a JSON source's readings) are
+    # declared on its input before the Compiler sees it, so finalize_app pins them with the dev's (#259).
+    body = body.model_copy(update={"inputs": [connector_fields.declare_compile_input(i) for i in body.inputs]})
     for inp in body.inputs:  # refuse an unsafe source before spending model budget on it
+        reason = _custom_config_error(inp.connector)
+        if reason is not None:
+            raise HTTPException(status_code=422, detail=f"{inp.id}: {reason}")
         url = connector_engine.connector_url(inp.connector) if inp.connector is not None else None
         if url is not None:
             try:
