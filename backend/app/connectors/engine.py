@@ -10,8 +10,9 @@ Poll scheduling is in-process and in-memory, the same safe-default philosophy as
 engine's own state: a restart just starts polling again from "now".
 
 Locating documents without coordinates (optional): with a `locate` callable, RSS items that have
-no `<georss:point>` are kept, de-duplicated against documents already written (so nothing is
-extracted twice), capped at `MAX_LOCATE_PER_POLL` per poll (rate budget), and passed to
+no `<georss:point>` are kept, de-duplicated against documents already written and against
+documents already tried this process (so each one costs at most one extraction), capped at
+`MAX_LOCATE_PER_POLL` per poll (rate budget), and passed to
 `locate(app, input, item)`. It returns `(lat, lon, confidence)` or None; a location outside the
 app's bbox is dropped. `make_extract_locator` builds one from the Scout's per-article extraction and
 a geocoder, both injected, so this module never imports agents. Without `locate`, behavior is
@@ -78,7 +79,13 @@ def _in_bbox(spec: AppSpec, lat: float, lon: float) -> bool:
 
 
 async def _located_rss_events(
-    db: Db, spec: AppSpec, inp: InputSpec, raw_text: str, now: float, locate: Locator
+    db: Db,
+    spec: AppSpec,
+    inp: InputSpec,
+    raw_text: str,
+    now: float,
+    locate: Locator,
+    attempted: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """RSS events, plus items without a point that `locate` places inside the bbox."""
     assert inp.connector is not None  # noqa: S101 - only called for pull inputs with a connector
@@ -92,8 +99,10 @@ async def _located_rss_events(
         for e in db.list_events(spec.app_id, inp.id)
         if e.user_id == source_id and e.model_extra and e.model_extra.get("doc_id")
     }
-    todo = [i for i in items if i["lat"] is None and i["doc_id"] and i["doc_id"] not in seen]
+    tried = attempted if attempted is not None else set()
+    todo = [i for i in items if i["lat"] is None and i["doc_id"] and i["doc_id"] not in seen | tried]
     for item in todo[:MAX_LOCATE_PER_POLL]:
+        tried.add(item["doc_id"])  # irrelevant / unplaceable / failed: not retried this process
         try:
             found = await locate(spec, inp, item)
         except Exception:  # noqa: BLE001 - one document must not drop the rest of the poll
@@ -220,12 +229,13 @@ async def poll_once(
     now: float,
     locate: Locator | None = None,
     spec: AppSpec | None = None,
+    attempted: set[str] | None = None,
 ) -> PollResult:
     assert inp.connector is not None  # noqa: S101 - callers only pass pull inputs with a connector
     try:
         raw = await fetch_raw(client, inp.connector)
         if locate is not None and spec is not None and inp.connector.type == "rss":
-            raw_events = await _located_rss_events(db, spec, inp, raw, now, locate)
+            raw_events = await _located_rss_events(db, spec, inp, raw, now, locate, attempted)
         else:
             raw_events = events_from_raw(inp.connector, raw, now)
     except Exception as e:  # noqa: BLE001 - a bad feed must not crash the poll loop
@@ -245,6 +255,7 @@ class ConnectorEngine:
     ) -> None:
         self.db = db
         self.locate = locate  # optional: place RSS items that carry no coordinates
+        self._attempted: dict[tuple[str, str], set[str]] = {}  # doc_ids already sent to locate
         self.client = client or httpx.AsyncClient()
         self.check_interval_s = check_interval_s
         self._last_polled_at: dict[tuple[str, str], float] = {}
@@ -267,7 +278,16 @@ class ConnectorEngine:
                 self._last_polled_at[key] = now
                 try:
                     results.append(
-                        await poll_once(self.client, self.db, spec.app_id, inp, now, locate=self.locate, spec=spec)
+                        await poll_once(
+                            self.client,
+                            self.db,
+                            spec.app_id,
+                            inp,
+                            now,
+                            locate=self.locate,
+                            spec=spec,
+                            attempted=self._attempted.setdefault(key, set()),
+                        )
                     )
                 except Exception:  # noqa: BLE001 - one connector must not stop the others
                     log.exception("connector poll failed for %s/%s", spec.app_id, inp.id)

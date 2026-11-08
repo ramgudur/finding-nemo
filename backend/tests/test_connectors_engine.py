@@ -369,7 +369,7 @@ def test_locator_never_reextracts_a_written_document_and_is_capped(monkeypatch):
     asyncio.run(eng.check_once(now=100.0))
     first = list(calls)
     asyncio.run(eng.check_once(now=102.0))
-    assert calls[len(first) :] == ["Unrelated", "Outside the area"]  # only docs never written are retried
+    assert calls[len(first) :] == []  # every doc costs at most one extraction per process
     monkeypatch.setattr(engine, "MAX_LOCATE_PER_POLL", 1)
     calls.clear()
     db2 = _db_with_app("app", [_rss_input()])
