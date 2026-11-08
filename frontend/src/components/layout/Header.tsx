@@ -4,6 +4,21 @@ import { User } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
+/** Tiny double wave under "nemo" in the logo. */
+function LogoWave() {
+  return (
+    <svg
+      className="pointer-events-none absolute left-1/2 top-full mt-[3px] h-[8px] w-[88%] -translate-x-1/2"
+      viewBox="0 0 48 9"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path d="M1 3 C 5 0.6, 9 0.6, 13 3 S 21 5.4, 25 3 S 33 0.6, 37 3 S 44 5, 47 3" stroke="#5F8FB0" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M7 7 C 11 5, 15 5, 19 7 S 27 9, 31 7 S 38 5.4, 41 6.6" stroke="#5F8FB0" strokeOpacity="0.65" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function Header() {
   const [health, setHealth] = useState<"ok" | "down" | "checking">("checking");
 
@@ -19,13 +34,15 @@ export function Header() {
   }, []);
 
   return (
-    <header className="pointer-events-none fixed inset-x-0 top-0 z-30 flex items-center justify-between px-6 py-5 sm:px-8">
+    <header className="pointer-events-none fixed inset-x-0 top-0 z-30 flex items-center justify-between px-5 py-5 sm:px-8 sm:py-6">
       <Link
         to="/"
-        className="pointer-events-auto font-display text-xl text-slate drop-shadow-sm transition-opacity hover:opacity-80"
+        className="pointer-events-auto relative inline-flex flex-col font-display text-[26px] font-medium leading-none text-slate transition-opacity hover:opacity-80 sm:text-[28px]"
         aria-label="finding nemo, go home"
       >
-        finding nemo
+        <span>
+          finding <span className="relative inline-block">nemo<LogoWave /></span>
+        </span>
       </Link>
       <div className="pointer-events-auto flex items-center gap-2">
         <span
@@ -34,10 +51,10 @@ export function Header() {
         />
         <button
           type="button"
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-cream/80 text-slate shadow-sm backdrop-blur-sm transition hover:bg-cream"
+          className="flex h-10 w-10 items-center justify-center rounded-full border border-white/70 bg-white/55 text-slate shadow-[0_4px_14px_-6px_rgba(47,88,114,0.35)] backdrop-blur-[2px] transition hover:bg-white/70"
           aria-label="profile"
         >
-          <User size={16} />
+          <User size={18} strokeWidth={2.1} />
         </button>
       </div>
     </header>
