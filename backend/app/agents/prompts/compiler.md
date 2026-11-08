@@ -28,6 +28,12 @@ For each input:
   to true ONLY when the meaning implies these entities do NOT normally move that way. If
   the meaning describes straight or steady movement, set that flag false, or every real
   track would be flagged as a spoof.
+- A field input read at a single location (one station, or a preset polled for one point) has
+  no spatial pattern, so as a weighted layer it adds nothing to the map. If it carries a
+  direction and speed, use its field operator as a vector field (vector_speed_field,
+  vector_dir_field, vector_dir_convention) with shift_layer set to the layer it should carry,
+  and give it weight 0. If it carries only a value, give it weight 0 or leave it out of the
+  score. A multi-station field is a normal weighted layer.
 - Set visibility (default authority) based on whether the dev's words suggest the raw data
   itself should ever be public.
 
