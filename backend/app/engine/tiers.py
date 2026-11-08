@@ -110,10 +110,16 @@ def slot_bounds(
     now: float,
     authority_evidence: bool,
     methods_with_data: int,
+    dev_revert: bool = False,
 ) -> tuple[float, float, str | None]:
     """``(lo, hi, reason_if_frozen)`` for one weight in the next step, before renormalization.
 
     A frozen weight returns ``lo == hi == current`` and a reason.
+
+    ``dev_revert``: a dev undoing a recorded change (``tools/revert_tools.py``; guards only pass it
+    for ``actor == "dev"``). It skips the evidence gates (cold start, stiff authority evidence) and
+    the stiff one-hour window, which exist to stop agent drift. Hard bounds still hold: pins,
+    locked, the flexible +/-25% step and (in ``check_update``) the flexible sum.
     """
     w = float(slot.weight)
     tier = as_tier(slot.tier)
@@ -122,6 +128,8 @@ def slot_bounds(
     if tier == "locked":
         return w, w, f"{slot.layer_id}: locked tier never changes"
     if tier == "stiff":
+        if dev_revert:
+            return 0.0, float("inf"), None
         if not authority_evidence:
             return w, w, f"{slot.layer_id}: stiff tier needs authority-confirmation evidence"
         ref = stiff_reference(slot, now)
@@ -129,7 +137,7 @@ def slot_bounds(
         hi = ref * (1 + STIFF_MAX_REL_PER_HOUR)
         return lo, hi, None
     # flexible
-    if methods_with_data < MIN_METHODS_WITH_DATA:
+    if methods_with_data < MIN_METHODS_WITH_DATA and not dev_revert:
         return (
             w,
             w,
@@ -175,6 +183,7 @@ def check_update(
     now: float,
     authority_evidence: bool = False,
     methods_with_data: int = 0,
+    dev_revert: bool = False,
 ) -> CheckResult:
     """Validate one proposed weight update against every tier rule.
 
@@ -201,7 +210,11 @@ def check_update(
     # Reject explicit edits to frozen weights up front, with their reason.
     for k in sorted(changed):
         lo, hi, why = slot_bounds(
-            by_id[k], now=now, authority_evidence=authority_evidence, methods_with_data=methods_with_data
+            by_id[k],
+            now=now,
+            authority_evidence=authority_evidence,
+            methods_with_data=methods_with_data,
+            dev_revert=dev_revert,
         )
         if why is not None:
             reasons.append(why)
@@ -215,7 +228,11 @@ def check_update(
 
     for s in slots:
         lo, hi, why = slot_bounds(
-            s, now=now, authority_evidence=authority_evidence, methods_with_data=methods_with_data
+            s,
+            now=now,
+            authority_evidence=authority_evidence,
+            methods_with_data=methods_with_data,
+            dev_revert=dev_revert,
         )
         v = final[s.layer_id]
         if v < lo - _EPS or v > hi + _EPS:
