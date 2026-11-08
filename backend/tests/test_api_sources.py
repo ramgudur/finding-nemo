@@ -70,7 +70,7 @@ def test_pull_source_keeps_the_devs_url_drops_an_invented_one_and_lists_the_rest
     first, second, *rest = body["options"]
     assert first["type"] == "rss" and first["config"] == {"url": "https://feeds.example.org/area.xml"}
     assert second["type"] == "json_api" and second.get("config") is None  # URL not in the dev's words
-    assert {o["type"] for o in body["options"]} <= {"rss", "json_api"}  # pull options only
+    assert {o["type"] for o in body["options"]} <= {"rss", "json_api", "json_list"}  # pull options only
     assert any((o.get("config") or {}).get("preset") for o in rest)  # presets still offered after the ranked ones
 
 
@@ -105,7 +105,7 @@ def test_repair_also_invalid_returns_the_full_unranked_list():
     assert r.status_code == 200, r.text
     body = r.json()
     assert _is_unranked_fallback(body)
-    assert {o["type"] for o in body["options"]} == {"post_api", "webhook", "rss", "json_api"}
+    assert {o["type"] for o in body["options"]} == {"post_api", "webhook", "rss", "json_api", "json_list"}
     assert body["meaning"] == PUSH_DESC
     actions = [t.action for t in db.list_trace("some-app")]
     assert "gave up" in actions and "fallback" in actions
@@ -141,7 +141,7 @@ def test_catalogue_has_no_html_scraper_and_every_preset_from_the_connector_catal
     from app.connectors.presets import PRESETS
 
     opts = catalogue()
-    assert {o.type for o in opts} == {"post_api", "webhook", "rss", "json_api"}
+    assert {o.type for o in opts} == {"post_api", "webhook", "rss", "json_api", "json_list"}
     assert {o.config["preset"] for o in opts if o.config and "preset" in o.config} == set(PRESETS)
 
 
@@ -165,7 +165,7 @@ def test_prose_style_type_and_junk_presets_are_cleaned_without_a_repair():
     assert len(fake.calls) == 1  # no repair call
     types = _types(r.json())
     assert types[0] == ("json_api", "open_meteo") and types[1] == ("rss", None)
-    assert all(o["type"] in ("rss", "json_api") for o in r.json()["options"])
+    assert all(o["type"] in ("rss", "json_api", "json_list") for o in r.json()["options"])
     assert any(t.why == "validated" for t in db.list_trace("some-app"))
 
 

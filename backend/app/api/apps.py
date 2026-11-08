@@ -10,6 +10,7 @@ writes the `spec_confirm` Change.
 
 from __future__ import annotations
 
+import logging
 import math
 import uuid
 from dataclasses import dataclass
@@ -26,7 +27,7 @@ from app.api.compile_gate import CompileGate
 from app.api.deps import authority_key_header, get_compile_gate, get_compiler_cache, get_db, get_engine, get_llm
 from app.connectors import engine as connector_engine
 from app.connectors import fields as connector_fields
-from app.connectors import json_api, url_guard
+from app.connectors import json_api, json_list, url_guard
 from app.core import clock as clock_mod
 from app.core.access import is_authority
 from app.core.db import Db
@@ -48,6 +49,7 @@ from app.tools.compiler_tools import _spec_errors, _spec_warnings
 from app.tools.context import ToolContext
 
 router = APIRouter(prefix="/v1/apps", tags=["apps"])
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -132,11 +134,17 @@ class ActivateResponse(Model):
 
 
 def _custom_config_error(conn: Any) -> str | None:
-    """Why a custom JSON source's read config (`response_path`, `fields`) is refused, or None."""
-    if conn is None or conn.type != "json_api" or conn.preset is not None:
+    """Why a custom JSON source's read config (`response_path`, `fields`) or a `json_list` item
+    mapping is refused, or None."""
+    if conn is None:
         return None
     try:
-        json_api.check_custom_config(conn.config)
+        if conn.type == "json_list":
+            json_list.check_config(conn.config)
+            if connector_engine.connector_url(conn) is None:
+                raise ValueError("a json_list connector needs a url")
+        elif conn.type == "json_api" and conn.preset is None:
+            json_api.check_custom_config(conn.config)
     except ValueError as e:
         return f"connector config refused: {e}"
     return None
@@ -175,6 +183,7 @@ def get_app(
 @router.post("/{app}/activate", response_model=ActivateResponse)
 def activate_app(
     app: str,
+    request: Request,
     db: Db = Depends(get_db),
     engine: TickEngine = Depends(get_engine),
 ) -> ActivateResponse:
@@ -202,7 +211,24 @@ def activate_app(
             t=datetime.fromtimestamp(t, tz=UTC),
         )
     )
+    _backfill(request, spec)
     return ActivateResponse(app_id=app, ingest_key=keys.ingest_key, authority_key=keys.authority_key)
+
+
+def _backfill(request: Request, spec: AppSpec) -> None:
+    """Backfill at activation (#267): one immediate poll of each pull connector, scheduled on the
+    connector engine's own loop, so a pulled source has data without waiting a whole poll_s. It
+    never blocks this response and never fails the activation; the poll is a normal one (URL
+    guard, status and trace recorded by `record_poll`)."""
+    if not any(i.kind == "pull" and i.connector is not None for i in spec.inputs):
+        return
+    engine = getattr(request.app.state, "connector_engine", None)
+    if engine is None:
+        return
+    try:
+        engine.poll_app_now(spec.app_id)
+    except Exception:  # noqa: BLE001 - the regular poll loop still picks the app up
+        log.exception("scheduling the activation poll of %s failed", spec.app_id)
 
 
 def _spec_diff(before: AppSpec, after: AppSpec) -> tuple[dict[str, Any], dict[str, Any]]:

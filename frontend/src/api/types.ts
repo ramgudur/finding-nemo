@@ -274,6 +274,9 @@ export interface Instruction {
   distance_m: number;
   computed_at: IsoDateTime;
   guard: GuardResult;
+  // Smarter routing (end-user batch, contract D). Optional: older backends don't send them.
+  mode?: InstructionMode | null;
+  walk_minutes?: number | null; // at about 1.3 m/s walking pace
 }
 
 // --- Outputs (GET /map?format=geojson, GET /hotspots) ---
@@ -553,4 +556,68 @@ export interface ScoutJobAccepted {
   job_id: string;
   app_id: string;
   input_id: string;
+}
+
+// --- Console: source status and test events (FE3; GET /sources/status, POST /simulate; #267/#268) ---
+// Both are authority only. Older backends answer 404; the console then hides these panels' data.
+
+/** How an input receives data: push endpoints or a pull connector type. */
+export type SourceVia = "post_api" | "webhook" | "rss" | "json_api" | "json_list";
+
+/** One row of GET /v1/apps/{app}/sources/status, one per input. */
+export interface SourceStatus {
+  input_id: string;
+  kind: InputKind;
+  via: SourceVia;
+  poll_s: number | null;
+  last_polled_at: string | null;
+  next_poll_at: string | null;
+  /** "ok", or "error: ..." (no URL, no body). Null before the first poll and for push inputs. */
+  last_status: string | null;
+  events_total: number;
+  events_last_hour: number;
+  last_event_at: string | null;
+}
+
+export type SimulateMode = "normal" | "spoof";
+
+/** Body of POST /v1/apps/{app}/simulate: push inputs only; the point must be inside the area. */
+export interface SimulateRequest {
+  input_id: string;
+  count: number; // 1..200
+  lat: number;
+  lon: number;
+  radius_m: number; // 10..5000
+  mode: SimulateMode;
+}
+
+/** 202 from POST /simulate. */
+export interface SimulateResult {
+  accepted: number;
+  rejected: number;
+  user_id_prefix: string;
+}
+
+// --- End-user page (FE1, #269): public app info and routing modes ---
+
+/** escape: started inside a blocked area. nearest_safe: no fixed destination within reach, so the
+ *  route goes to the nearest clear cell. fallback: nothing reachable (text is the dev's fallback). */
+export type InstructionMode = "route" | "escape" | "nearest_safe" | "fallback";
+
+/** One public source. `label` is the input's meaning (<= 80 chars), or "N private sources". */
+export interface PublicSource {
+  kind: InputKind;
+  label: string;
+}
+
+/** GET /v1/apps/{app}/public (no key). 404 for an unknown app; any status, it says when not active. */
+export interface PublicAppInfo {
+  app_id: string;
+  title: string;
+  intent: string;
+  status: AppStatus;
+  routing_enabled: boolean;
+  bbox: BBox;
+  last_update: IsoDateTime | null;
+  sources: PublicSource[];
 }

@@ -15,21 +15,27 @@ export interface LayerRowProps {
   weight: number;
   /** Largest weight in the stack, for the bar. */
   maxWeight: number;
+  /** Short freshness or role text ("10 s ago", "no data yet", "override"); empty hides it. */
   status: string;
+  /** Picks the dot colour; error text is always written out as well. */
+  tone?: "fresh" | "quiet" | "waiting" | "empty" | "error" | "pinned" | "override";
   selected: boolean;
   onToggle: () => void;
   /** Extra detail shown under a selected row. */
   children?: ReactNode;
 }
 
-const STATUS_DOT: Record<string, string> = {
-  live: "bg-seaGlass",
+const STATUS_DOT: Record<NonNullable<LayerRowProps["tone"]>, string> = {
+  fresh: "bg-mutedTeal",
+  quiet: "bg-seaGlass/70",
+  waiting: "bg-softStone",
+  empty: "bg-inkSoft/45",
+  error: "bg-coral",
   pinned: "bg-coral",
-  proposed: "bg-inkSoft/60",
   override: "bg-slate/70",
 };
 
-export function LayerRow({ layer, info, weight, maxWeight, status, selected, onToggle, children }: LayerRowProps) {
+export function LayerRow({ layer, info, weight, maxWeight, status, tone, selected, onToggle, children }: LayerRowProps) {
   const { layerId, input, op, visibility } = layer;
   const tier = input.tier;
   const isOverride = info ? info.role === "override" : op.op === "override";
@@ -54,10 +60,12 @@ export function LayerRow({ layer, info, weight, maxWeight, status, selected, onT
         <span className="relative flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="min-w-0 break-all font-mono text-[13px] font-medium text-slate">{layerId}</span>
           <TierBadge tier={tier} />
-          <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-inkSoft">
-            <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[status] ?? "bg-inkSoft/60"}`} />
-            {status}
-          </span>
+          {status && (
+            <span className={`ml-auto inline-flex items-center gap-1.5 text-[11px] ${tone === "error" ? "font-semibold text-danger" : "text-inkSoft"}`} title="When this layer's input last received data">
+              <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${tone ? STATUS_DOT[tone] : "bg-inkSoft/60"}`} />
+              {status}
+            </span>
+          )}
         </span>
 
         <span className="relative mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink">

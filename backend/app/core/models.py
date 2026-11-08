@@ -25,7 +25,7 @@ InputShape = Literal["point", "track", "fixed_point", "field", "document"]
 AppStatus = Literal["draft", "pending_confirmation", "active"]
 VerificationMethod = Literal["authority_confirmation", "predictive_check", "cross_input_agreement"]
 FieldType = Literal["number", "integer", "string", "boolean"]
-ConnectorType = Literal["rss", "json_api"]  # html is stubbed: rejected here
+ConnectorType = Literal["rss", "json_api", "json_list"]  # html is stubbed: rejected here
 PoiLabelMode = Literal["auto", "on", "off"]
 PoiStatus = Literal["active", "retired"]
 LabelProposalStatus = Literal["open", "accepted", "dismissed"]
@@ -257,7 +257,7 @@ class CompileFailure(Model):
     warnings: list[str] = Field(default_factory=list)
 
 
-SourceOptionType = Literal["post_api", "webhook", "rss", "json_api"]  # no HTML scraper (rule 10)
+SourceOptionType = Literal["post_api", "webhook", "rss", "json_api", "json_list"]  # no HTML scraper (rule 10)
 
 
 class SuggestSourceRequest(Model):
@@ -642,3 +642,50 @@ class WebhookReceipt(Model):
     received: int
     accepted: int
     rejected: list[WebhookRejection] = Field(default_factory=list, description="First 20 rejections only.")
+
+
+# --- Simulate (BE3, #268): POST /v1/apps/{app}/simulate (authority key) -------------
+
+SimulateMode = Literal["normal", "spoof"]
+
+
+class SimulateRequest(Model):
+    """Body of `POST /v1/apps/{app}/simulate`: generate test events for one push input. They go
+    through the same validation and storage as `/events` and carry a `sim-` / `spoof-` user_id
+    prefix so they stay identifiable."""
+
+    input_id: str = Field(min_length=1, description="A push input of the app (else 422).")
+    count: int = Field(ge=1, le=200)
+    lat: Lat = Field(ge=-90, le=90, description="Centre; must be inside the app's area (else 422).")
+    lon: Lon = Field(ge=-180, le=180)
+    radius_m: float = Field(ge=10, le=5000)
+    mode: SimulateMode = "normal"
+
+
+class SimulateResult(Model):
+    """202 response: how many generated events were stored, and the user_id prefix they carry."""
+
+    accepted: int = Field(ge=0)
+    rejected: int = Field(ge=0)
+    user_id_prefix: str
+
+
+# --- Source status (GET /v1/apps/{app}/sources/status, #267, BE2) ---------------------
+
+SourceVia = Literal["post_api", "webhook", "rss", "json_api", "json_list"]
+
+
+class SourceStatus(Model):
+    """One input's delivery health for the console (authority key only, rule 8). `last_status` is
+    the connector's last poll: "ok" or "error: <reason>", never a URL or a response body."""
+
+    input_id: str
+    kind: InputKind
+    via: SourceVia | None = Field(description="Null only for a pull input with no connector yet.")
+    poll_s: int | None = None
+    last_polled_at: UtcDatetime | None = None
+    next_poll_at: UtcDatetime | None = Field(default=None, description="last_polled_at + poll_s.")
+    last_status: str | None = None
+    events_total: int = 0
+    events_last_hour: int = 0
+    last_event_at: UtcDatetime | None = None
