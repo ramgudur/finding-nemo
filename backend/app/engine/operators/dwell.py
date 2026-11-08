@@ -1,7 +1,7 @@
-"""dwell: stop detection on tracks -> stationary clusters.
+"""dwell: stop detection on tracks -> stationary clusters of entities.
 
 Stay-point detection per user: a stay is a run of pings that each lie within `radius_m` of
-the centroid of the run so far (robust to GPS jitter) and that spans at least `min_dwell_s`.
+the centroid of the run so far (robust to position jitter) and that spans at least `min_dwell_s`.
 Each stay deposits the user's trust at its centroid, decayed by
 0.5^(time since the stay's last ping / half_life), then Gaussian-smoothed (peak 1).
 
@@ -31,7 +31,7 @@ from .base import (
 
 class DwellParams(OperatorParams):
     noise_floor: float = Field(default=3.0, gt=0)
-    radius_m: float = Field(default=25.0, gt=0)  # R; leave room for GPS noise
+    radius_m: float = Field(default=25.0, gt=0)  # R; leave room for position noise
     min_dwell_s: float = Field(default=120.0, gt=0)  # T
     window_s: float = Field(default=900.0, gt=0)
     half_life_s: float = Field(default=300.0, gt=0)

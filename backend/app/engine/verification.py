@@ -5,7 +5,7 @@ All three work off `layer_cache` windows (normalized stacks [T, L, H, W] + overr
 Events are passed as cells (`CellEvents`), so nothing here depends on the grid's projection.
 
 - authority_confirmation: for each authority arrival, the share of the `lookback_s` before it
-  during which the score peak was already within `radius_m` of the authority point (earlier and
+  during which the score peak was already within `radius_cells` of the authority point (earlier and
   closer -> higher; overrides are left out, they ARE the authority). The report also gives, per
   layer, how early and how close that layer's peak was.
 - predictive_check (leave-one-input-out): for each input with new events in (t, t + horizon],
@@ -63,7 +63,7 @@ class VerificationParams:
     top_frac: float = 0.10
     stride_s: float = 10.0  # evaluate predictive_check / agreement every stride_s, not every tick
     lookback_s: float = 300.0
-    radius_m: float = 50.0
+    radius_cells: float = 2.0  # authority match radius, in cells (fixed distances scale with cell_m)
     agreement_eps: float = 1e-3  # normalized values below this are smoothing tails, not signal
 
 
@@ -155,7 +155,7 @@ def authority_confirmation(window: CacheWindow, weights: np.ndarray, ctx: Verifi
     t = np.concatenate([a.t for a in arrivals])
     row = np.concatenate([a.row for a in arrivals])
     col = np.concatenate([a.col for a in arrivals])
-    radius_cells = p.radius_m / ctx.cell_m
+    radius_cells = p.radius_cells
 
     scores = score_maps(window.layers, np.asarray(weights, dtype=float), None)  # no overrides: they ARE the authority
     per_event, layers_report = [], []
@@ -179,7 +179,7 @@ def authority_confirmation(window: CacheWindow, weights: np.ndarray, ctx: Verifi
                 if dc is None:
                     continue
                 d = dc * ctx.cell_m
-                if lead is None and d <= p.radius_m:
+                if lead is None and dc <= p.radius_cells:
                     lead = float(ta - window.t[k])
                 dist = d  # ends as the distance at the last tick before the arrival
             report[lid] = {"lead_s": lead, "distance_m": dist}
@@ -336,7 +336,7 @@ def _authority_batch(window: CacheWindow, w: Any, ctx: VerificationContext, xp: 
         before = np.nonzero((window.t < ta) & (window.t >= ta - p.lookback_s))[0]
         if not len(before):
             continue
-        within = xp.asarray(np.hypot(rr - r, cc - c) <= p.radius_m / ctx.cell_m)  # [H, W]
+        within = xp.asarray(np.hypot(rr - r, cc - c) <= p.radius_cells)  # [H, W]
         near = xp.zeros(k_count)
         for k in before:
             s = xp.clip(xp.einsum("kl,lhw->khw", w, xp.asarray(window.layers[k])), 0.0, 1.0)

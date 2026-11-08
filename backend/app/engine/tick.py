@@ -14,9 +14,9 @@ Layers whose operator has ``role == "override"`` in the registry don't enter the
 their layer (clipped to [0, 1]) is max-ed into the override mask, which ``combine`` applies
 after the weighted sum.
 
-Downwind shift: when an operator's extras carry ``shift = {layer, args}`` plus ``wind_u`` /
-``wind_v`` (the ``field`` operator), the named raw layer is replaced by
-``field.advect(layer, wind_u, wind_v, cell_m, **args)`` after all operators ran and before
+Shift along a vector field: when an operator's extras carry ``shift = {layer, args}`` plus
+``vector_u`` / ``vector_v`` (the ``field`` operator), the named raw layer is replaced by
+``field.advect(layer, vector_u, vector_v, cell_m, **args)`` after all operators ran and before
 normalizing.
 """
 
@@ -306,7 +306,7 @@ def find_hotspots(
 def _apply_shifts(
     rt: AppRuntime, raw: dict[str, np.ndarray], extras: Mapping[str, Mapping[str, Any]], errors: list[str]
 ) -> None:
-    """Carry target layers downwind, in place, for every operator result that asks for it."""
+    """Carry target layers along a vector field, in place, for every operator result that asks for it."""
     for src_id, ex in extras.items():
         shift = ex.get("shift")
         if not shift:
@@ -316,7 +316,9 @@ def _apply_shifts(
             errors.append(f"{src_id}: shift target {target!r} is not a weighted layer of this app; not shifted")
             continue
         try:
-            shifted = field_op.advect(raw[target], ex["wind_u"], ex["wind_v"], rt.grid.cell_m, **shift.get("args", {}))
+            shifted = field_op.advect(
+                raw[target], ex["vector_u"], ex["vector_v"], rt.grid.cell_m, **shift.get("args", {})
+            )
             shifted = np.asarray(shifted, dtype=float)
             if shifted.shape != rt.grid.shape:
                 raise ValueError(f"shifted shape {shifted.shape} != grid {rt.grid.shape}")

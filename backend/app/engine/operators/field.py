@@ -1,24 +1,27 @@
-"""field: gridded / station data sampled onto the grid, with an optional downwind shift.
+"""field: gridded or point-sampled data on the grid, with an optional shift along a vector field.
 
-Sampling: the latest reading per station (user_id, else rounded location) within `max_age_s`
+Sampling: the latest reading per sample point (user_id, else rounded location) within `max_age_s`
 is interpolated onto cell centers by inverse-distance weighting; the layer is
 max(scale · value, 0).
 
-Wind (optional): with `wind_speed_field` (m/s) and `wind_dir_field` (meteorological degrees,
-the direction the wind blows FROM, as Open-Meteo reports it), the operator also interpolates
-the wind vector (u east, v north) onto the grid as extras["wind_u"], extras["wind_v"].
+Vector field (optional): with `vector_speed_field` (magnitude, m/s) and `vector_dir_field`
+(compass degrees), the operator also interpolates the vector (u east, v north) onto the grid as
+extras["vector_u"], extras["vector_v"]. `vector_dir_convention` says what the degrees mean:
+"from" (the direction the flow comes from) or "to" (the direction it heads).
+Which quantity it is, is the spec's business.
 
-Downwind shift (optional, `shift_layer`): another layer is carried by the wind with
-advection-diffusion, ∂c/∂t + u·∇c = D∇²c, over `shift_horizon_s`. It is solved semi-Lagrangian
-(back-trace each cell center by u·t, bilinear sample) followed by Gaussian diffusion with
-σ = √(2·D·t). Operators only see their own input, so the tick applies it:
-    shifted = field.advect(layers[extras["shift"]["layer"]], extras["wind_u"], extras["wind_v"],
+Shift along the field (optional, `shift_layer`): another layer is carried along the vector field
+with advection-diffusion, ∂c/∂t + u·∇c = D∇²c, over `shift_horizon_s`. It is solved
+semi-Lagrangian (back-trace each cell center by u·t, bilinear sample) followed by Gaussian
+diffusion with σ = √(2·D·t). Operators only see their own input, so the tick applies it:
+    shifted = field.advect(layers[extras["shift"]["layer"]], extras["vector_u"], extras["vector_v"],
                            grid.cell_m, **extras["shift"]["args"])
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Literal
 
 import numpy as np
 from pydantic import Field, model_validator
@@ -32,23 +35,24 @@ class FieldParams(OperatorParams):
     scale: float = 1.0
     max_age_s: float = Field(default=3600.0, gt=0)
     idw_power: float = Field(default=2.0, gt=0)
-    wind_speed_field: str | None = None
-    wind_dir_field: str | None = None
-    shift_layer: str | None = None  # layer_id to carry downwind; needs the wind fields
+    vector_speed_field: str | None = None
+    vector_dir_field: str | None = None
+    vector_dir_convention: Literal["from", "to"] = "from"
+    shift_layer: str | None = None  # layer_id to carry along the vector field; needs the vector fields
     shift_horizon_s: float = Field(default=600.0, ge=0)
     diffusion_m2_s: float = Field(default=0.0, ge=0)
 
     @model_validator(mode="after")
-    def _wind_pair(self) -> FieldParams:
-        if (self.wind_speed_field is None) != (self.wind_dir_field is None):
-            raise ValueError("wind_speed_field and wind_dir_field go together")
-        if self.shift_layer and self.wind_speed_field is None:
-            raise ValueError("shift_layer needs wind_speed_field and wind_dir_field")
+    def _vector_pair(self) -> FieldParams:
+        if (self.vector_speed_field is None) != (self.vector_dir_field is None):
+            raise ValueError("vector_speed_field and vector_dir_field go together")
+        if self.shift_layer and self.vector_speed_field is None:
+            raise ValueError("shift_layer needs vector_speed_field and vector_dir_field")
         return self
 
 
-def _latest_per_station(ev: Events) -> np.ndarray:
-    """Index of the latest event per station."""
+def _latest_per_point(ev: Events) -> np.ndarray:
+    """Index of the latest event per sample point."""
     key = np.array(
         [u if u else f"{round(a, 5)},{round(o, 5)}" for u, a, o in zip(ev.user_id, ev.lat, ev.lon, strict=True)],
         dtype=object,
@@ -60,7 +64,7 @@ def _latest_per_station(ev: Events) -> np.ndarray:
 
 
 def idw(sx: np.ndarray, sy: np.ndarray, values: np.ndarray, grid: GridLike, power: float) -> np.ndarray:
-    """Inverse-distance-weighted interpolation of station values onto cell centers."""
+    """Inverse-distance-weighted interpolation of point values onto cell centers."""
     h, w = grid.shape
     if len(values) == 0:
         return np.zeros((h, w))
@@ -71,10 +75,14 @@ def idw(sx: np.ndarray, sy: np.ndarray, values: np.ndarray, grid: GridLike, powe
     return (wts * values).sum(axis=2) / wts.sum(axis=2)
 
 
-def wind_uv(speed: np.ndarray, from_deg: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Meteorological (speed, direction it blows FROM) -> (u east, v north), m/s."""
-    rad = np.radians(from_deg)
-    return -speed * np.sin(rad), -speed * np.cos(rad)
+def vector_uv(
+    speed: np.ndarray, deg: np.ndarray, convention: Literal["from", "to"] = "from"
+) -> tuple[np.ndarray, np.ndarray]:
+    """(magnitude, compass degrees) -> (u east, v north). "to": degrees point where the flow heads;
+    "from": degrees point where it comes from (the vector is reversed)."""
+    rad = np.radians(deg)
+    sign = 1.0 if convention == "to" else -1.0
+    return sign * speed * np.sin(rad), sign * speed * np.cos(rad)
 
 
 def _bilinear(layer: np.ndarray, fx: np.ndarray, fy: np.ndarray) -> np.ndarray:
@@ -101,8 +109,8 @@ def advect(
     horizon_s: float,
     diffusion_m2_s: float = 0.0,
 ) -> np.ndarray:
-    """Carry `layer` downwind for `horizon_s`: semi-Lagrangian advection, then Gaussian diffusion.
-    Mass that leaves the grid is lost. u, v are [H, W] (or scalars) in m/s."""
+    """Carry `layer` along the vector field (u, v) for `horizon_s`: semi-Lagrangian advection, then
+    Gaussian diffusion. Mass that leaves the grid is lost. u, v are [H, W] (or scalars) in m/s."""
     h, w = layer.shape
     rows, cols = np.indices((h, w), dtype=float)
     du = np.broadcast_to(u, (h, w)) * horizon_s / cell_m
@@ -127,21 +135,21 @@ def field(
     now = clock.now()
     ev = events.select((events.t <= now) & (events.t > now - params.max_age_s))
     ev = ev.select(trust_weights(ev.user_id, trust) > 0)
-    ev = ev.select(_latest_per_station(ev)) if len(ev) else ev
+    ev = ev.select(_latest_per_point(ev)) if len(ev) else ev
     sx, sy = grid.to_xy(ev.lat, ev.lon)
 
     values = ev.column(params.value_field, np.nan)
     ok = np.isfinite(values)
     layer = np.maximum(params.scale * idw(sx[ok], sy[ok], values[ok], grid, params.idw_power), 0.0)
-    extras: dict = {"n_stations": int(ok.sum())}
+    extras: dict = {"n_points": int(ok.sum())}
 
-    if params.wind_speed_field and params.wind_dir_field:
-        spd = ev.column(params.wind_speed_field, np.nan)
-        deg = ev.column(params.wind_dir_field, np.nan)
-        okw = np.isfinite(spd) & np.isfinite(deg)
-        u, v = wind_uv(spd[okw], deg[okw])
-        extras["wind_u"] = idw(sx[okw], sy[okw], u, grid, params.idw_power)
-        extras["wind_v"] = idw(sx[okw], sy[okw], v, grid, params.idw_power)
+    if params.vector_speed_field and params.vector_dir_field:
+        spd = ev.column(params.vector_speed_field, np.nan)
+        deg = ev.column(params.vector_dir_field, np.nan)
+        okv = np.isfinite(spd) & np.isfinite(deg)
+        u, v = vector_uv(spd[okv], deg[okv], params.vector_dir_convention)
+        extras["vector_u"] = idw(sx[okv], sy[okv], u, grid, params.idw_power)
+        extras["vector_v"] = idw(sx[okv], sy[okv], v, grid, params.idw_power)
         if params.shift_layer:
             extras["shift"] = {
                 "layer": params.shift_layer,

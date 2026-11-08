@@ -3,6 +3,9 @@
 An AppSpec operator entry is `{op, weight, noise_floor?, ...params}`. `op` and `weight` belong to
 the combine step, so `parse_params` drops them and validates the rest against the params model.
 
+`horizon_s(name, params)` says how far back an operator reads events (None = all history, e.g. an
+override with no ttl stays active until cleared), so the tick fetches enough history and no more.
+
 `role` tells the tick where a layer goes: "layer" layers are normalized and weighted; "override"
 layers are 0/1 masks fed to combine's override step (applied after the weighted sum, never weighted).
 """
@@ -32,6 +35,7 @@ class OperatorInfo:
     shapes: tuple[str, ...]  # input shapes it accepts (AppSpec `shape`)
     description: str
     role: Literal["layer", "override"] = "layer"
+    horizon: Callable[[Any], float | None] = lambda p: None  # seconds of history needed; None = all
 
 
 OPERATORS: dict[str, OperatorInfo] = {
@@ -42,8 +46,9 @@ OPERATORS: dict[str, OperatorInfo] = {
             flow_source,
             FlowSourceParams,
             ("track",),
-            "Net outflow of moving people per cell over a short window, plus a back-projected "
-            "point where movement lines meet (source = people leaving, sink = converging); needs tracks.",
+            "Net outflow of moving entities per cell over a short window, plus a back-projected "
+            "point where movement lines meet (source = entities leaving, sink = converging); needs tracks.",
+            horizon=lambda p: p.window_s,
         ),
         OperatorInfo(
             "density",
@@ -51,28 +56,32 @@ OPERATORS: dict[str, OperatorInfo] = {
             DensityParams,
             ("point", "track"),
             "Smoothed density of point events with half-life decay, trust weights and per-user duplicate removal.",
+            horizon=lambda p: p.half_life_s * p.max_age_half_lives,
         ),
         OperatorInfo(
             "dwell",
             dwell,
             DwellParams,
             ("track",),
-            "Stop detection: people staying within R meters for at least T seconds, as stationary clusters.",
+            "Stop detection: entities staying within R meters for at least T seconds, as stationary clusters.",
+            horizon=lambda p: p.window_s,
         ),
         OperatorInfo(
             "field",
             field,
             FieldParams,
             ("field",),
-            "Station or gridded readings interpolated onto the grid; with wind fields it can carry another "
-            "layer downwind (advection-diffusion).",
+            "Point or gridded readings interpolated onto the grid; with a vector field (magnitude + direction) "
+            "it can carry another layer along it (advection-diffusion).",
+            horizon=lambda p: p.max_age_s,
         ),
         OperatorInfo(
             "event_points",
             event_points,
             EventPointsParams,
             ("document",),
-            "Geocoded documents (e.g. news) as confidence x source reliability, decaying over time.",
+            "Geocoded documents as confidence x source reliability, decaying over time.",
+            horizon=lambda p: p.half_life_s * p.max_age_half_lives,
         ),
         OperatorInfo(
             "override",
@@ -81,6 +90,7 @@ OPERATORS: dict[str, OperatorInfo] = {
             ("fixed_point",),
             "Authority fixed points: score forced to 1.0 within a radius until cleared; applied after weighting.",
             role="override",
+            horizon=lambda p: p.ttl_s,  # None: active until cleared, so all history
         ),
     )
 }
@@ -109,6 +119,13 @@ def run(
     info = get(name)
     p = params if isinstance(params, info.params) else parse_params(name, params)  # type: ignore[arg-type]
     return info.fn(events, p, trust, clock, grid)
+
+
+def horizon_s(name: str, params: Mapping[str, Any] | OperatorParams | None = None) -> float | None:
+    """Seconds of event history the operator reads with these params; None = all history."""
+    info = get(name)
+    p = params if isinstance(params, info.params) else parse_params(name, params)  # type: ignore[arg-type]
+    return info.horizon(p)
 
 
 def list_operators() -> list[dict[str, Any]]:

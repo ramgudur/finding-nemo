@@ -2,18 +2,23 @@
 
 Spoof features (`suspicious_users`, behind the `get_suspicious_users` tool). Each is a flag, not a
 verdict; the Critic weighs them and any trust change still has to pass a backtest.
-  - duplicate_coords: the exact same coordinates (to ~1 cm) as a DIFFERENT account. Real GPS
+  - duplicate_coords: the exact same coordinates (to ~1 cm) as a DIFFERENT account. Real position
     readings practically never collide; scripted accounts do.
-  - impossible_speed: a hop faster than `max_speed_mps` (~12 m/s on foot) even after subtracting
-    a GPS error allowance (`jitter_m`) from its length.
+  - impossible_speed: a hop faster than `max_speed_mps` even after subtracting a position-error
+    allowance (`jitter_m`) from its length.
   - new_id_burst: first seen inside a short window with many new IDs at once AND far above the
-    batch's usual rate of new IDs. The first `onset_s` of a batch is skipped: an incident's start
-    is a natural wave of new users; a scripted burst later on stands out against the background.
-  - constant_speed: a run of >= 4 hops with (near-)identical speed; real walking speed wobbles.
-  - straight_track: a run of >= 5 pings on a perfectly straight line over a real distance; GPS
+    batch's usual rate of new IDs. The first `onset_s` of a batch is skipped: the start of an
+    event is a natural wave of new IDs; a scripted burst later on stands out against the background.
+  - constant_speed: a run of >= 4 hops with (near-)identical speed; real movement speed wobbles.
+  - straight_track: a run of >= 5 pings on a perfectly straight line over a real distance; position
     noise bends it. (Runs, not whole tracks: a scripted track may stop or turn later.)
   - shared_device / shared_ip: the same `device_id` / `ip` field value as another account.
-Being close to other people is never a feature: crowds are what the platform is for.
+Being close to other entities is never a feature: clusters are what the platform is for.
+
+Domain limits come from the spec: each input's `plausibility` ({max_speed_mps?, jitter_m?,
+flag_constant_speed?, flag_straight_line?}) overrides the neutral defaults below
+(`SpoofParams.from_plausibility`, `suspicious_users_by_input`). Something that legitimately moves
+fast or in straight lines sets its own limits or turns those checks off.
 
 Trust bounds (`check_trust_change`, called by tools/guards.py): trust lives in [0, 1]; agents may
 lower it freely with a reason; an increase is at most +0.1 and at most once per 5 minutes of Clock
@@ -24,7 +29,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -49,18 +54,34 @@ FLAG_WEIGHTS: dict[str, float] = {
 @dataclass(frozen=True)
 class SpoofParams:
     coord_decimals: int = 7  # ~1 cm: "exact" duplicate
-    max_speed_mps: float = 12.0
-    jitter_m: float = 30.0  # GPS error allowance subtracted from each hop before the speed test
+    max_speed_mps: float = 12.0  # neutral default; inputs set their own via plausibility
+    jitter_m: float = 30.0  # position-error allowance subtracted from each hop before the speed test
     burst_window_s: float = 10.0
     burst_min_ids: int = 15
     burst_factor: float = 5.0  # window count vs the rest of the batch's new-ID rate per window
-    onset_s: float = 60.0  # an incident's first minute is a natural wave of new IDs: never a burst
+    onset_s: float = 60.0  # the first minute of a batch is a natural wave of new IDs: never a burst
     min_hops: int = 4
     speed_cv_max: float = 0.01  # coefficient of variation below this = identical speeds
     straight_dev_m: float = 0.5  # max sideways deviation for a "perfectly straight" track
     straight_min_m: float = 20.0
     device_field: str = "device_id"
     ip_field: str = "ip"
+    flag_constant_speed: bool = True
+    flag_straight_line: bool = True
+
+    @classmethod
+    def from_plausibility(cls, plausibility: object | None, base: SpoofParams | None = None) -> SpoofParams:
+        """Apply an input's `plausibility` (a mapping or a model with those attributes; None keeps
+        the defaults). Only set values override."""
+        out = base or cls()
+        if plausibility is None:
+            return out
+        get = plausibility.get if isinstance(plausibility, Mapping) else lambda k: getattr(plausibility, k, None)
+        updates = {k: get(k) for k in _PLAUSIBILITY_KEYS}
+        return replace(out, **{k: v for k, v in updates.items() if v is not None})
+
+
+_PLAUSIBILITY_KEYS = ("max_speed_mps", "jitter_m", "flag_constant_speed", "flag_straight_line")
 
 
 @dataclass
@@ -144,7 +165,7 @@ def suspicious_users(events: Events, params: SpoofParams | None = None) -> list[
         dist = np.hypot(dx, dy)
         ok = dt > 0
         speed = np.where(ok, dist / np.where(ok, dt, 1.0), np.inf)
-        # speed beyond GPS error: subtract the jitter allowance from each hop first
+        # speed beyond position error: subtract the jitter allowance from each hop first
         excess = np.where(ok, (dist - p.jitter_m) / np.where(ok, dt, 1.0), np.where(dist > p.jitter_m, np.inf, 0.0))
         if (excess > p.max_speed_mps).any():
             flags[u].add("impossible_speed")
@@ -152,9 +173,11 @@ def suspicious_users(events: Events, params: SpoofParams | None = None) -> list[
         # constant speed / straight line: any run of min_hops consecutive hops (a scripted track
         # can stop or bend later, e.g. at an edge, so whole-track tests would miss it)
         k = p.min_hops
+        if not (p.flag_constant_speed or p.flag_straight_line):
+            continue
         for a0 in range(len(dist) - k + 1):
             seg = slice(a0, a0 + k)
-            if ok[seg].all() and (dist[seg] > 0).all():
+            if p.flag_constant_speed and ok[seg].all() and (dist[seg] > 0).all():
                 sp = speed[seg]
                 cv = float(sp.std() / sp.mean())
                 if cv < p.speed_cv_max:
@@ -163,7 +186,7 @@ def suspicious_users(events: Events, params: SpoofParams | None = None) -> list[
             px = x[idx[a0 : a0 + k + 1]] - x[idx[a0]]
             py = y[idx[a0 : a0 + k + 1]] - y[idx[a0]]
             span = np.hypot(px[-1], py[-1])
-            if span >= p.straight_min_m:
+            if p.flag_straight_line and span >= p.straight_min_m:
                 dev = float((np.abs(px * py[-1] - py * px[-1]) / span).max())  # off the first->last line
                 if dev < p.straight_dev_m:
                     flags[u].add("straight_track")
@@ -183,6 +206,28 @@ def suspicious_users(events: Events, params: SpoofParams | None = None) -> list[
     ]
     out.sort(key=lambda s: (-s.score, s.user_id))
     return out
+
+
+def suspicious_users_by_input(
+    events_by_input: Mapping[str, Events],
+    plausibility_by_input: Mapping[str, object | None] | None = None,
+    base: SpoofParams | None = None,
+) -> list[UserSuspicion]:
+    """Run `suspicious_users` per input with that input's plausibility limits, then merge per user
+    (union of flags, max score). Use this instead of concatenating inputs with different limits."""
+    merged: dict[str, UserSuspicion] = {}
+    for inp, ev in events_by_input.items():
+        params = SpoofParams.from_plausibility((plausibility_by_input or {}).get(inp), base)
+        for s in suspicious_users(ev, params):
+            cur = merged.get(s.user_id)
+            if cur is None:
+                merged[s.user_id] = s
+                continue
+            cur.flags = sorted(set(cur.flags) | set(s.flags))
+            cur.score = float(min(1.0, sum(FLAG_WEIGHTS[f] for f in cur.flags)))
+            cur.details.update(s.details)
+            cur.n_events += s.n_events
+    return sorted(merged.values(), key=lambda s: (-s.score, s.user_id))
 
 
 def summarize(suspects: list[UserSuspicion], limit: int = 20) -> dict:

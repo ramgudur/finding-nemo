@@ -1,4 +1,4 @@
-"""event_points: geocoded documents (news articles, reports).
+"""event_points: geocoded documents.
 
 Each document deposits confidence × source reliability × 0.5^(age / half_life) at its
 location, then Gaussian-smoothed (peak 1). Source reliability is the trust value of the
