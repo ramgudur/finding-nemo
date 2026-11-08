@@ -41,7 +41,7 @@ class ApplyChangesArgs(_Args):
 
 class SetUserTrustArgs(_Args):
     user_id: str
-    trust: float = Field(ge=0, le=1, description="Lowering is free. Increases: at most +0.1 per user per 5 min.")
+    trust: float = Field(ge=0, le=1, description="Must be lower than the current trust. Raise trust via run_backtest.")
     reason: str
 
 
@@ -79,7 +79,9 @@ def run_backtest(ctx: ToolContext, args: RunBacktestArgs) -> dict[str, Any]:
     cand_trust = None
     if args.weights:
         # Cold start and stiff evidence need to know which methods have data: probe with a
-        # no-op backtest first so a frozen proposal fails fast with the guard's reason.
+        # no-op backtest first so a frozen proposal fails fast with the guard's reason. A stiff
+        # change can only ever pass if authority_confirmation has data; whether it actually
+        # *decided* the backtest is checked after the real run and again at apply.
         probe = bt_mod.run_backtest(rt.spec, events, now=now, weights=baseline, trust=trust, params=params)
         with_data = set(probe.baseline_train) | set(probe.baseline_holdout)
         final = guards.check_weights(
@@ -112,6 +114,17 @@ def run_backtest(ctx: ToolContext, args: RunBacktestArgs) -> dict[str, Any]:
     )
     ctx.db.add_backtest(ctx.app_id, out.backtest)
     with_data = set(out.baseline_train) | set(out.baseline_holdout)
+    # Stiff weights move only when authority confirmation decided the backtest (CLAUDE.md rule 5);
+    # apply_changes re-checks the tier rules with exactly this flag.
+    authority_decided = out.deciding_method == "authority_confirmation"
+    tier_of = guards.layer_tiers(ctx)
+    stiff_moved = [k for k in final if tier_of[k] == "stiff" and abs(final[k] - baseline[k]) > 1e-12]
+    note = reason
+    if stiff_moved and out.backtest.passed and not authority_decided:
+        note = (
+            f"{reason} | stiff layers {', '.join(stiff_moved)} can't be applied: the deciding method was "
+            f"{out.deciding_method}, not authority_confirmation"
+        )
     ctx.candidates.put(
         TestedCandidate(
             backtest_id=out.backtest.id,
@@ -123,7 +136,7 @@ def run_backtest(ctx: ToolContext, args: RunBacktestArgs) -> dict[str, Any]:
             weights=final,
             trust_changes=trust_changes,
             methods_with_data=len(with_data),
-            authority_evidence="authority_confirmation" in with_data,
+            authority_evidence=authority_decided,
             reason=out.reason,
         )
     )
@@ -138,7 +151,7 @@ def run_backtest(ctx: ToolContext, args: RunBacktestArgs) -> dict[str, Any]:
         "tested_weights": {k: round(v, 6) for k, v in final.items() if abs(v - baseline[k]) > 1e-12},
         "tested_trust": {u: a for u, (_, a) in trust_changes.items()},
         "elapsed_ms": round(out.backtest.elapsed_ms, 1),
-        "note": reason,
+        "note": note,
     }
 
 
@@ -169,7 +182,15 @@ def apply_changes(ctx: ToolContext, args: ApplyChangesArgs) -> dict[str, Any]:
 
 
 def set_user_trust(ctx: ToolContext, args: SetUserTrustArgs) -> dict[str, Any]:
+    """Lower one user's trust. Raising trust is the risky direction and needs evidence:
+    run_backtest(trust=...) then apply_changes (CLAUDE.md rule 5)."""
     reason = guards.require_reason(args.reason)
+    before, _ = guards.current_trust(ctx, args.user_id)
+    if args.trust > before:
+        raise GuardError(
+            f"set_user_trust only lowers trust ({before:.2f} -> {args.trust:.2f} is an increase); "
+            "raise it with run_backtest(trust=...) and then apply_changes"
+        )
     c = guards.apply_trust(ctx, args.user_id, args.trust, reason=reason, backtest_id=None)
     return {"user_id": args.user_id, "before": c.before["trust"], "after": c.after["trust"], "change_id": c.id}
 

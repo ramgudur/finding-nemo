@@ -164,8 +164,16 @@ def test_stiff_needs_authority_evidence(env, scripted):
     scripted["methods"] = ("predictive_check", "cross_input_agreement")
     r = call(ctx(), "run_backtest", weights={"news.density": 0.52}, reason="news helps")
     assert not r["ok"] and "authority-confirmation" in r["error"]
+    # authority_confirmation has data but another method decided: backtest runs, apply is refused
+    scripted["methods"] = ("predictive_check", "authority_confirmation", "cross_input_agreement")
+    r = call(ctx(), "run_backtest", weights={"news.density": 0.52}, reason="news helps")
+    assert r["ok"] and r["result"]["passed"] and "not authority_confirmation" in r["result"]["note"]
+    a = call(ctx(), "apply_changes", backtest_id=r["result"]["backtest_id"], reason="x")
+    assert not a["ok"] and "authority-confirmation" in a["error"]
+    # authority_confirmation decided: applies
     scripted["methods"] = ALL
-    assert call(ctx(), "run_backtest", weights={"news.density": 0.52}, reason="news helps")["ok"]
+    r = call(ctx(), "run_backtest", weights={"news.density": 0.52}, reason="news helps")
+    assert call(ctx(), "apply_changes", backtest_id=r["result"]["backtest_id"], reason="authority agreed")["ok"]
 
 
 def test_dev_pin_freezes_weight_and_agents_cant_pin(env, scripted):
@@ -185,20 +193,36 @@ def test_dev_pin_freezes_weight_and_agents_cant_pin(env, scripted):
     assert [c.after["pinned"] for c in pins] == [True, False]
 
 
-def test_trust_lowering_free_increase_capped(env, scripted):
-    clock, db, _, _, ctx = env
+def _raise_trust(ctx, user_id, to):
+    r = call(ctx(), "run_backtest", trust={user_id: to}, reason="agrees with authority")
+    if not r["ok"]:
+        return r
+    return call(ctx(), "apply_changes", backtest_id=r["result"]["backtest_id"], reason="holdout improved")
+
+
+def test_set_user_trust_only_lowers(env, scripted):
+    _, db, _, _, ctx = env
     assert call(ctx(), "set_user_trust", user_id="u1", trust=0.2, reason="duplicate coords")["ok"]
-    r = call(ctx(), "set_user_trust", user_id="u1", trust=0.5, reason="seems fine")
+    r = call(ctx(), "set_user_trust", user_id="u1", trust=0.25, reason="seems fine")
+    assert not r["ok"] and "only lowers" in r["error"] and "run_backtest" in r["error"]
+    assert call(ctx(), "set_user_trust", user_id="u1", trust=0.0, reason="spoof burst")["ok"]
+    assert not call(ctx(), "set_user_trust", user_id="u1", trust=0.0, reason="")["ok"]  # reason required
+    assert [c.after["trust"] for c in db.list_changes("tools-app", kind="trust")] == [0.2, 0.0]
+
+
+def test_trust_increases_via_backtest_are_capped(env, scripted):
+    clock, db, _, _, ctx = env
+    call(ctx(), "set_user_trust", user_id="u1", trust=0.2, reason="duplicate coords")
+    r = _raise_trust(ctx, "u1", 0.5)
     assert not r["ok"] and "exceeds +0.1" in r["error"]
-    assert call(ctx(), "set_user_trust", user_id="u1", trust=0.3, reason="recovering")["ok"]
+    assert _raise_trust(ctx, "u1", 0.3)["ok"]
     clock.advance(60)
-    r = call(ctx(), "set_user_trust", user_id="u1", trust=0.35, reason="more")
+    r = _raise_trust(ctx, "u1", 0.35)
     assert not r["ok"] and "next increase in" in r["error"]
     clock.advance(241)
-    assert call(ctx(), "set_user_trust", user_id="u1", trust=0.4, reason="more")["ok"]
-    assert call(ctx(), "set_user_trust", user_id="u1", trust=0.0, reason="spoof burst")["ok"]  # lowering anytime
-    assert not call(ctx(), "set_user_trust", user_id="u1", trust=0.1, reason="")["ok"]  # reason required
-    assert [c.after["trust"] for c in db.list_changes("tools-app", kind="trust")] == [0.2, 0.3, 0.4, 0.0]
+    assert _raise_trust(ctx, "u1", 0.4)["ok"]
+    assert [c.after["trust"] for c in db.list_changes("tools-app", kind="trust")] == [0.2, 0.3, 0.4]
+    assert all(c.backtest_id for c in db.list_changes("tools-app", kind="trust")[1:])
 
 
 def test_trust_via_backtest_applies_with_cap(env, scripted):

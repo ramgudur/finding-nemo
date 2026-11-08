@@ -56,8 +56,8 @@ TOOLS: dict[str, Tool] = {
         ),
         Tool(
             "set_user_trust",
-            "Set one user's trust in [0, 1]. Lowering is allowed with a reason; increases are capped at "
-            "+0.1 per user per 5 minutes.",
+            "Lower one user's trust (to a value in [0, 1]) with a reason. Increases need evidence: use "
+            "run_backtest(trust=...) and apply_changes (capped at +0.1 per user per 5 minutes).",
             st.SetUserTrustArgs,
             st.set_user_trust,
             frozenset({"critic"}),
