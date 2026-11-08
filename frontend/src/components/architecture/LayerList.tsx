@@ -6,7 +6,9 @@ import { useMemo } from "react";
 import type { AppSpec, Change, OperatorConfig, SourceStatus, TraceEntry, WeightsView } from "../../api/types";
 import { useNow } from "../../hooks/useSourceStatus";
 import { describeSource } from "../app/sourceStatus";
+import type { VectorState } from "../../hooks/useVectorReadings";
 import { LayerRow } from "./LayerRow";
+import { shiftNoteFor } from "./VectorFieldBits";
 import { specLayers, useOperatorCatalog, type SpecLayer } from "./specLayers";
 import { TierBadge } from "./TierBadge";
 
@@ -117,9 +119,11 @@ export interface LayerListProps {
   onSelectLayer: (id: string | null) => void;
   /** GET /sources/status rows (authority view), for each row's freshness; null when unknown. */
   sources?: SourceStatus[] | null;
+  /** Vector-field layers and their latest readings (authority view). */
+  vectors?: VectorState[];
 }
 
-export function LayerList({ spec, visibleIds, weights, trace, changes, selectedLayerId, shownId, onSelectLayer, sources }: LayerListProps) {
+export function LayerList({ spec, visibleIds, weights, trace, changes, selectedLayerId, shownId, onSelectLayer, sources, vectors = [] }: LayerListProps) {
   const now = useNow(5000);
   const srcById = new Map((sources ?? []).map((r) => [r.input_id, r]));
   const catalog = useOperatorCatalog();
@@ -195,6 +199,8 @@ export function LayerList({ spec, visibleIds, weights, trace, changes, selectedL
               weight={weightOf(l)}
               maxWeight={maxWeight}
               {...statusOf(l)}
+              vector={vectors.find((v) => v.layer.layerId === l.layerId) ?? null}
+              shiftNote={shiftNoteFor(vectors, l.layerId)}
               selected={selected}
               onToggle={() => onSelectLayer(selected ? null : l.layerId)}
             >

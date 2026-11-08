@@ -6,9 +6,11 @@ import { Hourglass } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 import type { AppSpec, GeoJsonBBox, MapResponse } from "../../api/types";
 import type { LiveAppData } from "../../hooks/useLiveAppData";
+import type { VectorState } from "../../hooks/useVectorReadings";
 import { Map } from "../Map/Map";
 import { HEAT_GRADIENT_CSS, fmtLatLon, gridShape } from "../Map/geo";
 import { HeatmapStats } from "./HeatmapStats";
+import { MapVectorBadge } from "./VectorFieldBits";
 
 export interface HeatmapPanelProps {
   spec: AppSpec | null;
@@ -20,6 +22,8 @@ export interface HeatmapPanelProps {
   marker?: { lat: number; lon: number; radius_m: number } | null;
   /** Shown under the "no activity yet" state: how to make something happen (authority view). */
   emptyHint?: ReactNode;
+  /** Vector-field layers with their latest reading (authority view): drawn as a corner arrow. */
+  vectors?: VectorState[];
 }
 
 function maxValue(m: MapResponse | null, id: string): number | null {
@@ -37,7 +41,7 @@ export function shownLayer(map: MapResponse | null, selectedLayerId: string | nu
   return ids.includes("score") ? "score" : (ids[0] ?? null);
 }
 
-export default function HeatmapPanel({ spec, live, selectedLayerId, className, onPick, marker, emptyHint }: HeatmapPanelProps) {
+export default function HeatmapPanel({ spec, live, selectedLayerId, className, onPick, marker, emptyHint, vectors = [] }: HeatmapPanelProps) {
   const { map, hotspots, pois } = live;
   // Destination labels come from the spec (authority view); without it no pin is marked as a destination.
   const labelSet = spec?.outputs?.poi_labels?.label_set;
@@ -60,6 +64,8 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className, o
   const hsCount = hotspots?.hotspots.length ?? null;
   const emptyShown = map !== null && shown !== null && (map.layers[shown]?.features.length ?? 0) === 0;
   const threshold = spec?.outputs?.hotspot_threshold ?? 0.5;
+  const shownVector = vectors.find((v) => v.layer.layerId === shown && v.layer.shiftOnly) ?? null;
+  const badges = vectors.filter((v) => v.reading);
   // Three distinct pre-data states: loading (no answer yet), waiting (active, no tick yet), quiet (ticks, no cells).
   const phase: "loading" | "waiting" | "unavailable" | "noPublic" | "quiet" | "data" =
     map === null ? (live.notTicked ? "waiting" : live.settled ? "unavailable" : "loading") : shown === null ? "noPublic" : emptyShown ? "quiet" : "data";
@@ -113,6 +119,13 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className, o
             <div className="pointer-events-none absolute right-2 top-2 z-[500] rounded-md bg-cream/90 px-2 py-1 font-mono text-[10.5px] text-slate shadow-sm">
               NE {fmtLatLon(bbox[3], bbox[2])}
             </div>
+            {badges.length > 0 && (
+              <div className="pointer-events-none absolute right-2 top-10 z-[500] flex flex-col items-end gap-1.5">
+                {badges.map((v) => (
+                  <MapVectorBadge key={v.layer.layerId} state={v} />
+                ))}
+              </div>
+            )}
           </>
         )}
         {phase === "loading" && (
@@ -150,9 +163,19 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className, o
             <div className="max-w-[44ch] rounded-2xl bg-cream/95 px-3.5 py-2 text-center shadow-[0_6px_20px_-10px_rgba(53,89,107,0.45)]">
               <p className="flex items-center justify-center gap-1.5 text-[13px] font-semibold text-slate">
                 <span aria-hidden className="h-2 w-2 rounded-full bg-mutedTeal motion-safe:animate-pulse" />
-                {shown === "score" ? "Live — no activity yet in your area" : `Live — ${shown} has no cells yet`}
+                {shownVector
+                  ? `${shown} is a vector field, so it draws no cells`
+                  : shown === "score"
+                    ? "Live — no activity yet in your area"
+                    : `Live — ${shown} has no cells yet`}
               </p>
-              <p className="text-[12px] text-ink">{emptyHint ?? "Cells appear here when events land inside the area."}</p>
+              <p className="text-[12px] text-ink">
+                {shownVector
+                  ? shownVector.layer.shiftLayer
+                    ? `It moves ${shownVector.layer.shiftLayer} before scoring; the arrow shows which way. Pick that layer to see the moved cells.`
+                    : "Its direction and speed are shown by the arrow."
+                  : (emptyHint ?? "Cells appear here when events land inside the area.")}
+              </p>
             </div>
           </div>
         )}

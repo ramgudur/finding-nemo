@@ -373,11 +373,19 @@ export function Map({ bbox, layers, visible, hotspots, pois, destinationLabels, 
     L.circleMarker(at, { pane: "hm-marker", radius: 4, color: "#F0EBDD", weight: 2, fillColor: "#C46F52", fillOpacity: 1, interactive: false }).addTo(g);
   }, [marker?.lat, marker?.lon, marker?.radius_m]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Regression guard (#284): Leaflet owns the container's classes (leaflet-container gives it
+  // overflow:hidden and lifts preflight's img max-width so tiles keep their size). If anything ever
+  // rewrites them again, the tiles collapse to 0 px wide and the map vanishes.
+  useEffect(() => {
+    if (import.meta.env.DEV && el.current && map.current && !el.current.classList.contains("leaflet-container"))
+      console.error("Map: the Leaflet container lost its classes; React must not manage its className.");
+  });
+
+  // React styles only the wrapper. The inner div's className is static, so React never rewrites it
+  // (toggling a class there would wipe the classes Leaflet added at mount).
   return (
-    <div
-      ref={el}
-      className={`hm-map ${onPick ? "hm-map--picking" : ""} ${className ?? ""}`}
-      style={{ height, minHeight: 280, width: "100%", borderRadius: 12 }}
-    />
+    <div className={`${onPick ? "hm-map--picking" : ""} ${className ?? ""}`} style={{ height, minHeight: 280, width: "100%" }}>
+      <div ref={el} className="hm-map" style={{ height: "100%", width: "100%", borderRadius: 12 }} />
+    </div>
   );
 }
