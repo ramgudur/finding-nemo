@@ -274,6 +274,9 @@ export interface Instruction {
   distance_m: number;
   computed_at: IsoDateTime;
   guard: GuardResult;
+  // Smarter routing (end-user batch, contract D). Optional: older backends don't send them.
+  mode?: InstructionMode | null;
+  walk_minutes?: number | null; // at about 1.3 m/s walking pace
 }
 
 // --- Outputs (GET /map?format=geojson, GET /hotspots) ---
@@ -593,4 +596,28 @@ export interface SimulateResult {
   accepted: number;
   rejected: number;
   user_id_prefix: string;
+}
+
+// --- End-user page (FE1, #269): public app info and routing modes ---
+
+/** escape: started inside a blocked area. nearest_safe: no fixed destination within reach, so the
+ *  route goes to the nearest clear cell. fallback: nothing reachable (text is the dev's fallback). */
+export type InstructionMode = "route" | "escape" | "nearest_safe" | "fallback";
+
+/** One public source. `label` is the input's meaning (<= 80 chars), or "N private sources". */
+export interface PublicSource {
+  kind: InputKind;
+  label: string;
+}
+
+/** GET /v1/apps/{app}/public (no key). 404 for an unknown app; any status, it says when not active. */
+export interface PublicAppInfo {
+  app_id: string;
+  title: string;
+  intent: string;
+  status: AppStatus;
+  routing_enabled: boolean;
+  bbox: BBox;
+  last_update: IsoDateTime | null;
+  sources: PublicSource[];
 }

@@ -18,6 +18,7 @@ import type {
   OperatorInfo,
   PinRequest,
   POI,
+  PublicAppInfo,
   ScoutJobAccepted,
   ScoutRequest,
   SimulateRequest,
@@ -148,6 +149,10 @@ export const api = {
   sourcesStatus: (appId: string, key: string) => get<SourceStatus[]>(`${app(appId)}/sources/status`, key),
   simulate: (appId: string, key: string, body: SimulateRequest) =>
     request<SimulateResult>("POST", `${app(appId)}/simulate`, key, body),
+  // --- End-user page (FE1, #269) ---
+  // public: title, intent, status, area, last update and public sources; 404 unknown app (or an
+  // older backend without the route: callers fall back to /map and /instruction alone)
+  publicInfo: (appId: string) => get<PublicAppInfo>(`${app(appId)}/public`),
 };
 
 // --- Architecture page additions (fe-arch-shell) ---
