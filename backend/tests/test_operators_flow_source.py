@@ -107,3 +107,16 @@ def test_deterministic():
     a, b = _run(ev), _run(ev)
     np.testing.assert_array_equal(a.layer, b.layer)
     assert a.extras == b.extras
+
+
+def test_physics_fit_beats_the_reference_on_noise_and_fake_flight():
+    """Constant-velocity track fits (#84) vs reference/flowsource.py; full table: tests/bench_flow_source.py."""
+    import bench_flow_source as bench
+
+    seeds = range(12)
+    for kw in ({"n": 80, "gps": 15.0}, {"n": 80, "spoof_frac": 0.1, "spoof_kind": "flight"}):
+        ref_err, op_err, _ = bench.evaluate(seeds, **kw)
+        assert np.median(op_err) < np.median(ref_err), kw
+    _, op_err, covered = bench.evaluate(seeds, n=80)
+    assert np.median(op_err) < 15
+    assert 0.55 <= covered <= 0.98  # 2 x uncertainty_m covers most true sources (~75% measured)
