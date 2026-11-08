@@ -1,4 +1,4 @@
-"""`api/outputs.py`: `GET /map?format=geojson` and `GET /hotspots`.
+"""`api/outputs.py`: `GET /map?format=geojson`, `GET /hotspots`, `GET /pois` and `GET /inputs/{input}/raw`.
 
 Both read the engine's latest `TickResult` and filter by visibility: no `X-Authority-Key`
 header gets public data (rule 8); a *wrong* key is rejected with 401, not silently
@@ -7,19 +7,20 @@ filtering so `api/ws.py` streams exactly the same shapes over the WebSocket.
 
 Hotspot visibility is decided in `engine/tick.py` (public only when every contributing layer,
 including any active override layer, is a public output layer; else authority). Here it's
-only filtered.
+only filtered. POIs are filtered per item by their own `visibility`. Raw events are authority-only:
+a missing or wrong key is 401 (rule 8: raw inputs never reach a request without the key).
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import authority_key_header, get_db, get_engine
 from app.core.access import require_authority_if_present, visible
 from app.core.db import Db
-from app.core.models import AppSpec, CellCollection, HotspotsResponse, MapResponse
+from app.core.models import POI, AppSpec, CellCollection, Event, HotspotsResponse, MapResponse, UtcDatetime
 from app.engine.grid import Grid
 from app.engine.tick import TickEngine, TickResult
 
@@ -28,6 +29,7 @@ router = APIRouter(prefix="/v1/apps", tags=["outputs"])
 # grid.to_geojson() keeps cells with value > min_value; this matches "value < 0.01 omitted"
 # (values are rounded to 4 decimals, so this margin never changes which cells are kept).
 _CELL_MIN_VALUE = 0.0099995
+MAX_RAW = 5000
 
 
 def build_map_response(app_id: str, spec: AppSpec, grid: Grid, result: TickResult, authority: bool) -> MapResponse:
@@ -92,3 +94,36 @@ def get_hotspots(
 
     authority = require_authority_if_present(db, app, authority_key)
     return build_hotspots_response(app, spec, result, authority)
+
+
+@router.get("/{app}/pois", response_model=list[POI])
+def get_pois(
+    app: str,
+    db: Db = Depends(get_db),
+    authority_key: str | None = Depends(authority_key_header),
+) -> list[POI]:
+    """Active POIs; without the authority key, only `public` ones (sensitive labels stay private)."""
+    if db.get_app(app) is None:
+        raise HTTPException(status_code=404, detail="app not found")
+    authority = require_authority_if_present(db, app, authority_key)
+    return [p for p in db.list_pois(app, status="active") if visible(p.visibility, authority)]
+
+
+@router.get("/{app}/inputs/{input_id}/raw", response_model=list[Event])
+def get_raw(
+    app: str,
+    input_id: str,
+    since: UtcDatetime | None = Query(default=None, description="Only events with ts after this time."),
+    limit: int = Query(default=1000, ge=1, le=MAX_RAW, description="At most this many, the most recent."),
+    db: Db = Depends(get_db),
+    authority_key: str | None = Depends(authority_key_header),
+) -> list[Event]:
+    spec = db.get_app(app)
+    if spec is None:
+        raise HTTPException(status_code=404, detail="app not found")
+    if authority_key is None or not db.check_authority_key(app, authority_key):
+        raise HTTPException(status_code=401, detail="authority key required")
+    if not any(i.id == input_id for i in spec.inputs):
+        raise HTTPException(status_code=404, detail="input not found")
+    events = db.list_events(app, input_id=input_id, since=since.timestamp() if since is not None else None)
+    return events[-limit:]

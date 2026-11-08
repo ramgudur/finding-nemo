@@ -160,3 +160,72 @@ def test_hotspots_before_any_tick_is_404(setup):
     client, db, engine, clock, keys = setup
     r = client.get("/v1/apps/test-app/hotspots", headers={"X-Authority-Key": keys["authority_key"]})
     assert r.status_code == 404
+
+
+# -- GET /pois and GET /inputs/{input}/raw (rule 8) ---------------------------------------
+
+
+def _poi(poi_id: str, visibility: str, status: str = "active"):
+    from datetime import UTC, datetime
+
+    from app.core.models import POI
+
+    now = datetime.fromtimestamp(T0, UTC)
+    return POI(
+        id=poi_id,
+        candidate_id=f"c-{poi_id}",
+        lat=0.005,
+        lon=0.005,
+        radius_m=10.0,
+        label=f"label-{poi_id}",
+        confidence=0.8,
+        visibility=visibility,
+        status=status,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def test_pois_are_filtered_per_item(setup):
+    client, db, engine, clock, keys = setup
+    db.upsert_poi("test-app", _poi("pub", "public"), t=T0)
+    db.upsert_poi("test-app", _poi("priv", "authority"), t=T0)
+    db.upsert_poi("test-app", _poi("old", "public", status="retired"), t=T0)
+
+    public = client.get("/v1/apps/test-app/pois")
+    assert public.status_code == 200
+    assert [p["id"] for p in public.json()] == ["pub"]
+
+    auth = client.get("/v1/apps/test-app/pois", headers={"X-Authority-Key": keys["authority_key"]})
+    assert sorted(p["id"] for p in auth.json()) == ["priv", "pub"]
+
+    assert client.get("/v1/apps/test-app/pois", headers={"X-Authority-Key": "wrong"}).status_code == 401
+    assert client.get("/v1/apps/nope/pois").status_code == 404
+
+
+def test_raw_is_authority_only(setup):
+    client, db, engine, clock, keys = setup
+    _post_pings(client, keys["ingest_key"], n=3)
+
+    assert client.get("/v1/apps/test-app/inputs/pings/raw").status_code == 401
+    assert client.get("/v1/apps/test-app/inputs/pings/raw", headers={"X-Authority-Key": "wrong"}).status_code == 401
+    auth = {"X-Authority-Key": keys["authority_key"]}
+    r = client.get("/v1/apps/test-app/inputs/pings/raw", headers=auth)
+    assert r.status_code == 200
+    assert sorted(e["user_id"] for e in r.json()) == ["u0", "u1", "u2"]
+    assert client.get("/v1/apps/test-app/inputs/nope/raw", headers=auth).status_code == 404
+
+
+def test_raw_since_and_limit(setup):
+    client, db, engine, clock, keys = setup
+    auth = {"X-Authority-Key": keys["authority_key"]}
+    for i in range(4):
+        client.post(
+            "/v1/apps/test-app/inputs/pings/events",
+            json={"user_id": f"u{i}", "lat": 0.005, "lon": 0.005, "ts": _iso(T0 + i)},
+            headers={"X-Ingest-Key": keys["ingest_key"]},
+        )
+    since = client.get("/v1/apps/test-app/inputs/pings/raw", params={"since": _iso(T0 + 1)}, headers=auth).json()
+    assert [e["user_id"] for e in since] == ["u2", "u3"]
+    last = client.get("/v1/apps/test-app/inputs/pings/raw", params={"limit": 1}, headers=auth).json()
+    assert [e["user_id"] for e in last] == ["u3"]
