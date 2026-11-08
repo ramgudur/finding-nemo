@@ -64,11 +64,11 @@ varying float vAlpha;
 varying float vFace;
 void main() {
   float across = abs(vUv.x);
-  float edge = 1.0 - smoothstep(0.35, 1.0, across);         // soft ribbon edges
+  float edge = 1.0 - smoothstep(0.5, 1.0, across);         // soft ribbon edges
   float tip = 1.0 - smoothstep(0.82, 1.0, vT);
   float root = smoothstep(0.0, 0.06, vT);
   // More opaque at the base, fading toward the tips.
-  float alpha = edge * tip * root * vAlpha * mix(1.0, 0.4, smoothstep(0.1, 1.0, vT));
+  float alpha = edge * tip * root * vAlpha * mix(1.0, 0.38, smoothstep(0.1, 1.0, vT));
   if (alpha <= 0.002) discard;
 
   vec3 yellow = vec3(0.639, 0.741, 0.494);  // #A3BD7E
@@ -79,11 +79,13 @@ void main() {
   float h = vTone * 2.0;
   vec3 hue = h < 1.0 ? mix(yellow, olive, h) : mix(olive, blue, h - 1.0);
   float n = pFbm(vec2(vUv.x * 1.5 + vTone * 30.0, vT * 6.0));
-  vec3 col = mix(hue, sage, clamp(vT * 0.55 + (n - 0.5) * 0.5, 0.0, 1.0));
+  vec3 col = mix(hue, sage, clamp(vT * 0.35 + (n - 0.5) * 0.4, 0.0, 1.0));
+  // A little extra saturation so the blades survive the water tint above them.
+  col = mix(vec3(dot(col, vec3(0.333))), col, 1.4) * 0.93;
   // Pale midrib and brighter faces where the ribbon is flat to the light.
   col += 0.05 * (1.0 - smoothstep(0.0, 0.25, across));
   col *= 0.9 + 0.12 * vFace;
   col *= pGrain(vec2(vUv.x * 0.6, vT * 4.0) + vTone * 10.0);
-  gl_FragColor = vec4(col, alpha * (0.75 + 0.25 * vFace));
+  gl_FragColor = vec4(col, alpha * (0.88 + 0.12 * vFace));
 }
 `;
