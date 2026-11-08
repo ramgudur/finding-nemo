@@ -235,7 +235,7 @@ Ingest keys and authority keys are generated per app at activation and stored in
 | `flow_source` | tracks | Divergence over a ~20 s window as the heat layer. **Point estimate:** weighted least-squares intersection of back-extended movement lines, with robust reweighting. Reports `source` (people leaving) vs `sink` (converging). Needs tracks, not single taps. Reference tests: ~13–29 m median error in a 300 m area with 40+ phones. |
 | `density` | point events | Smoothed density with half-life decay, trust weights and duplicate removal. |
 | `dwell` | tracks | Stop detection (individual within R meters for ≥ T, both from the spec) → stationary clusters. |
-| `field` | gridded data | Sampled onto the grid; can optionally shift another layer downwind. |
+| `field` | gridded or station data | Sampled onto the grid. Optionally reads a **vector field** from two of the input's fields (magnitude + direction, with a spec-set direction convention `from`/`to`) and carries another layer along it (advection, optional diffusion). Domain-neutral: wind, water current or crowd drift are all just vector fields chosen by the spec; no names or conventions in the operator are specific to one domain. |
 | `event_points` | geocoded documents | Confidence × source reliability, decaying over time. |
 | `override` | authority fixed points | max(score, 1.0) within the radius until cleared. |
 
@@ -423,3 +423,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-07:** WS frames `auth_ok` / `tick` approved as proposed by Allen; REST with a wrong authority key returns 401, no key returns public data.
 - **2026-11-07:** Kida seat b files and takes `trust.py` spoof features (step 3) next, then the batch backtest (step 5).
 - **2026-11-07:** Trust increases need a passing backtest; `set_user_trust` only lowers. Stiff weight changes pass only when `authority_confirmation` is the deciding method. Storing tested candidates in `Backtest` is declined for now (after a restart the Critic re-runs the backtest). (PR #39)
+- **2026-11-07:** The `field` operator is a neutral vector field, not wind: params like `vector_speed_field` / `vector_dir_field` / `vector_dir_convention` (`from` | `to`) replace the `wind_*` names, and docs say "along the vector field", not "downwind". Wind is one use, set by the spec. Rule: operators never name a domain (wind, birds, police); the spec does.
