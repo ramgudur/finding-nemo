@@ -22,19 +22,33 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.agents import budget
 from app.agents.llm import LlmRouter
 from app.agents.loop import run_agent
 from app.core.db import Db
+from app.core.models import TraceEntry
 from app.engine.tick import TickEngine, TickResult
 from app.tools.context import ToolContext
 from app.tools.registry import call_tool
 
 log = logging.getLogger(__name__)
 
+
+def _trace_skip(ctx: ToolContext, reason: str) -> None:
+    """Rule 2: deciding not to even start a run is still a skip, and still gets a trace entry --
+    not just a call that fails mid-run (loop.py's own rate-budget catch)."""
+    ctx.db.add_trace(
+        TraceEntry(
+            t=ctx.now_dt(), app_id=ctx.app_id, agent="critic", action="skipped", skipped_reason=reason, why=reason
+        )
+    )
+
+
 MIN_INTERVAL_S = 60.0
 TRIGGER_COOLDOWN_S = 15.0
 VERIFICATION_DROP_EPS = 0.05
 MAX_ITERATIONS = 5
+AGENT = "critic"  # model field and budget key
 FLYWHEEL_PATH = Path("data/flywheel/critic.jsonl")
 
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "critic.md").read_text(encoding="utf-8")
@@ -155,6 +169,7 @@ class _AppTriggerState:
     seen_hotspots: set[str] = field(default_factory=set)
     had_override: bool = False
     last_verification_value: float | None = None
+    pending_trigger: str | None = None  # a trigger deferred because the rate budget was low
 
 
 def hotspot_trigger(state: _AppTriggerState, result: TickResult) -> str | None:
@@ -195,6 +210,7 @@ class CriticScheduler:
         self.llm = llm or LlmRouter()
         self.poll_s = poll_s
         self._state: dict[str, _AppTriggerState] = {}
+        self._running: set[tuple[str, str]] = set()  # (app_id, agent) runs in flight
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
 
@@ -212,16 +228,35 @@ class CriticScheduler:
             # numpy-heavy (verification.evaluate); keep it off the event loop.
             triggered = await asyncio.to_thread(verification_drop_trigger, ctx, st)
 
-        reason = None
-        if triggered is not None and now - st.last_triggered_at >= TRIGGER_COOLDOWN_S:
-            reason = triggered
-            st.last_triggered_at = now
-        elif now - st.last_run_at >= MIN_INTERVAL_S:
-            reason = "scheduled check"
+        reason, priority = None, None
+        if st.pending_trigger is not None and now - st.last_triggered_at >= TRIGGER_COOLDOWN_S:
+            reason, priority = st.pending_trigger, "triggered"  # a trigger deferred for budget
+        elif triggered is not None and now - st.last_triggered_at >= TRIGGER_COOLDOWN_S:
+            reason, priority = triggered, "triggered"
+        elif now - st.last_run_at >= budget.scaled_interval(
+            MIN_INTERVAL_S, len(self.engine.apps), AGENT, self.llm.rpm(AGENT)
+        ):
+            reason, priority = "scheduled check", "scheduled"
         if reason is None:
             return
+        if (app_id, AGENT) in self._running:
+            return  # never more than one in-flight run per app and agent
+        if not self.llm.admit(AGENT, budget.EST_CALLS[AGENT], priority):
+            # the run itself is deferred (kept pending for triggered, just waits for scheduled),
+            # but the decision not to start it now is still a skip (rule 2)
+            _trace_skip(ctx, "rate budget")
+            if priority == "triggered":
+                st.pending_trigger = reason
+            return
+        st.pending_trigger = None
+        if priority == "triggered":
+            st.last_triggered_at = now
         st.last_run_at = now
-        await run_critic(ctx, reason, self.llm)
+        self._running.add((app_id, AGENT))
+        try:
+            await run_critic(ctx, reason, self.llm)
+        finally:
+            self._running.discard((app_id, AGENT))
 
     async def check_once(self) -> None:
         now = self.engine.clock.now()
