@@ -288,3 +288,15 @@ export interface HotspotsResponse {
   t: IsoDateTime;
   hotspots: Hotspot[];
 }
+
+// --- WS /v1/apps/{app}/stream ---
+// Client -> server, first frame only: {type: "auth", key}. Frames are filtered like REST.
+
+export interface StreamAuthFrame {
+  type: "auth";
+  key: string;
+}
+
+export type StreamFrame =
+  | { type: "auth_ok"; authority: boolean }
+  | { type: "tick"; t: IsoDateTime; map: MapResponse; hotspots: HotspotsResponse };
