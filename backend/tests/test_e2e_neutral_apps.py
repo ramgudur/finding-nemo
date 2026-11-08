@@ -13,7 +13,7 @@ C) tracks:        track input -> flow_source + dwell; point estimate near the tr
 Plus a scripted POI Labeler run (synthetic script) creating POIs from code-made candidates, and
 REST + WebSocket visibility checks (rule 8).
 
-Tests marked xfail(strict=True) document platform gaps found by this sweep.
+Tests marked xfail(strict=True) document gaps found by this sweep that are still open.
 """
 
 from __future__ import annotations
@@ -349,11 +349,6 @@ def test_a_authority_sees_layers_and_trace(app_a):
     assert app_a.get("/trace", app_a.authority_key).status_code == 200
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="GAP #179: GET /v1/apps/{app}/inputs/{input}/raw is in the CLAUDE.md endpoint table but no router "
-    "serves it (app/api/outputs.py has only /map and /hotspots); it 404s even with the authority key",
-)
 def test_a_raw_events_for_authority(app_a):
     r = app_a.get("/inputs/reports/raw?since=0", app_a.authority_key)
     assert r.status_code == 200
@@ -404,11 +399,6 @@ def test_a_public_instruction_never_names_the_authority_poi(app_a, poi_a):
     assert "busy area" not in ins["text"].lower()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="GAP #178: GET /v1/apps/{app}/pois is in the CLAUDE.md endpoint table but no router serves it "
-    "(app/api/outputs.py has only /map and /hotspots); POIs are only reachable via db/tools",
-)
 def test_a_pois_endpoint_filters_by_visibility(app_a, poi_a):
     pid = poi_a["pois"][0].id
     authority = app_a.get("/pois", app_a.authority_key)
@@ -657,10 +647,6 @@ def test_b_scripted_labeler_names_a_document_cluster(app_b, poi_b):
     assert poi.visibility == "public"  # destination label: public by the lead's #113 decision
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="GAP #178: GET /v1/apps/{app}/pois is not served (see test_a_pois_endpoint_filters_by_visibility)",
-)
 def test_b_public_pois_include_the_destination_poi(app_b, poi_b):
     r = app_b.get("/pois")
     assert r.status_code == 200
