@@ -193,3 +193,11 @@
     transition: none;
   }
 }
+
+/* Picking a point (Test your app): a crosshair over the whole map, tiles and cells included. */
+.hm-map--picking,
+.hm-map--picking .leaflet-container,
+.hm-map--picking .leaflet-interactive,
+.hm-map--picking .leaflet-grab {
+  cursor: crosshair;
+}

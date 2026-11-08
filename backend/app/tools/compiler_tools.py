@@ -318,10 +318,10 @@ def test_connector(ctx: ToolContext, args: TestConnectorArgs) -> dict[str, Any]:
     injected = ctx.extra.get("http_client")  # tests inject an httpx.Client on a MockTransport
     try:
         if injected is not None:
-            events = check_connector_sync(injected, inp.connector, ctx.now())
+            events = check_connector_sync(injected, inp.connector, ctx.now(), bbox=spec.grid.bbox)
         else:
             with httpx.Client() as client:
-                events = check_connector_sync(client, inp.connector, ctx.now())
+                events = check_connector_sync(client, inp.connector, ctx.now(), bbox=spec.grid.bbox)
     except Exception as e:  # noqa: BLE001 - reported to the agent, not raised past the tool
         _drop_failed(ctx, args.connector_id, f"connector test failed: {type(e).__name__}")
         raise GuardError(f"connector test failed: {type(e).__name__}: {e}; the connector was removed") from None

@@ -23,6 +23,10 @@ export interface LiveAppData {
   /** Server time of the last frame or poll (MapResponse.t), or null before the first one. */
   lastUpdate: string | null;
   error: string | null;
+  /** /map answered 404 "has not ticked yet": the app is active but the engine hasn't produced a frame. */
+  notTicked: boolean;
+  /** The first answer (a frame, a poll, or an error) has arrived; before that the map is loading. */
+  settled: boolean;
   /** The authority key was rejected (401/403 or auth_ok:false); data falls back to the public view. */
   keyRejected: boolean;
   /** Whether data is being requested with an authority key (and it has not been rejected). */
@@ -40,6 +44,7 @@ export function useLiveAppData(
   const [hotspots, setHotspots] = useState<HotspotsResponse | null>(null);
   const [pois, setPois] = useState<POI[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notTicked, setNotTicked] = useState(false);
   const alive = useRef(true);
   const onAuthError = useRef(opts?.onAuthError);
   onAuthError.current = opts?.onAuthError;
@@ -51,6 +56,7 @@ export function useLiveAppData(
     setHotspots(null);
     setPois(null);
     setError(null);
+    setNotTicked(false);
   }, [appId, authorityKey]);
 
   const activeKey = keyRejected ? "" : (authorityKey ?? "");
@@ -69,6 +75,7 @@ export function useLiveAppData(
     setMap(m);
     setHotspots(h);
     setError(null);
+    setNotTicked(false);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -78,7 +85,10 @@ export function useLiveAppData(
     } catch (e) {
       if (!alive.current) return;
       if (activeKey && isAuthError(e)) reject();
-      else if (e instanceof ApiError && e.status === 404) setError(`App "${appId}" not found or not active.`);
+      else if (e instanceof ApiError && e.status === 404 && /tick/i.test(e.message)) {
+        setNotTicked(true);
+        setError(null);
+      } else if (e instanceof ApiError && e.status === 404) setError(`App "${appId}" not found or not active.`);
       else setError(e instanceof Error ? e.message : String(e));
     }
   }, [appId, activeKey, apply, reject]);
@@ -141,6 +151,8 @@ export function useLiveAppData(
     streamState,
     lastUpdate: map?.t ?? null,
     error: keyRejected ? "Authority key rejected. Showing the public view." : error,
+    notTicked: map === null && notTicked,
+    settled: map !== null || notTicked || error !== null,
     keyRejected,
     authority: Boolean(activeKey),
   };

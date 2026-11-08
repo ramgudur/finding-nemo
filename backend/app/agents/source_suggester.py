@@ -40,6 +40,7 @@ OPTION_KIND: dict[SourceOptionType, InputKind] = {
     "webhook": "push",
     "rss": "pull",
     "json_api": "pull",
+    "json_list": "pull",
 }
 FALLBACK_KIND: InputKind = "push"
 FALLBACK_SHAPE: InputShape = "point"
@@ -79,6 +80,16 @@ def catalogue() -> list[SourceOption]:
         )
     out.append(
         SourceOption(type="json_api", label="JSON API (custom URL)", why="The platform polls a JSON endpoint you name.")
+    )
+    out.append(
+        SourceOption(
+            type="json_list",
+            label="JSON list / GeoJSON feed (we fetch it)",
+            why=(
+                "The platform polls a URL that returns a list of located items (e.g. a GeoJSON "
+                "FeatureCollection); each item becomes one event, mapped by paths you set."
+            ),
+        )
     )
     return out
 
@@ -204,11 +215,14 @@ def build_suggestion(raw: _ModelSuggestion, description: str) -> SourceSuggestio
     url = _devs_url(description) if raw.kind == "pull" else None
     if url and not any((o.config or {}).get("url") == url for o in options):
         rss = next((i for i, o in enumerate(options) if o.type == "rss"), None)
+        listed = next((i for i, o in enumerate(options) if o.type == "json_list"), None)
         custom_i = next(
             (i for i, o in enumerate(options) if o.type == "json_api" and not (o.config or {}).get("preset")), None
         )
         if rss is not None:  # the model chose a feed but didn't carry the URL
             options[rss] = options[rss].model_copy(update={"config": {"url": url}})
+        elif listed is not None:  # the model chose a list of located items: the same
+            options[listed] = options[listed].model_copy(update={"config": {"url": url}})
         elif custom_i is not None:  # the model chose a custom endpoint: it's the dev's, and goes first
             chosen = options.pop(custom_i)
             options.insert(0, chosen.model_copy(update={"config": {"url": url}}))

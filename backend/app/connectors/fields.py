@@ -3,7 +3,8 @@
 Events a connector writes go through the same field validation as pushed ones
 (`api/ingest._check_fields`): every extra must be a declared field. A connector's events carry
 fields of its own (an RSS document's `doc_id` / `confidence`, a preset's or custom JSON source's
-readings), so a source added in the Builder with `fields: []` would have every event rejected.
+readings, a `json_list` source's mapped `fields`), so a source added in the Builder with
+`fields: []` would have every event rejected.
 
 One rule, applied wherever a connector enters a spec (compile, `POST /v1/apps`, `PUT /spec`, the
 `create_connector` tool) and by the poller itself (so specs stored before this rule still work):
@@ -14,7 +15,7 @@ Data only (rule 10); nothing here names a domain (rule 3).
 
 from __future__ import annotations
 
-from app.connectors import json_api
+from app.connectors import json_api, json_list
 from app.core.models import AppSpec, CompileInput, ConnectorConfig, InputField, InputSpec
 
 # What `connectors/engine._rss_event` writes besides user_id/lat/lon/ts.
@@ -42,6 +43,15 @@ def implied_fields(conn: ConnectorConfig | None) -> list[InputField]:
             return []
         return [
             InputField(name=n, type="number", required=False, description="Reading from the connector's response.")
+            for n in names
+        ]
+    if conn.type == "json_list":
+        try:
+            names = json_list.field_names(conn.config)
+        except ValueError:
+            return []
+        return [
+            InputField(name=n, type="number", required=False, description="Value read from each item of the list.")
             for n in names
         ]
     return []
