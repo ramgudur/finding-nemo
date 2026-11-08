@@ -126,6 +126,26 @@ def _spec_warnings(spec: AppSpec) -> list[str]:
             "poi_labels.mode is 'on' but label_set is empty, so the POI Labeler can never label anything; "
             "propose labels for the places the intent names (or use mode 'auto' / 'off')"
         )
+    methods = {v.method for v in spec.verification}
+    weighted_inputs = {
+        inp.id
+        for inp in spec.inputs
+        for op in inp.operators
+        if op.op in registry.OPERATORS and registry.get(op.op).role != "override"
+    }
+    missing = []
+    if weighted_inputs and "predictive_check" not in methods:
+        missing.append("predictive_check")
+    if len(weighted_inputs) >= 2 and "cross_input_agreement" not in methods:
+        missing.append("cross_input_agreement")
+    if any(i.tier == "locked" for i in spec.inputs) and "authority_confirmation" not in methods:
+        missing.append("authority_confirmation")
+    if missing:
+        warnings.append(
+            f"verification leaves out {missing}, which this app's inputs can feed. The Critic may change "
+            "flexible weights only once two methods have data (cold start), so propose every method the "
+            "inputs support"
+        )
     if any(i.tier == "locked" for i in spec.inputs):
         order = [v.method for v in sorted(spec.verification, key=lambda v: v.priority)]
         if not order or order[0] != "authority_confirmation":

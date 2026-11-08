@@ -26,6 +26,7 @@ from typing import Any
 from app.agents.llm import LlmRouter
 from app.agents.loop import run_agent
 from app.core.models import AppSpec, TraceEntry
+from app.engine.operators import registry as operator_registry
 from app.tools.context import ToolContext
 from app.tools.registry import call_tool
 
@@ -85,10 +86,13 @@ def _task_prompt(
             "routing.destination_points as given (you can't add, move or drop them), so they "
             "count as destinations when you decide on routing."
         )
+    # The catalogue is in the task, so the model doesn't spend a round trip on list_operators.
+    catalogue = json.dumps(operator_registry.list_operators(), separators=(",", ":"))
     return (
         "Compile this into a complete proposed AppSpec, exactly as given below plus your "
         "own choices of tier, operators, plausibility, verification, outputs and routing "
-        f"for the inputs:\n{json.dumps(given, indent=2)}{note}"
+        f"for the inputs:\n{json.dumps(given, indent=2)}{note}\n\n"
+        f"Operator catalogue (what list_operators returns):\n{catalogue}"
     )
 
 

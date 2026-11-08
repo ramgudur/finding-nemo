@@ -65,11 +65,45 @@ def test_validate_spec_accepts_a_good_spec(ctx):
                 "plausibility": {"max_speed_mps": 12},
             }
         ],
+        "verification": [{"method": "predictive_check", "priority": 1}],
     }
     r = _call(ctx, "validate_spec", {"spec": spec})
     assert r["result"]["valid"] is True
     assert r["result"]["errors"] == []
     assert r["result"]["warnings"] == []
+
+
+def test_validate_spec_warns_when_verification_leaves_out_a_method_the_inputs_can_feed(ctx):
+    """The Critic tunes flexible weights only once two methods have data (cold start), so a
+    proposal with one method on an app that could feed three would never let it act."""
+
+    def inp(id_, tier="flexible", op="density"):
+        return {
+            "id": id_,
+            "kind": "push",
+            "shape": "point",
+            "tier": tier,
+            "meaning": "a report",
+            "operators": [{"op": op, "weight": 1.0}],
+            "plausibility": {"max_speed_mps": 12},
+        }
+
+    base = {**_draft().model_dump(mode="json"), "inputs": [inp("a"), inp("b"), inp("c", "locked", "override")]}
+    one = {**base, "verification": [{"method": "predictive_check", "priority": 1}]}
+    w = _call(ctx, "validate_spec", {"spec": one})["result"]["warnings"]
+    assert any("cross_input_agreement" in x and "authority_confirmation" in x for x in w)
+    full = {
+        **base,
+        "verification": [
+            {"method": "authority_confirmation", "priority": 1},
+            {"method": "predictive_check", "priority": 2},
+            {"method": "cross_input_agreement", "priority": 3},
+        ],
+    }
+    assert not any("leaves out" in x for x in _call(ctx, "validate_spec", {"spec": full})["result"]["warnings"])
+    # one weighted input: cross_input_agreement can't have data, so it isn't asked for
+    single = {**base, "inputs": [inp("a")], "verification": [{"method": "predictive_check", "priority": 1}]}
+    assert _call(ctx, "validate_spec", {"spec": single})["result"]["warnings"] == []
 
 
 def test_validate_spec_warns_on_missing_plausibility_for_flexible_track_or_point(ctx):
