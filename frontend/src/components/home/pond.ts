@@ -24,7 +24,7 @@ export const Z = {
   BED: 0, // pond floor: pebbles (drawn by the bed plane)
   ROCKS: 1,
   SEAWEED: 2,
-  KOI: 3,
+  KOI: 5.5, // just under the surface: drawn over the water tint so the koi stay vivid (the reference)
   WATER: 5, // translucent overlay: tint, caustics, light shaft, refraction feel
   RIPPLES: 6,
   PADS: 7, // floating on the surface: lily pads, leaves
