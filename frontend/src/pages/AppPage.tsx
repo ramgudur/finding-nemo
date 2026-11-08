@@ -5,6 +5,7 @@ import { forgetKey, loadKey, saveKey } from "../api/authorityKey";
 import { ApiError, api } from "../api/client";
 import { openStream, type StreamState } from "../api/stream";
 import type { CellCollection, GeoJsonBBox, Hotspot, HotspotsResponse, MapResponse, StreamFrame } from "../api/types";
+import { ConsolePanels } from "../components/ConsolePanels/ConsolePanels";
 import { DemoTools } from "../components/DemoTools/DemoTools";
 import { LayerToggles } from "../components/LayerToggles/LayerToggles";
 import { Map } from "../components/Map/Map";
@@ -175,6 +176,7 @@ export function AppPage({ appId }: { appId: string }) {
           )}
         </div>
       </div>
+      {authority && <ConsolePanels appId={appId} authorityKey={activeKey} />}
       {authority && <DemoTools appId={appId} authorityKey={activeKey} />}
     </div>
   );

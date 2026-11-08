@@ -1,4 +1,15 @@
-import type { ClockControl, ClockState, ErrorSeries, HotspotsResponse, MapResponse } from "./types";
+import type {
+  Change,
+  ClockControl,
+  ClockState,
+  ErrorSeries,
+  HotspotsResponse,
+  MapResponse,
+  PinRequest,
+  TraceEntry,
+  VerificationView,
+  WeightsView,
+} from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -24,6 +35,13 @@ const app = (appId: string) => `/apps/${encodeURIComponent(appId)}`;
 export const api = {
   map: (appId: string, key?: string) => get<MapResponse>(`${app(appId)}/map?format=geojson`, key),
   hotspots: (appId: string, key?: string) => get<HotspotsResponse>(`${app(appId)}/hotspots`, key),
+  // authority only (api/trace.py)
+  trace: (appId: string, key: string) => get<TraceEntry[]>(`${app(appId)}/trace?limit=50`, key),
+  changes: (appId: string, key: string) => get<Change[]>(`${app(appId)}/changes`, key),
+  weights: (appId: string, key: string) => get<WeightsView>(`${app(appId)}/weights`, key),
+  verification: (appId: string, key: string) => get<VerificationView>(`${app(appId)}/verification`, key),
+  pin: (appId: string, key: string, layerId: string, body: PinRequest) =>
+    request<WeightsView>("POST", `${app(appId)}/weights/${encodeURIComponent(layerId)}/pin`, key, body),
   // DEMO_MODE only: these 404 otherwise
   debugClock: () => get<ClockState>("/debug/clock"),
   controlClock: (appId: string, key: string, body: ClockControl) =>
