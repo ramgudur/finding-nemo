@@ -126,3 +126,25 @@ def test_invalid_event_body_is_422(client, ingest_key):
         headers={"X-Ingest-Key": ingest_key},
     )
     assert r.status_code == 422
+
+
+@pytest.mark.parametrize("lat,lon", [(40.0, 0.005), (0.005, 202 - 180), (-0.001, 0.005), (0.005, 0.0101)])
+def test_position_outside_the_grid_bbox_is_422(client, ingest_key, lat, lon):
+    r = client.post(
+        "/v1/apps/test-app/inputs/pings/events", json=_event(lat=lat, lon=lon), headers={"X-Ingest-Key": ingest_key}
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"] == "position outside the app's area"
+
+
+def test_position_on_the_bbox_edge_is_accepted(client, ingest_key):
+    for lat, lon in [(0.0, 0.0), (0.01, 0.01)]:
+        r = client.post(
+            "/v1/apps/test-app/inputs/pings/events", json=_event(lat=lat, lon=lon), headers={"X-Ingest-Key": ingest_key}
+        )
+        assert r.status_code == 202, r.text
+
+
+def test_out_of_range_latitude_is_still_a_validation_422(client, ingest_key):
+    r = client.post("/v1/apps/test-app/inputs/pings/events", json=_event(lat=202), headers={"X-Ingest-Key": ingest_key})
+    assert r.status_code == 422

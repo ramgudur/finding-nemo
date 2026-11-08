@@ -32,6 +32,7 @@ Errors: ``RevertNotFound`` (404), ``RevertStale`` (409: the target no longer hol
 
 from __future__ import annotations
 
+import json
 import math
 from typing import Any
 
@@ -68,10 +69,15 @@ def _same(a: Any, b: Any) -> bool:
     return a == b
 
 
+def _show(value: Any) -> str:
+    """A recorded value as compact JSON for an error message (not a Python repr)."""
+    return json.dumps(value, separators=(",", ":"), sort_keys=True, default=str)
+
+
 def _stale(change: Change, current: Any) -> RevertStale:
     return RevertStale(
-        f"{change.kind} {change.target!r} changed since change {change.id} (now {current!r}, "
-        f"that change left {change.after!r}); revert the later change first"
+        f"{change.kind} {change.target!r} changed since change {change.id} (now {_show(current)}, "
+        f"that change left {_show(change.after)}); revert the later change first"
     )
 
 
