@@ -148,9 +148,8 @@ def test_public_caller_gets_no_authority_layers_or_hotspots(run):
 
 
 def test_top_hotspot_is_near_the_threat_early(run):
-    r = run["snaps"][20]["result"]
-    top = max(r.hotspots, key=lambda h: h.peak)
-    assert _dist_m(top.lat, top.lon, ca.threat_at(20.0)) < 40
+    top = max(run["snaps"][20]["hotspots"]["hotspots"], key=lambda h: h["score"])
+    assert _dist_m(top["lat"], top["lon"], ca.threat_at(20.0)) < 40
 
 
 def test_flow_source_points_back_at_the_threat(run):
