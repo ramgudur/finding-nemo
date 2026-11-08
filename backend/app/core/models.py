@@ -24,7 +24,7 @@ InputShape = Literal["point", "track", "fixed_point", "field", "document"]
 AppStatus = Literal["draft", "pending_confirmation", "active"]
 VerificationMethod = Literal["authority_confirmation", "predictive_check", "cross_input_agreement"]
 FieldType = Literal["number", "integer", "string", "boolean"]
-ConnectorType = Literal["rss", "json_api", "open_meteo"]  # html is stubbed: rejected here
+ConnectorType = Literal["rss", "json_api"]  # html is stubbed: rejected here
 PoiLabelMode = Literal["auto", "on", "off"]
 PoiStatus = Literal["active", "retired"]
 AgentName = Literal["compiler", "scout", "critic", "poi_labeler", "message_guard"]
@@ -107,6 +107,22 @@ class ConnectorConfig(Model):
     url: str | None = None
     poll_s: float = Field(default=300, gt=0)
     config: dict[str, Any] = Field(default_factory=dict)
+    preset: str | None = Field(
+        default=None, description="A ready-made config under connectors/presets/, e.g. 'open_meteo'."
+    )
+
+
+class Plausibility(Model):
+    """Per-input bounds for the spoof checks in `engine/trust.py` (tracks/points only).
+
+    The Compiler proposes these from the input's `meaning`: a bird's plausible speed and
+    straight-line flight are not a person's. Omitted values use `engine/trust.py`'s defaults.
+    """
+
+    max_speed_mps: float | None = Field(default=None, gt=0)
+    jitter_m: float | None = Field(default=None, ge=0)
+    flag_constant_speed: bool | None = None
+    flag_straight_line: bool | None = None
 
 
 class InputSpec(Model):
@@ -119,6 +135,7 @@ class InputSpec(Model):
     fields: list[InputField] = Field(default_factory=list)
     connector: ConnectorConfig | None = None
     operators: list[OperatorConfig] = Field(default_factory=list)
+    plausibility: Plausibility | None = None
 
     @model_validator(mode="after")
     def _defaults_and_shape(self) -> InputSpec:
@@ -164,6 +181,9 @@ class PoiLabelConfig(Model):
 class Outputs(Model):
     layers: list[OutputLayer] = Field(default_factory=list)
     poi_labels: PoiLabelConfig = Field(default_factory=PoiLabelConfig)
+    hotspot_threshold: float = Field(
+        default=0.5, gt=0, le=1, description="Score at or above which connected cells form a hotspot."
+    )
 
 
 class DestinationPoint(Model):

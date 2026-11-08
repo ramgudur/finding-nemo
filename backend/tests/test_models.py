@@ -3,7 +3,18 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from app.core.models import AppSpec, BBox, CellCollection, Event, Hotspot, Instruction, MapResponse, PoiLabel
+from app.core.models import (
+    AppSpec,
+    BBox,
+    CellCollection,
+    ConnectorConfig,
+    Event,
+    Hotspot,
+    Instruction,
+    MapResponse,
+    Plausibility,
+    PoiLabel,
+)
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -142,6 +153,38 @@ def test_map_response_accepts_grid_to_geojson_output():
 
     m = MapResponse(app_id="a", t=NOW, cell_m=grid.cell_m, bbox=grid.bbox, layers={"score": fc})
     assert m.layers["score"].features[0].properties.row == 0
+
+
+def test_outputs_hotspot_threshold_defaults_and_bounds():
+    s = AppSpec.model_validate(_spec())
+    assert s.outputs.hotspot_threshold == 0.5
+    with pytest.raises(ValidationError):
+        AppSpec.model_validate(_spec(outputs={"hotspot_threshold": 0.0}))
+    with pytest.raises(ValidationError):
+        AppSpec.model_validate(_spec(outputs={"hotspot_threshold": 1.5}))
+
+
+def test_input_plausibility_is_optional_and_partial():
+    s = AppSpec.model_validate(_spec())
+    assert s.inputs[0].plausibility is None
+
+    bad = _spec()
+    bad["inputs"][0]["plausibility"] = {"max_speed_mps": 30.0, "flag_straight_line": False}
+    s = AppSpec.model_validate(bad)
+    p = s.inputs[0].plausibility
+    assert p.max_speed_mps == 30.0
+    assert p.flag_straight_line is False
+    assert p.jitter_m is None and p.flag_constant_speed is None
+
+    with pytest.raises(ValidationError):
+        Plausibility(max_speed_mps=-1.0)
+
+
+def test_connector_config_accepts_a_preset_and_rejects_open_meteo_as_a_type():
+    c = ConnectorConfig(type="json_api", preset="open_meteo")
+    assert c.preset == "open_meteo"
+    with pytest.raises(ValidationError):
+        ConnectorConfig(type="open_meteo")
 
 
 def test_hotspot_rejects_both_sensitive_defaults_and_bad_radius():
