@@ -568,7 +568,7 @@ export type SourceVia = "post_api" | "webhook" | "rss" | "json_api" | "json_list
 export interface SourceStatus {
   input_id: string;
   kind: InputKind;
-  via: SourceVia;
+  via: SourceVia | null; // null: a pull input with no connector yet (#277)
   poll_s: number | null;
   last_polled_at: string | null;
   next_poll_at: string | null;

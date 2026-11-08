@@ -70,7 +70,7 @@ export function describeSource(s: SourceStatus, now: number): SourceLine {
   };
 }
 
-export const VIA_LABEL: Record<SourceStatus["via"], string> = {
+export const VIA_LABEL: Record<NonNullable<SourceStatus["via"]>, string> = {
   post_api: "POST API",
   webhook: "webhook",
   rss: "RSS feed",
