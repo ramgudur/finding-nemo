@@ -47,19 +47,19 @@ export function BuilderLayout() {
   }
 
   return (
-    <main className="bld sky-wash relative min-h-screen overflow-x-hidden">
-      <div aria-hidden className="sky-mist pointer-events-none fixed inset-0 overflow-hidden">
-        <span className="mist-a" />
-        <span className="mist-b" />
-        <span className="mist-c" />
-      </div>
-      <div aria-hidden className="paper-grain pointer-events-none fixed inset-0" />
-      {/* Mist band so content scrolling under the fixed header fades instead of colliding with the logo. */}
+    <main className="bld wp-ground relative min-h-screen overflow-x-hidden">
+      {/* Caustic light across the top of the page only (the Home pond's light, seen from the work surface). */}
+      <div aria-hidden className="wp-caustic" />
+      {/* Water band so content scrolling under the fixed header fades instead of colliding with the logo. */}
       <div
         aria-hidden
-        className="pointer-events-none fixed inset-x-0 top-0 z-10 h-20 bg-gradient-to-b from-[#d2e6ec] via-[#d2e6ec]/85 to-transparent"
+        className="pointer-events-none fixed inset-x-0 top-0 z-10 h-20 bg-gradient-to-b from-washedSky via-washedSky/85 to-transparent"
       />
-      <div className="relative mx-auto flex max-w-3xl flex-col gap-8 px-4 pb-[calc(10rem+env(safe-area-inset-bottom))] pt-24 sm:px-6 sm:pt-28">
+      <div
+        className={`relative mx-auto flex flex-col gap-8 px-4 pb-[calc(10rem+env(safe-area-inset-bottom))] pt-24 sm:px-6 sm:pt-28 ${
+          step === "sources" ? "max-w-[1120px]" : "max-w-3xl"
+        }`}
+      >
         {step && (
           <div className="flex items-center gap-2 sm:flex-wrap sm:gap-3">
             <Stepper current={step} complete={complete} />

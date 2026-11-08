@@ -1,19 +1,19 @@
-// Tier badge: locked (stone, lock icon), stiff (sea glass, ±10%/h), flexible (soft aqua, ±25%/step).
+// Tier badge: locked (solid deep, lock icon: never editable), stiff (teal, ±10%/h), flexible (reed green, ±25%/step).
 import { Lock, Waves, Wind } from "lucide-react";
 import type { Tier } from "../../api/types";
 import { TIER_HELP, TIER_RULE } from "./specLayers";
 
 /** Row/card surface per tier, so the tier reads at a glance even before the badge. */
 export const TIER_SURFACE: Record<Tier, string> = {
-  locked: "border-[#C9C2AE] bg-[#E6E1D3]/80",
-  stiff: "border-seaGlass/60 bg-[#D3E6E3]/80",
-  flexible: "border-softAqua bg-[#E3F2F3]/85",
+  locked: "border-tierLocked/[0.14] bg-tierLocked/[0.06]",
+  stiff: "border-tierStiff/[0.18] bg-tierStiff/[0.07]",
+  flexible: "border-tierFlex/[0.2] bg-tierFlex/[0.07]",
 };
 
 const BADGE: Record<Tier, string> = {
-  locked: "bg-softStone text-slate ring-1 ring-[#BDB49C]",
-  stiff: "bg-seaGlass/35 text-[#2F6265] ring-1 ring-seaGlass/70",
-  flexible: "bg-softAqua/55 text-[#2E6670] ring-1 ring-softAqua",
+  locked: "bg-tierLocked text-cream",
+  stiff: "bg-tierStiff/[0.14] text-tierStiff",
+  flexible: "bg-tierFlex/[0.16] text-tierFlex",
 };
 
 const ICON = { locked: Lock, stiff: Waves, flexible: Wind } as const;
@@ -23,7 +23,7 @@ export function TierBadge({ tier, compact = false }: { tier: Tier; compact?: boo
   return (
     <span
       title={TIER_HELP[tier]}
-      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${BADGE[tier]}`}
+      className={`wp-chip !text-[11.5px] font-bold ${BADGE[tier]}`}
     >
       <Icon aria-hidden className="h-3 w-3" strokeWidth={2.25} />
       {tier}

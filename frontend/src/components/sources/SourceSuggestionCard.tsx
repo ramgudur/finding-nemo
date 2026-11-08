@@ -7,9 +7,9 @@ export function KindBadge({ kind, small }: { kind: "push" | "pull"; small?: bool
   return (
     <span
       title={kind === "push" ? "Your app sends this to the platform" : "The platform fetches this on a schedule"}
-      className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full font-semibold ${
-        small ? "px-1.5 py-px text-[11px]" : "px-2 py-0.5 text-xs"
-      } ${kind === "push" ? "bg-primary/15 text-primary" : "bg-mutedTeal/20 text-[#3C6668]"}`}
+      className={`wp-chip shrink-0 ${small ? "!h-5 !px-1.5 !text-[11.5px]" : ""} ${
+        kind === "push" ? "bg-deep/[0.11] text-deep" : "bg-live/[0.13] text-live"
+      }`}
     >
       <Icon size={small ? 10 : 11} strokeWidth={2.4} aria-hidden />
       {kind === "push" ? "from your app" : "we fetch"}

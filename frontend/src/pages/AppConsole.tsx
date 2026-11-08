@@ -181,20 +181,20 @@ export default function AppConsole() {
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0 space-y-1.5">
             <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="truncate font-mono text-[24px] font-semibold text-slate">{appId}</h1>
+              <h1 className="truncate font-mono text-[28px] font-semibold tracking-[-0.02em] text-slate max-sm:text-[22px]">{appId}</h1>
               <StatusChip live />
               <span
-                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${authority ? "bg-slate text-cream" : "bg-white/60 text-slate ring-1 ring-paleWater"}`}
+                className={`inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-[13px] font-bold ${authority ? "bg-deep text-cream" : "bg-sheet text-slate shadow-[inset_0_0_0_1px_rgb(var(--c-slate)/0.24)]"}`}
               >
-                {authority ? <KeyRound aria-hidden className="h-3 w-3" /> : null}
+                {authority ? <KeyRound aria-hidden className="h-3.5 w-3.5" /> : null}
                 {authority ? "Authority view" : "Public view"}
               </span>
             </div>
-            {spec?.intent && <p className="max-w-[70ch] text-[14.5px] text-ink">{spec.intent}</p>}
+            {spec?.intent && <p className="max-w-[72ch] text-[15px] text-ink">{spec.intent}</p>}
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2 md:justify-end">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/55 px-2.5 py-1 font-mono text-[12px] text-slate" title={live.lastUpdate ?? undefined}>
-              <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${live.connected ? "bg-mutedTeal motion-safe:animate-pulse" : "bg-coral"}`} />
+            <span className="inline-flex h-8 items-center gap-2.5 rounded-full bg-sheet px-3 font-mono text-[12px] text-slate shadow-[var(--shadow-1)]" title={live.lastUpdate ?? undefined}>
+              <span aria-hidden className={`wp-dot ${live.connected ? "is-live" : "is-off"}`} />
               {conn}
               {updated && <span className="text-ink">· {updated}</span>}
             </span>
@@ -233,7 +233,7 @@ export default function AppConsole() {
         )}
       </header>
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(360px,1fr)]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(400px,480px)]">
         <div className="flex min-w-0 flex-col gap-5">
           <HeatmapPanel
             spec={spec}
@@ -279,8 +279,8 @@ export default function AppConsole() {
           )}
         </div>
 
-        <section aria-label="Console" className="flex min-w-0 flex-col gap-3 self-start rounded-3xl bg-cream/55 p-4 shadow-[0_8px_30px_-14px_rgba(53,89,107,0.3)]">
-          <div role="tablist" aria-label="Console" onKeyDown={onTabKey} className="-mx-1 flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden rounded-full bg-white/50 p-1 sm:mx-0 sm:flex-wrap sm:overflow-visible">
+        <section aria-label="Console" className="wp-sheet flex min-w-0 flex-col gap-4 self-start overflow-hidden pb-5">
+          <div role="tablist" aria-label="Console" onKeyDown={onTabKey} className="flex overflow-x-auto border-b border-slate/[0.13] px-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {TABS.map(({ id, label, Icon, authority: needsKey }) => {
               const on = tab === id;
               const lockedTab = needsKey && !authority;
@@ -298,7 +298,7 @@ export default function AppConsole() {
                     // on phones the tab strip scrolls sideways: bring the chosen tab fully into view
                     e.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" });
                   }}
-                  className={`tap relative flex shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-full px-3 py-1.5 text-[12.5px] sm:flex-1 sm:shrink sm:px-2.5 font-semibold transition-colors duration-150 ${
+                  className={`tap relative flex h-12 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-2 text-[12.5px] font-bold transition-colors duration-150 ease-wp ${
                     on ? "text-slate" : "text-ink hover:text-slate"
                   }`}
                 >
@@ -306,14 +306,14 @@ export default function AppConsole() {
                     <motion.span
                       layoutId="console-tab"
                       aria-hidden
-                      className="absolute inset-0 rounded-full bg-cream shadow-sm ring-1 ring-paleWater"
-                      transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                      className="absolute inset-x-2 -bottom-px h-[2.5px] rounded-full bg-deep"
+                      transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
                     />
                   )}
-                  {lockedTab ? <Lock aria-hidden className="relative h-3 w-3" /> : <Icon aria-hidden className="relative h-3.5 w-3.5 lg:max-2xl:hidden" />}
+                  {lockedTab ? <Lock aria-hidden className="relative h-3 w-3" /> : <Icon aria-hidden className="relative h-3.5 w-3.5 lg:max-[1700px]:hidden" />}
                   <span className="relative">{label}</span>
                   {id === "changes" && authority && data.changes.length > 0 && (
-                    <span className="relative font-mono text-[11px] text-ink">{data.changes.length}</span>
+                    <span className="relative rounded-[5px] bg-slate/[0.08] px-1 py-0.5 font-mono text-[11px] leading-none text-ink">{data.changes.length}</span>
                   )}
                 </button>
               );
@@ -328,11 +328,11 @@ export default function AppConsole() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.15 }}
-            className="min-w-0 space-y-3"
+            className="min-w-0 space-y-3 px-4 sm:px-5"
           >
-            <div className="px-1">
-              <h2 className="text-[15px] font-bold text-slate">{tabInfo.label}</h2>
-              <p className="text-[12.5px] text-ink">{tabInfo.desc}</p>
+            <div>
+              <h2 className="text-[18px] font-bold text-slate">{tabInfo.label}</h2>
+              <p className="mt-1 text-[13.5px] text-ink">{tabInfo.desc}</p>
             </div>
             {tab === "layers" ? (
               <LayerList
@@ -369,7 +369,7 @@ export default function AppConsole() {
               data.weights ? (
                 <>
                   <WeightsPanel view={data.weights} busy={data.pinBusy} onPin={(l, p) => void data.pin(l, p)} />
-                  {data.pinError && <p className="mt-1 text-[12.5px] font-semibold text-[#7A4232]">{data.pinError}</p>}
+                  {data.pinError && <p className="mt-1 text-[12.5px] font-semibold text-danger">{data.pinError}</p>}
                 </>
               ) : (
                 <p className="text-[13px] text-ink">Weights appear after the first engine tick.</p>
@@ -450,7 +450,7 @@ function UnlockForm({
       <button
         type="submit"
         disabled={!value.trim()}
-        className="tap rounded-full bg-[#4F80B0] px-4 py-1.5 text-[13px] font-semibold text-cream shadow-sm transition-[transform,opacity] duration-150 hover:-translate-y-px disabled:translate-y-0 disabled:opacity-45"
+        className="tap wp-press rounded-full bg-deep px-4 py-1.5 text-[13px] font-bold text-cream hover:bg-primaryHover disabled:opacity-45"
       >
         Unlock
       </button>
@@ -459,7 +459,7 @@ function UnlockForm({
         Remember on this device
       </label>
       {rejected && (
-        <p id="unlock-rejected" role="alert" className="w-full text-[13px] font-semibold text-[#7A4232]">
+        <p id="unlock-rejected" role="alert" className="w-full text-[13px] font-semibold text-danger">
           Key rejected, showing the public view.
         </p>
       )}

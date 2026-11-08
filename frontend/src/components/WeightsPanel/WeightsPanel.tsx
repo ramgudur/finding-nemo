@@ -32,7 +32,7 @@ export function WeightsPanel({ view, busy, onPin }: Props) {
                 onClick={() => onPin(l.layer_id, !l.pinned)}
                 className={`inline-flex w-[76px] items-center justify-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold transition-[transform,box-shadow,background-color] duration-150 hover:-translate-y-px disabled:opacity-50 ${
                   l.pinned
-                    ? "bg-coral/25 text-[#8A4B39] ring-1 ring-coral/60"
+                    ? "bg-coral/25 text-danger ring-1 ring-coral/60"
                     : "bg-white/60 text-ink ring-1 ring-paleWater hover:shadow-sm"
                 }`}
               >

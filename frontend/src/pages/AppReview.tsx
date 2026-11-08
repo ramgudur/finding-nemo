@@ -238,7 +238,7 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
         </aside>
       </div>
 
-      <div className="sticky bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-20 flex flex-col gap-2 rounded-2xl bg-cream/95 p-3 sm:bottom-4 sm:gap-3 shadow-[0_10px_32px_-12px_rgba(53,89,107,0.45)] backdrop-blur-sm sm:flex-row sm:items-center sm:px-4">
+      <div className="sticky bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-20 flex flex-col gap-2 rounded-2xl bg-sheet p-3 sm:bottom-4 sm:gap-3 shadow-[var(--shadow-2)] backdrop-blur-sm sm:flex-row sm:items-center sm:px-4">
         <p className="flex min-w-0 flex-1 items-start gap-2 text-[12.5px] text-slate sm:text-[13px]">
           <Lock aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-mutedTeal" />
           <span aria-live="polite">
@@ -282,7 +282,7 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
           </button>
         </div>
         {activateError && (
-          <p role="alert" className="w-full text-[13px] font-semibold text-[#7A4232] sm:order-last">
+          <p role="alert" className="w-full text-[13px] font-semibold text-danger sm:order-last">
             {activateError.text}{" "}
             {activateError.live && (
               <Link to={`/apps/${encodeURIComponent(appId)}`} className="underline underline-offset-2">
@@ -296,7 +296,7 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
       <dialog
         ref={dialog}
         aria-labelledby="rv-confirm-title"
-        className="w-[min(560px,calc(100vw-32px))] rounded-3xl bg-mist p-0 text-left text-slate shadow-[0_24px_60px_-20px_rgba(53,89,107,0.6)] backdrop:bg-slate/25"
+        className="w-[min(560px,calc(100vw-32px))] rounded-[20px] bg-sheet p-0 text-left text-slate shadow-[var(--shadow-2)] backdrop:bg-slate/25"
       >
         <div className="space-y-4 p-5 sm:p-6">
           <div>
@@ -348,7 +348,7 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
               </ol>
             )}
           </div>
-          <p className="rounded-xl bg-coral/15 px-3 py-2 text-[13px] text-[#7A4232]">
+          <p className="rounded-xl bg-attnBg px-3 py-2 text-[13px] font-semibold text-attn">
             Your ingest and authority keys appear on the next screen, once. Have somewhere ready to save them.
           </p>
           <div className="flex flex-wrap justify-end gap-2">

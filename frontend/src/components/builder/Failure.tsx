@@ -77,7 +77,7 @@ export function FailurePanel({ failure, onClose }: { failure: Failure; onClose?:
     <div
       ref={ref}
       role="alert"
-      className="flex scroll-mb-32 flex-col gap-2 rounded-2xl border border-danger/30 bg-[#F6E6DD]/90 px-5 py-4 text-sm text-slate shadow-[0_10px_30px_-20px_rgba(150,80,60,0.6)]"
+      className="flex scroll-mb-32 flex-col gap-2 rounded-2xl bg-attnBg px-5 py-4 text-sm text-slate shadow-[var(--shadow-1)]"
     >
       <div className="flex items-start gap-3">
         <strong className="font-semibold text-danger">{failure.title}</strong>

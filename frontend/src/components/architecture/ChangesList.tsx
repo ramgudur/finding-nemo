@@ -75,7 +75,7 @@ export function ChangesList({ changes, onRevert }: { changes: Change[]; onRevert
               </p>
             )}
             {note && (
-              <p role="status" className={`mt-1 text-[11.5px] ${note.ok ? "text-mutedTeal" : "text-[#8A4B39]"}`}>
+              <p role="status" className={`mt-1 text-[11.5px] ${note.ok ? "text-mutedTeal" : "text-danger"}`}>
                 {note.text}
               </p>
             )}

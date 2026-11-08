@@ -219,9 +219,9 @@ export function TestControls({ appId, authorityKey, spec, point, onPointChange, 
 
 function Card({ children }: { children: ReactNode }) {
   return (
-    <section aria-labelledby="test-title" className="space-y-3 rounded-3xl bg-cream/60 p-4 shadow-[0_8px_30px_-14px_rgba(53,89,107,0.3)]">
+    <section aria-labelledby="test-title" className="wp-sheet space-y-4 p-5 sm:p-6">
       <div>
-        <h2 id="test-title" className="text-[15px] font-bold text-slate">
+        <h2 id="test-title" className="text-[18px] font-bold text-slate">
           Test your app
         </h2>
         <p className="text-[12.5px] text-ink">Send simulated events through the real ingest path. They're marked as simulated in the trace.</p>

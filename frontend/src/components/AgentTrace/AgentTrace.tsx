@@ -28,7 +28,7 @@ export function AgentTrace({ entries, empty = "No agent runs yet." }: { entries:
                 <span
                   key={n}
                   title={c.result_summary}
-                  className={`rounded-full px-1.5 py-px font-mono text-[10.5px] ${c.ok ? "bg-seaGlass/25 text-[#2F6265]" : "bg-coral/25 text-[#8A4B39]"}`}
+                  className={`rounded-full px-1.5 py-px font-mono text-[10.5px] ${c.ok ? "bg-seaGlass/25 text-tierStiff" : "bg-coral/25 text-danger"}`}
                 >
                   {c.name}
                   {c.ok ? "" : " (failed)"}
@@ -37,7 +37,7 @@ export function AgentTrace({ entries, empty = "No agent runs yet." }: { entries:
             </div>
           )}
           {e.skipped_reason ? (
-            <div className="mt-1 text-[#8A5A3C]">skipped: {e.skipped_reason}</div>
+            <div className="mt-1 text-attn">skipped: {e.skipped_reason}</div>
           ) : (
             <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5">
               {FIELDS.filter(([k]) => e[k]).map(([k, label]) => (

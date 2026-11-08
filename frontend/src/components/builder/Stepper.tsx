@@ -12,6 +12,21 @@ interface Props {
   complete: Record<StepId, boolean>;
 }
 
+/** The logo's double wave, as the path between two steps: solid once walked, dotted ahead. */
+function StepWave({ on }: { on: boolean }) {
+  return (
+    <svg aria-hidden viewBox="0 0 40 10" className="h-2.5 w-4 shrink-0 fill-none sm:mx-1 sm:w-10">
+      <path
+        d="M2 5C7 1 12 1 17 5S27 9 32 5 37 2 38 4"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        className={on ? "stroke-deep/55" : "stroke-inkSoft/45"}
+        strokeDasharray={on ? undefined : "2 4"}
+      />
+    </svg>
+  );
+}
+
 export function Stepper({ current, complete }: Props) {
   const currentIndex = STEPS.findIndex((s) => s.id === current);
   return (
@@ -25,10 +40,10 @@ export function Stepper({ current, complete }: Props) {
             <span
               className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors duration-200 ${
                 isCurrent
-                  ? "bg-primary text-cream"
+                  ? "bg-deep text-cream shadow-[0_0_0_4px_rgb(var(--c-deep)/0.14)]"
                   : done
-                    ? "bg-mutedTeal/20 text-slate ring-1 ring-mutedTeal/50"
-                    : "bg-white/50 text-ink ring-1 ring-inkSoft/30"
+                    ? "bg-deep/10 text-deep"
+                    : "text-inkSoft ring-[1.5px] ring-inset ring-slate/25"
               }`}
             >
               {done ? <Check size={13} strokeWidth={2.6} aria-hidden /> : i + 1}
@@ -37,13 +52,13 @@ export function Stepper({ current, complete }: Props) {
           const body = (
             <>
               {dot}
-              <span className={isCurrent ? "whitespace-nowrap font-semibold text-slate" : "text-ink max-sm:sr-only"}>{step.label}</span>
+              <span className={isCurrent ? "whitespace-nowrap font-extrabold text-slate" : `font-semibold max-sm:sr-only ${done ? "text-ink" : "text-inkSoft"}`}>{step.label}</span>
               {done && <span className="sr-only">(done)</span>}
             </>
           );
           return (
             <li key={step.id} className="flex items-center gap-1">
-              {i > 0 && <span aria-hidden className="h-px w-3 bg-inkSoft/40 sm:mx-1 sm:w-8" />}
+              {i > 0 && <StepWave on={complete[STEPS[i - 1]!.id] && i <= currentIndex} />}
               {isCurrent ? (
                 <span aria-current="step" className="tap flex items-center gap-2 rounded-full px-1.5 py-1">
                   {body}
@@ -51,7 +66,7 @@ export function Stepper({ current, complete }: Props) {
               ) : reachable ? (
                 <Link
                   to={`/new/${step.id}`}
-                  className="tap flex items-center justify-center gap-2 rounded-full px-1.5 py-1 transition-colors duration-150 hover:bg-white/45"
+                  className="tap wp-press flex items-center justify-center gap-2 rounded-full px-1.5 py-1 hover:bg-slate/[0.06]"
                 >
                   {body}
                 </Link>

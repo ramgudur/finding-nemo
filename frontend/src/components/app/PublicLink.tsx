@@ -35,8 +35,8 @@ export function QrSvg({ value, size = 168, className = "" }: { value: string; si
       shapeRendering="crispEdges"
       className={`rounded-xl ${className}`}
     >
-      <rect width={n} height={n} fill="#FBF8F1" />
-      <path d={qrPath(qr)} fill="#22394A" />
+      <rect width={n} height={n} className="fill-sheet" />
+      <path d={qrPath(qr)} className="fill-deep2" />
     </svg>
   );
 }
@@ -53,7 +53,7 @@ export function PublicLinkRow({ link }: { link: string }) {
           href={link}
           target="_blank"
           rel="noreferrer"
-          className="min-w-0 flex-1 basis-[240px] break-all rounded-lg bg-white/70 px-2.5 py-1.5 font-mono text-[12.5px] text-slate underline decoration-mutedTeal/50 underline-offset-2 transition-colors hover:decoration-slate"
+          className="min-w-0 flex-1 basis-[240px] break-all rounded-[10px] bg-sheet px-3 py-2 font-mono text-[13px] text-slate shadow-[inset_0_0_0_1px_rgb(var(--c-slate)/0.18)] underline decoration-deep/40 underline-offset-2 transition-colors hover:decoration-slate"
         >
           {link}
         </a>
@@ -64,7 +64,7 @@ export function PublicLinkRow({ link }: { link: string }) {
             aria-expanded={open}
             aria-controls={panel}
             onClick={() => setOpen((o) => !o)}
-            className="tap inline-flex shrink-0 items-center gap-1 rounded-lg bg-white/75 px-2.5 py-1 text-[12px] font-semibold text-slate ring-1 ring-paleWater transition-[background-color,box-shadow] duration-150 hover:bg-white hover:shadow-sm"
+            className="tap wp-press inline-flex shrink-0 items-center gap-1.5 rounded-full bg-sheet px-3 py-1 text-[12.5px] font-bold text-slate shadow-[inset_0_0_0_1px_rgb(var(--c-slate)/0.24)] hover:shadow-[inset_0_0_0_1px_rgb(var(--c-ink-soft))]"
           >
             <QrIcon aria-hidden className="h-3.5 w-3.5" />
             {open ? "Hide QR" : "Show as QR"}
@@ -73,7 +73,7 @@ export function PublicLinkRow({ link }: { link: string }) {
       </div>
       {open && (
         <div id={panel} className="flex flex-wrap items-center gap-4">
-          <QrSvg value={link} size={176} className="shadow-[0_6px_20px_-10px_rgba(53,89,107,0.45)]" />
+          <QrSvg value={link} size={176} className="shadow-[var(--shadow-1)]" />
           <p className="max-w-[36ch] text-[13px] text-ink">Point a phone camera at it to open the end-user page. Print it or put it on a slide for people nearby.</p>
         </div>
       )}
@@ -110,7 +110,7 @@ export function PublicLinkButtons({ link }: { link: string }) {
           aria-controls={panel}
           aria-label="Show the public link as a QR code"
           onClick={() => setOpen((o) => !o)}
-          className="tap inline-flex shrink-0 items-center gap-1 rounded-lg bg-white/75 px-2.5 py-1 text-[12px] font-semibold text-slate ring-1 ring-paleWater transition-[background-color,box-shadow] duration-150 hover:bg-white hover:shadow-sm"
+          className="tap wp-press inline-flex shrink-0 items-center gap-1.5 rounded-full bg-sheet px-3 py-1 text-[12.5px] font-bold text-slate shadow-[inset_0_0_0_1px_rgb(var(--c-slate)/0.24)] transition-[background-color,box-shadow] duration-150 hover:bg-white hover:shadow-sm"
         >
           <QrIcon aria-hidden className="h-3.5 w-3.5" /> QR
         </button>
@@ -120,7 +120,7 @@ export function PublicLinkButtons({ link }: { link: string }) {
           id={panel}
           role="dialog"
           aria-label="Public link QR code"
-          className="absolute right-0 top-full z-[1100] mt-2 w-[236px] space-y-2 rounded-2xl bg-cream p-3 shadow-[0_14px_40px_-12px_rgba(34,57,74,0.45)] ring-1 ring-paleWater"
+          className="absolute right-0 top-full z-[1100] mt-2 w-[236px] space-y-2 rounded-2xl bg-sheet p-3 shadow-[var(--shadow-2)]"
         >
           <div className="flex items-center justify-between">
             <p className="text-[13px] font-bold text-slate">End-user page</p>

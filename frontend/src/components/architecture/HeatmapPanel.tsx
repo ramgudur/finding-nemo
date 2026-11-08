@@ -73,18 +73,18 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className, o
   return (
     <section
       aria-label="Live map"
-      className={`flex min-w-0 flex-col gap-3 rounded-3xl bg-washedSky/70 p-4 shadow-[0_8px_30px_-12px_rgba(53,89,107,0.3)] ${className ?? ""}`}
+      className={`wp-sheet flex min-w-0 flex-col gap-4 p-4 sm:p-5 ${className ?? ""}`}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h2 className="text-[15px] font-bold text-slate">Live map</h2>
-          <p className="text-[12.5px] text-ink">{shown === "score" || shown === null ? "The combined score, updated every engine tick." : "One layer before weighting. Pick score in Layers to see the combined map."}</p>
+          <h2 className="text-[18px] font-bold text-slate">Live map</h2>
+          <p className="mt-1 text-[13.5px] text-ink">{shown === "score" || shown === null ? "The combined score, updated every engine tick." : "One layer before weighting. Pick score in Layers to see the combined map."}</p>
         </div>
         <span className="font-mono text-[12px] text-ink">showing {shown ?? "nothing yet"}</span>
       </div>
 
       {live.error && !live.keyRejected && (
-        <p role="alert" className="rounded-lg bg-coral/20 px-3 py-2 text-[13px] text-[#7A4232]">
+        <p role="alert" className="rounded-lg bg-attnBg px-3 py-2 text-[13px] font-semibold text-attn">
           {live.error}
         </p>
       )}
@@ -94,7 +94,8 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className, o
         </p>
       )}
 
-      <div className="relative">
+      {/* The map is a window into the pond, framed in deep water. */}
+      <div className="relative overflow-hidden rounded-[20px] bg-deep2 p-1.5 shadow-[var(--shadow-2)] [&_.leaflet-container]:rounded-[15px]">
         {bbox ? (
           <Map
             bbox={bbox}
@@ -113,10 +114,10 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className, o
         )}
         {bbox && (
           <>
-            <div className="pointer-events-none absolute bottom-2 left-2 z-[500] rounded-md bg-cream/90 px-2 py-1 font-mono text-[10.5px] text-slate shadow-sm">
+            <div className="pointer-events-none absolute bottom-2 left-2 z-[500] rounded-lg bg-cream/95 px-2.5 py-1.5 font-mono text-[11px] text-slate shadow-[var(--shadow-1)]">
               SW {fmtLatLon(bbox[1], bbox[0])}
             </div>
-            <div className="pointer-events-none absolute right-2 top-2 z-[500] rounded-md bg-cream/90 px-2 py-1 font-mono text-[10.5px] text-slate shadow-sm">
+            <div className="pointer-events-none absolute right-2 top-2 z-[500] rounded-lg bg-cream/95 px-2.5 py-1.5 font-mono text-[11px] text-slate shadow-[var(--shadow-1)]">
               NE {fmtLatLon(bbox[3], bbox[2])}
             </div>
             {badges.length > 0 && (
@@ -139,8 +140,8 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className, o
           </div>
         )}
         {phase === "waiting" && (
-          <div role="status" className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center rounded-xl bg-[rgba(220,238,241,0.78)]">
-            <div className="max-w-[34ch] space-y-1 rounded-2xl bg-cream/95 px-4 py-3 text-center shadow-[0_8px_24px_-12px_rgba(53,89,107,0.4)]">
+          <div role="status" className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center rounded-xl bg-mist/80">
+            <div className="max-w-[34ch] space-y-1 rounded-2xl bg-cream/95 px-4 py-3 text-center shadow-[var(--shadow-1)]">
               <p className="flex items-center justify-center gap-1.5 text-[14px] font-bold text-slate">
                 <Hourglass aria-hidden className="h-4 w-4 text-mutedTeal" /> Waiting for the first tick
               </p>
@@ -149,20 +150,20 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className, o
           </div>
         )}
         {phase === "unavailable" && (
-          <div className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center rounded-xl bg-[rgba(220,238,241,0.7)]">
+          <div className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center rounded-xl bg-mist/70">
             <p className="max-w-[34ch] rounded-2xl bg-cream/95 px-4 py-3 text-center text-[13px] text-slate shadow-sm">The map couldn't be loaded. It retries every 2 s.</p>
           </div>
         )}
         {phase === "noPublic" && (
-          <div role="status" className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center rounded-xl bg-[rgba(220,238,241,0.7)]">
+          <div role="status" className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center rounded-xl bg-mist/70">
             <p className="max-w-[34ch] rounded-2xl bg-cream/95 px-4 py-3 text-center text-[13px] text-slate shadow-sm">No layer of this app is public. Unlock the authority view to see the map.</p>
           </div>
         )}
         {phase === "quiet" && (
           <div role="status" className="absolute inset-x-0 bottom-9 z-[500] flex justify-center px-3">
-            <div className="max-w-[44ch] rounded-2xl bg-cream/95 px-3.5 py-2 text-center shadow-[0_6px_20px_-10px_rgba(53,89,107,0.45)]">
+            <div className="max-w-[44ch] rounded-2xl bg-cream/95 px-3.5 py-2 text-center shadow-[var(--shadow-1)]">
               <p className="flex items-center justify-center gap-1.5 text-[13px] font-semibold text-slate">
-                <span aria-hidden className="h-2 w-2 rounded-full bg-mutedTeal motion-safe:animate-pulse" />
+                <span aria-hidden className="wp-dot is-live" />
                 {shownVector
                   ? `${shown} is a vector field, so it draws no cells`
                   : shown === "score"
