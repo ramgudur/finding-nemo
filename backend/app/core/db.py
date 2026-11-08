@@ -1,7 +1,7 @@
 """SQLite persistence.
 
 Tables: apps, inputs, events, connectors, weights_history, trust, pois, trace, changes,
-backtests, keys. This schema is shared: post on the board when it changes (AGENTS.md).
+backtests, keys, label_proposals. This schema is shared: post on the board when it changes (AGENTS.md).
 
 Pydantic contracts (``AppSpec``, ``InputSpec``, ``Event``, ``POI``, ``TraceEntry``,
 ``Change``, ``Backtest``) are stored as their own JSON (``model_dump_json`` /
@@ -33,6 +33,8 @@ from app.core.models import (
     ConnectorConfig,
     Event,
     InputSpec,
+    LabelProposal,
+    LabelProposalStatus,
     PoiStatus,
     TraceEntry,
     Visibility,
@@ -132,6 +134,15 @@ CREATE TABLE IF NOT EXISTS backtests (
     backtest_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_backtests_lookup ON backtests(app_id, t);
+
+CREATE TABLE IF NOT EXISTS label_proposals (
+    id TEXT PRIMARY KEY,
+    app_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    t REAL NOT NULL,
+    proposal_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_label_proposals_lookup ON label_proposals(app_id, status, t);
 
 CREATE TABLE IF NOT EXISTS keys (
     app_id TEXT PRIMARY KEY,
@@ -479,6 +490,48 @@ class Db:
     def list_backtests(self, app_id: str) -> list[Backtest]:
         rows = self._query("SELECT backtest_json FROM backtests WHERE app_id = ? ORDER BY t", (app_id,))
         return [Backtest.model_validate_json(r["backtest_json"]) for r in rows]
+
+    # -- label_proposals ------------------------------------------------------------
+
+    def add_label_proposal(self, app_id: str, proposal: LabelProposal) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO label_proposals (id, app_id, status, t, proposal_json) VALUES (?, ?, ?, ?, ?)",
+                (proposal.id, app_id, proposal.status, proposal.t.timestamp(), proposal.model_dump_json()),
+            )
+            self._conn.commit()
+
+    def get_label_proposal(self, app_id: str, proposal_id: str) -> LabelProposal | None:
+        row = self._query_one(
+            "SELECT proposal_json FROM label_proposals WHERE app_id = ? AND id = ?", (app_id, proposal_id)
+        )
+        return LabelProposal.model_validate_json(row["proposal_json"]) if row else None
+
+    def list_label_proposals(self, app_id: str, status: LabelProposalStatus | None = None) -> list[LabelProposal]:
+        clauses, params = ["app_id = ?"], [app_id]
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        rows = self._query(
+            f"SELECT proposal_json FROM label_proposals WHERE {' AND '.join(clauses)} ORDER BY t, rowid", params
+        )
+        return [LabelProposal.model_validate_json(r["proposal_json"]) for r in rows]
+
+    def set_label_proposal_status(
+        self, app_id: str, proposal_id: str, status: LabelProposalStatus
+    ) -> LabelProposal | None:
+        """Set a proposal's status; returns the updated proposal, or None if it doesn't exist."""
+        with self._lock:
+            current = self.get_label_proposal(app_id, proposal_id)
+            if current is None:
+                return None
+            new = current.model_copy(update={"status": status})
+            self._conn.execute(
+                "UPDATE label_proposals SET status = ?, proposal_json = ? WHERE app_id = ? AND id = ?",
+                (status, new.model_dump_json(), app_id, proposal_id),
+            )
+            self._conn.commit()
+            return new
 
     # -- keys -----------------------------------------------------------------------
 
