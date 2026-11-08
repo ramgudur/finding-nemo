@@ -2,26 +2,26 @@
 // faint soft shadow offset onto the water. Very slow idle bob and rotation.
 import { useMemo } from "react";
 import { PlaneGeometry, ShaderMaterial } from "three";
-import { Z, pctToWorld, pond } from "./pond";
+import { Z, pctToWorld, pond, widthPctToWorld } from "./pond";
 import { makeInstanced, narrowScale, useAspect, useDisposable, useDriveUniforms } from "./shaders/propsCommon";
 import { PAD_FRAG, PAD_VERT } from "./shaders/propsPad";
 
-// [x%, y%, radius (world units = % of height), rotation (rad)]
+// [x%, y%, diameter (% of viewport width), rotation (rad)]
 const PADS: [number, number, number, number][] = [
   // top-left cluster (x 0-22%, y 5-25%), the first partly off-screen
-  [1, 9, 8, 2.4],
-  [11, 5, 5.5, -0.9],
-  [16, 14, 4.6, 0.7],
-  [6, 21, 5.2, -2.6],
+  [1, 9, 9, 2.4],
+  [11, 4, 7, -0.9],
+  [18, 14, 7.5, 0.7],
+  [7, 24, 8, -2.6],
   // beside the log
-  [83, 27, 5, 1.9],
+  [83, 27, 8, 1.9],
   // bottom-left
-  [9, 88, 6, -1.4],
-  [23, 83, 4.4, 2.9],
+  [8, 90, 10, -1.4],
+  [21, 82, 9, 2.9],
   // bottom-right, larger, partly off-screen
-  [93, 80, 8.5, 0.3],
-  [101, 95, 10, -2.1],
-  [85, 97, 7, 1.2],
+  [92, 79, 13, 0.3],
+  [101, 95, 14, -2.1],
+  [84, 97, 12, 1.2],
 ];
 
 // Tiny floating leaves: [x%, y%, length, rotation]
@@ -64,12 +64,14 @@ export default function LilyPads() {
   useDriveUniforms(materials);
 
   const padGeo = useDisposable(() => {
-    const k = narrowScale(aspect);
+    // Sizes are % of width; portrait screens use a 0.75 aspect floor so pads stay readable.
+    const sizeAspect = Math.max(aspect, 0.75);
     const xf = new Float32Array(PADS.length * 4);
     const meta = new Float32Array(PADS.length * 4);
-    PADS.forEach(([x, y, r, rot], i) => {
+    PADS.forEach(([x, y, dia, rot], i) => {
       const [wx, wy] = pctToWorld(x, y, aspect);
-      xf.set([wx, wy, rot, r * k], i * 4);
+      // The pad outline sits at ~0.9 of the quad's half-size.
+      xf.set([wx, wy, rot, widthPctToWorld(dia, sizeAspect) / 2 / 0.9], i * 4);
       meta.set([(i * 0.381 + 0.2) % 1, i * 1.7, 0.32 + 0.06 * ((i * 7) % 3), 0.35], i * 4);
     });
     return makeInstanced(baseGeo, PADS.length, { aXform: [4, xf], aMeta: [4, meta] });

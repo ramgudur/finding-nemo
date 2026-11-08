@@ -1,11 +1,13 @@
 // Weathered floating log (DESIGN.md §1, "Log"): lies diagonally in the upper right from about
-// (64%, 5%) and runs off the right edge past (100%, 35%). Very subtle bob and slow rotation.
+// (64%, 5%) and runs off the right edge past (100%, 35%). Broken, split near end with faint
+// ripple rings around it (LogRipples). Very subtle bob and slow rotation.
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { type Group, PlaneGeometry, ShaderMaterial } from "three";
 import { Z, pctToWorld, pond } from "./pond";
 import { narrowScale, useAspect, useDisposable } from "./shaders/propsCommon";
 import { LOG_FRAG, LOG_VERT } from "./shaders/propsLog";
+import LogRipples from "./LogRipples";
 
 const START: [number, number] = [64, 5];
 const THROUGH: [number, number] = [100, 35];
@@ -38,13 +40,20 @@ export default function FloatingLog() {
       c * SHADOW_OFFSET[0] - s * SHADOW_OFFSET[1],
       s * SHADOW_OFFSET[0] + c * SHADOW_OFFSET[1],
     ];
+    // Half-width: ~7-8% of viewport height across once the soft edge and girth noise are applied.
+    const wid = 5.0 * narrowScale(aspect);
+    const stub = wid * 0.8; // the split stubs reach back this far from the round body
+    // Put the stubs' midpoint on the start point.
+    const ox = x0 - Math.cos(angle) * stub * 0.5;
+    const oy = y0 - Math.sin(angle) * stub * 0.5;
     return {
-      x0,
-      y0,
+      x0: ox,
+      y0: oy,
       angle,
       shadow,
-      len: dist * 1.35, // extends well past the viewport edge
-      wid: 4.8 * narrowScale(aspect), // half-width, world units
+      len: dist * 1.35 + stub, // extends well past the viewport edge
+      wid,
+      stub,
     };
   }, [aspect]);
 
@@ -53,7 +62,12 @@ export default function FloatingLog() {
       vertexShader: LOG_VERT,
       fragmentShader: LOG_FRAG,
       defines: shadow ? { SHADOW: "" } : {},
-      uniforms: { uLen: { value: 1 }, uWid: { value: 1 }, uShadowAlpha: { value: 0.18 } },
+      uniforms: {
+        uLen: { value: 1 },
+        uWid: { value: 1 },
+        uStub: { value: 0 },
+        uShadowAlpha: { value: 0.18 },
+      },
       transparent: true,
       depthWrite: false,
     });
@@ -62,6 +76,7 @@ export default function FloatingLog() {
   for (const m of [mat, shadowMat]) {
     m.uniforms.uLen!.value = layout.len;
     m.uniforms.uWid!.value = layout.wid;
+    m.uniforms.uStub!.value = layout.stub;
   }
 
   const t = useRef(0);
@@ -86,6 +101,7 @@ export default function FloatingLog() {
         renderOrder={Z.LOG - 0.05}
       />
       <mesh geometry={baseGeo} material={mat} position={[0, 0, Z.LOG]} frustumCulled={false} renderOrder={Z.LOG} />
+      <LogRipples x={layout.stub * 0.8} rx={layout.wid * 3.4} ry={layout.wid * 2.3} />
     </group>
   );
 }

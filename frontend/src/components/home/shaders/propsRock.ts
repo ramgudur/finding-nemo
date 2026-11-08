@@ -28,8 +28,10 @@ void main() {
   float a = atan(uv.y, uv.x);
   float s = vSeed * 13.7;
   // Lumpy rounded outline.
-  float rr = 0.86 + 0.06 * sin(a * 2.0 + s) + 0.04 * sin(a * 3.0 + s * 1.7)
-           + 0.05 * (pNoise(vec2(cos(a), sin(a)) * 1.6 + s) - 0.5);
+  // Irregular rounded outline: a few seeded harmonics plus noise, so no two rocks are ovals.
+  float rr = 0.80 + 0.10 * sin(a * 2.0 + s) + 0.08 * sin(a * 3.0 + s * 1.7)
+           + 0.04 * sin(a * 5.0 + s * 2.3)
+           + 0.16 * (pNoise(vec2(cos(a), sin(a)) * 1.1 + s) - 0.5);
   float d = length(uv) / rr;
   float alpha = 1.0 - smoothstep(0.86, 1.0, d);
   if (alpha <= 0.001) discard;
@@ -41,10 +43,10 @@ void main() {
   vec3 n = normalize(vec3(uv * 0.85, h + 0.25));
   float lit = clamp(dot(n, normalize(vec3(L2, 0.7))), 0.0, 1.0);
 
-  vec3 stone = vec3(0.60, 0.63, 0.58);
-  vec3 stoneDark = vec3(0.47, 0.51, 0.48);
-  vec3 moss = vec3(0.50, 0.58, 0.42);
-  vec3 mossLight = vec3(0.60, 0.67, 0.49);
+  vec3 stone = vec3(0.624, 0.686, 0.651);      // #9FAFA6
+  vec3 stoneDark = vec3(0.498, 0.569, 0.541);  // #7F918A
+  vec3 moss = vec3(0.55, 0.63, 0.46);
+  vec3 mossLight = vec3(0.64, 0.71, 0.52);
 
   float m1 = pFbm(uv * 1.8 + s);
   vec3 col = mix(stoneDark, stone, smoothstep(0.25, 0.75, m1));
@@ -53,7 +55,7 @@ void main() {
   float mossMask = smoothstep(0.50, 0.66, mossN);
   col = mix(col, mix(moss, mossLight, pNoise(uv * 6.0 + s)), mossMask * 0.7);
 
-  col *= 0.74 + 0.42 * lit;
+  col *= 0.80 + 0.34 * lit;
   // Pigment pooling at the edge (watercolor), soft, never an outline.
   col *= 1.0 - 0.10 * smoothstep(0.62, 0.95, d);
   col *= pGrain(uv * 2.0 + s);

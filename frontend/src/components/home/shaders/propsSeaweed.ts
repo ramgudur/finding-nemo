@@ -67,13 +67,19 @@ void main() {
   float edge = 1.0 - smoothstep(0.35, 1.0, across);         // soft ribbon edges
   float tip = 1.0 - smoothstep(0.82, 1.0, vT);
   float root = smoothstep(0.0, 0.06, vT);
-  float alpha = edge * tip * root * vAlpha;
+  // More opaque at the base, fading toward the tips.
+  float alpha = edge * tip * root * vAlpha * mix(1.0, 0.4, smoothstep(0.1, 1.0, vT));
   if (alpha <= 0.002) discard;
 
-  vec3 olive = vec3(0.498, 0.651, 0.478);   // #7FA67A
-  vec3 sage  = vec3(0.663, 0.737, 0.647);   // #A9BCA5
+  vec3 yellow = vec3(0.639, 0.741, 0.494);  // #A3BD7E
+  vec3 olive  = vec3(0.498, 0.651, 0.478);  // #7FA67A
+  vec3 blue   = vec3(0.498, 0.651, 0.627);  // #7FA6A0
+  vec3 sage   = vec3(0.663, 0.737, 0.647);  // #A9BCA5
+  // Each blade gets its own green along yellow -> olive -> blue, paling toward the tip.
+  float h = vTone * 2.0;
+  vec3 hue = h < 1.0 ? mix(yellow, olive, h) : mix(olive, blue, h - 1.0);
   float n = pFbm(vec2(vUv.x * 1.5 + vTone * 30.0, vT * 6.0));
-  vec3 col = mix(olive, sage, clamp(vT * 0.7 + vTone * 0.5 + (n - 0.5) * 0.5, 0.0, 1.0));
+  vec3 col = mix(hue, sage, clamp(vT * 0.55 + (n - 0.5) * 0.5, 0.0, 1.0));
   // Pale midrib and brighter faces where the ribbon is flat to the light.
   col += 0.05 * (1.0 - smoothstep(0.0, 0.25, across));
   col *= 0.9 + 0.12 * vFace;

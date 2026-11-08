@@ -20,14 +20,14 @@ function makeBlades(aspect: number, mobile: boolean): Blade[] {
       y,
       rot,
       len: len * k,
-      width: lerp(4.0, 7.0, r()) * k,
+      width: lerp(5.0, 8.5, r()) * k,
       curl: lerp(-0.4, 0.4, r()),
       phase: r() * Math.PI * 2,
       twist: lerp(2.0, 5.0, r()),
       speed: lerp(0.35, 0.85, r()),
       amp: lerp(0.05, 0.12, r()),
       tone: r(),
-      alpha: lerp(0.6, 0.85, r()),
+      alpha: lerp(0.72, 0.95, r()),
     });
   };
 
