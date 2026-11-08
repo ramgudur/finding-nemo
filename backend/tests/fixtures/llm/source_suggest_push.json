@@ -1,0 +1,15 @@
+{
+  "scenario": "source_suggest_push",
+  "description": "Synthetic, hand-written; not a recorded model run. Add a source: a source the dev's own app sends; shaped like a reasoning-off JSON-mode reply (content is a JSON object).",
+  "steps": [
+    {
+      "expect": {
+        "reasoning": false
+      },
+      "response": {
+        "content": "{\"kind\": \"push\", \"shape\": \"point\", \"options\": [{\"type\": \"post_api\", \"why\": \"Your app already sends each reading, so it can post it straight to the endpoint.\"}, {\"type\": \"webhook\", \"why\": \"If a service sends them for you, give it the endpoint as a webhook URL.\"}]}",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

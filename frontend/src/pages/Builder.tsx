@@ -10,11 +10,15 @@ import type {
   AppSpec,
   BBox,
   CompileInput,
+  ConnectorConfig,
   DestinationPoint,
   FieldType,
   InputField,
   InputKind,
   InputShape,
+  SourceOption,
+  SourceOptionType,
+  SourceSuggestion,
 } from "../api/types";
 
 const KINDS: InputKind[] = ["push", "pull"];
@@ -31,8 +35,63 @@ function gridCells(b: BBox, cellM: number): [number, number] {
   return [Math.max(1, Math.ceil(h - 1e-9)), Math.max(1, Math.ceil(w - 1e-9))];
 }
 
-type Draft = { id: string; kind: InputKind; shape: InputShape; meaning: string; fields: string };
-const emptyInput = (): Draft => ({ id: "", kind: "push", shape: "point", meaning: "", fields: "" });
+type Draft = {
+  id: string;
+  kind: InputKind;
+  shape: InputShape;
+  meaning: string;
+  fields: string;
+  // "Add a source": the suggestion for this input's description and the option the dev picked
+  suggestion: SourceSuggestion | null;
+  suggesting: boolean;
+  suggestError: string;
+  source: SourceOption | null;
+  url: string; // rss / custom json_api
+  connConfig: string; // json_api config as JSON, e.g. preset placeholders
+};
+const emptyInput = (): Draft => ({
+  id: "",
+  kind: "push",
+  shape: "point",
+  meaning: "",
+  fields: "",
+  suggestion: null,
+  suggesting: false,
+  suggestError: "",
+  source: null,
+  url: "",
+  connConfig: "",
+});
+
+const OPTION_KIND: Record<SourceOptionType, InputKind> = { post_api: "push", webhook: "push", rss: "pull", json_api: "pull" };
+const optionKey = (o: SourceOption) => `${o.type}:${String(o.config?.preset ?? "")}`;
+const presetOf = (o: SourceOption | null) => (typeof o?.config?.preset === "string" ? o.config.preset : null);
+const needsUrl = (d: Draft) => d.kind === "pull" && !!d.source && OPTION_KIND[d.source.type] === "pull" && !presetOf(d.source);
+
+function parseConfig(text: string): Record<string, unknown> | null {
+  if (!text.trim()) return {};
+  try {
+    const v: unknown = JSON.parse(text);
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The pull connector the dev chose for this input, or undefined (push, or no source picked). */
+function connectorOf(d: Draft): ConnectorConfig | undefined {
+  const s = d.source;
+  if (d.kind !== "pull" || !s || OPTION_KIND[s.type] !== "pull") return undefined;
+  const type = s.type === "rss" ? "rss" : "json_api";
+  const preset = presetOf(s);
+  if (!preset && !d.url.trim()) return undefined; // no URL yet: the Compiler may ask the Scout for one
+  return {
+    type,
+    url: preset ? null : d.url.trim(),
+    preset,
+    config: type === "json_api" ? parseConfig(d.connConfig) ?? {} : {},
+  };
+}
 
 /** "name:type, other:type?" -> InputField[] ("?" marks optional). */
 function parseFields(text: string): InputField[] {
@@ -166,6 +225,89 @@ function AreaPicker({
   );
 }
 
+/** "Add a source": the suggested kind/shape and ranked options for one input, and the picked option's settings. */
+function SourcePicker({
+  draft,
+  appId,
+  group,
+  onPick,
+  onChange,
+}: {
+  draft: Draft;
+  appId: string;
+  group: string; // radio group name, unique per input
+  onPick: (o: SourceOption) => void;
+  onChange: (patch: Partial<Draft>) => void;
+}) {
+  const s = draft.suggestion;
+  if (!s) return null;
+  const unranked = new Set(s.options.map((o) => OPTION_KIND[o.type])).size > 1;
+  const picked = draft.source ? optionKey(draft.source) : "";
+  const endpoint = `/v1/apps/${appId || "<app>"}/inputs/${draft.id || "<input id>"}/events`;
+  const pickedKindMismatch = draft.source && OPTION_KIND[draft.source.type] !== draft.kind;
+  return (
+    <div style={{ ...box, display: "grid", gap: 6, background: "#f7f9fc" }}>
+      <div>
+        {unranked ? (
+          <span style={{ color: "#8a5a00" }}>
+            The model couldn't rank these, so every option is listed. Pick one and set kind and shape yourself.
+          </span>
+        ) : (
+          <span>
+            Looks like a <strong>{s.kind}</strong> source ({s.kind === "push" ? "it sends to us" : "we fetch it"}), one
+            item is a <strong>{s.shape}</strong>. Override kind or shape above if that's wrong.
+          </span>
+        )}
+      </div>
+      {s.options.map((o) => (
+        <label key={optionKey(o)} style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
+          <input type="radio" name={group} checked={picked === optionKey(o)} onChange={() => onPick(o)} />
+          <span>
+            <strong>{o.label}</strong> <span style={muted}>({OPTION_KIND[o.type]})</span> — {o.why}
+          </span>
+        </label>
+      ))}
+      {(unranked || s.kind === "push") && (
+        <label style={{ display: "flex", gap: 6, alignItems: "baseline", color: "#999" }}>
+          <input type="radio" disabled />
+          <span>SMS / phone (later)</span>
+        </label>
+      )}
+      {draft.source && pickedKindMismatch && (
+        <span style={{ color: "#8a5a00" }}>
+          The picked option is a {OPTION_KIND[draft.source.type]} source but kind is {draft.kind}; it won't be used.
+        </span>
+      )}
+      {draft.source && !pickedKindMismatch && OPTION_KIND[draft.source.type] === "push" && (
+        <span style={muted}>
+          {draft.source.type === "webhook" ? "Webhook URL" : "Endpoint"}: <code>POST {endpoint}</code> with header{" "}
+          <code>X-Ingest-Key</code> (the key is shown once when you confirm).
+        </span>
+      )}
+      {draft.source && !pickedKindMismatch && needsUrl(draft) && (
+        <input
+          aria-label="source URL"
+          placeholder={draft.source.type === "rss" ? "feed URL (https://...)" : "JSON endpoint URL (https://...)"}
+          value={draft.url}
+          onChange={(e) => onChange({ url: e.target.value })}
+        />
+      )}
+      {draft.source && !pickedKindMismatch && draft.source.type === "json_api" && (
+        <label style={{ display: "grid", gap: 4 }}>
+          <span style={muted}>
+            Connector config (JSON){presetOf(draft.source) ? ` for preset ${presetOf(draft.source)}` : ""}; latitude and
+            longitude default to the area's center.
+          </span>
+          <input aria-label="connector config" value={draft.connConfig} onChange={(e) => onChange({ connConfig: e.target.value })} />
+        </label>
+      )}
+      {draft.source?.type === "rss" && !pickedKindMismatch && !draft.url.trim() && (
+        <span style={muted}>No feed yet? Leave the URL empty and the Compiler can ask the Scout to find one.</span>
+      )}
+    </div>
+  );
+}
+
 function Review({ spec }: { spec: AppSpec }) {
   const w = warnings(spec);
   return (
@@ -280,6 +422,10 @@ export function Builder() {
       dims[0] * dims[1] > MAX_GRID_CELLS &&
       `The grid would be ${dims[0]} x ${dims[1]} cells; the limit is ${MAX_GRID_CELLS.toLocaleString()}. Use a smaller area or bigger cells.`,
     inputs.some((i) => !SLUG.test(i.id) || !i.meaning.trim()) && "Every input needs an id and a meaning.",
+    inputs.some((i) => i.kind === "pull" && i.source?.type === "json_api" && parseConfig(i.connConfig) === null) &&
+      "Connector config must be a JSON object.",
+    inputs.some((i) => needsUrl(i) && i.source?.type === "json_api" && !i.url.trim()) &&
+      "A custom JSON API source needs its URL.",
     points.some((p) => !p.label.trim()) && "Every destination needs a label.",
     bbox &&
       points.some((p) => p.lat < bbox.min_lat || p.lat > bbox.max_lat || p.lon < bbox.min_lon || p.lon > bbox.max_lon) &&
@@ -288,6 +434,39 @@ export function Builder() {
 
   const setInput = (k: number, patch: Partial<Draft>) =>
     setInputs((xs) => xs.map((x, j) => (j === k ? { ...x, ...patch } : x)));
+
+  const center = bbox
+    ? { latitude: round6((bbox.min_lat + bbox.max_lat) / 2), longitude: round6((bbox.min_lon + bbox.max_lon) / 2) }
+    : null;
+
+  const suggest = async (k: number) => {
+    const d = inputs[k];
+    if (!d) return;
+    setInput(k, { suggesting: true, suggestError: "" });
+    try {
+      const sug = await api.suggestSource(appId, { intent: intent.trim(), description: d.meaning });
+      setInput(k, { suggesting: false, suggestion: sug, source: null, url: "", connConfig: "" });
+      if (new Set(sug.options.map((o) => OPTION_KIND[o.type])).size === 1) {
+        setInput(k, { kind: sug.kind, shape: sug.shape });
+      }
+    } catch (e) {
+      setInput(k, { suggesting: false, suggestError: String(e instanceof ApiError ? e.message : e) });
+    }
+  };
+
+  const pick = (k: number, o: SourceOption) => {
+    const d = inputs[k];
+    const sug = d?.suggestion;
+    const unranked = sug ? new Set(sug.options.map((x) => OPTION_KIND[x.type])).size > 1 : true;
+    const url = typeof o.config?.url === "string" ? o.config.url : "";
+    setInput(k, {
+      source: o,
+      kind: OPTION_KIND[o.type],
+      ...(sug && !unranked ? { shape: sug.shape } : {}),
+      url,
+      connConfig: o.type === "json_api" && center ? JSON.stringify(center) : "",
+    });
+  };
 
   const addPoint = useCallback((lat: number, lon: number) => setPoints((xs) => [...xs, { lat, lon, label: "" }]), []);
   const setPoint = (k: number, patch: Partial<DestinationPoint>) =>
@@ -303,7 +482,14 @@ export function Builder() {
         intent: intent.trim(),
         grid: { cell_m: cellM, bbox },
         inputs: inputs.map(
-          (i): CompileInput => ({ id: i.id, kind: i.kind, shape: i.shape, meaning: i.meaning.trim(), fields: parseFields(i.fields) }),
+          (i): CompileInput => ({
+            id: i.id,
+            kind: i.kind,
+            shape: i.shape,
+            meaning: i.meaning.trim(),
+            fields: parseFields(i.fields),
+            connector: connectorOf(i),
+          }),
         ),
         destination_points: points.map((p) => ({ ...p, label: p.label.trim() })),
       };
@@ -411,7 +597,7 @@ export function Builder() {
         ))}
       </fieldset>
       <fieldset style={{ ...box, display: "grid", gap: 10 }}>
-        <legend>Inputs</legend>
+        <legend>Inputs (sources)</legend>
         {inputs.map((i, k) => (
           <div key={k} style={{ display: "grid", gap: 6, borderBottom: "1px solid #eee", paddingBottom: 10 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -440,9 +626,27 @@ export function Builder() {
             <textarea
               aria-label="meaning"
               rows={2}
-              placeholder="What does one event of this input mean? Your words go to the Compiler verbatim."
+              placeholder="Describe the source in plain words: where it comes from and what one item means. Your words go to the Compiler verbatim."
               value={i.meaning}
               onChange={(e) => setInput(k, { meaning: e.target.value })}
+            />
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                disabled={i.suggesting || !i.meaning.trim() || !SLUG.test(appId)}
+                onClick={() => void suggest(k)}
+              >
+                {i.suggesting ? "Suggesting…" : i.suggestion ? "Suggest again" : "Suggest how to connect it"}
+              </button>
+              {!SLUG.test(appId) && <span style={muted}>Set the app id first.</span>}
+              {i.suggestError && <span style={{ color: "#b00020" }}>{i.suggestError}</span>}
+            </div>
+            <SourcePicker
+              draft={i}
+              appId={appId}
+              group={`source-${k}`}
+              onPick={(o) => pick(k, o)}
+              onChange={(patch) => setInput(k, patch)}
             />
             <input
               aria-label="fields"
@@ -453,7 +657,7 @@ export function Builder() {
           </div>
         ))}
         <button type="button" onClick={() => setInputs((xs) => [...xs, emptyInput()])} style={{ justifySelf: "start" }}>
-          Add input
+          Add a source
         </button>
       </fieldset>
       {problems.length > 0 && <p style={{ ...muted, margin: 0 }}>{problems[0]}</p>}

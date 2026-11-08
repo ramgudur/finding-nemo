@@ -181,6 +181,16 @@ class CompileInput(Model):
     shape: InputShape
     meaning: str = Field(description="The dev's words, verbatim.")
     fields: list[InputField] = Field(default_factory=list)
+    connector: ConnectorConfig | None = Field(
+        default=None,
+        description="Pull only: the dev's chosen connector (URL or preset). Copied verbatim into the spec.",
+    )
+
+    @model_validator(mode="after")
+    def _push_has_no_connector(self) -> CompileInput:
+        if self.kind == "push" and self.connector is not None:
+            raise ValueError(f"push input {self.id!r} must not have a connector")
+        return self
 
 
 class CompileRequest(Model):
@@ -193,6 +203,37 @@ class CompileRequest(Model):
         default_factory=list,
         description="Fixed destinations the dev picked on the map. Copied verbatim into routing.destination_points.",
     )
+
+
+SourceOptionType = Literal["post_api", "webhook", "rss", "json_api"]  # no HTML scraper (rule 10)
+
+
+class SuggestSourceRequest(Model):
+    """Body of `POST /v1/apps/{app}/sources/suggest`: the dev describes one source in plain words."""
+
+    intent: str = Field(max_length=4000)
+    description: str = Field(min_length=1, max_length=2000)
+
+
+class SourceOption(Model):
+    """One way to connect a source. `config` carries pull settings: `{"preset": name}` for a
+    `json_api` preset, `{"url": ...}` only when the dev's own description gave that URL."""
+
+    type: SourceOptionType
+    label: str
+    why: str
+    config: dict[str, Any] | None = None
+
+
+class SourceSuggestion(Model):
+    """Response of `POST /v1/apps/{app}/sources/suggest`. `options` are ranked best first; when the
+    model's answer could not be used, they are the full catalogue, unranked. `meaning` is the
+    dev's description, verbatim."""
+
+    kind: InputKind
+    shape: InputShape
+    options: list[SourceOption]
+    meaning: str
 
 
 class VerificationSpec(Model):

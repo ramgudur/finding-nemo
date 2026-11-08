@@ -216,6 +216,15 @@ def create_input(ctx: ToolContext, args: CreateInputArgs) -> dict[str, Any]:
     return {"input_id": args.id, "warnings": _spec_warnings(spec)}
 
 
+def _check_connector_url(ctx: ToolContext, config: ConnectorConfig) -> None:
+    url = connector_engine.connector_url(config)
+    if url is not None:  # the server would fetch this every poll_s: refuse internal targets up front
+        try:
+            url_guard.check_url(url, allow_private=ctx.extra.get("allow_private_urls", url_guard.demo_allows_private()))
+        except url_guard.UnsafeUrl as e:
+            raise GuardError(f"connector URL refused: {e}") from e
+
+
 def create_connector(ctx: ToolContext, args: CreateConnectorArgs) -> dict[str, Any]:
     spec = _spec(ctx)
     inp = next((i for i in spec.inputs if i.id == args.input_id), None)
@@ -225,12 +234,7 @@ def create_connector(ctx: ToolContext, args: CreateConnectorArgs) -> dict[str, A
         raise GuardError(f"input {args.input_id!r} is {inp.kind!r}; only a pull input takes a connector")
     before = inp.connector.model_dump(mode="json") if inp.connector else None
     config = ConnectorConfig(type=args.type, url=args.url, poll_s=args.poll_s, config=args.config, preset=args.preset)
-    url = connector_engine.connector_url(config)
-    if url is not None:  # the server would fetch this every poll_s: refuse internal targets up front
-        try:
-            url_guard.check_url(url, allow_private=ctx.extra.get("allow_private_urls", url_guard.demo_allows_private()))
-        except url_guard.UnsafeUrl as e:
-            raise GuardError(f"connector URL refused: {e}") from e
+    _check_connector_url(ctx, config)
     new_inputs = [i.model_copy(update={"connector": config}) if i.id == args.input_id else i for i in spec.inputs]
     _save(ctx, spec.model_copy(update={"inputs": new_inputs}))
     ctx.db.add_change(
@@ -296,6 +300,18 @@ def finalize_app(ctx: ToolContext, args: FinalizeAppArgs) -> dict[str, Any]:
         # the dev's map picks, verbatim: the model can't add, move or drop them
         routing = {**(raw.get("routing") or {}), "destination_points": ctx.extra["dev_destination_points"]}
         raw = {**raw, "routing": routing}
+    dev_connectors: dict[str, Any] = ctx.extra.get("dev_connectors") or {}
+    if dev_connectors and isinstance(raw, dict) and isinstance(raw.get("inputs"), list):
+        # the dev's chosen sources (Builder "Add a source"), verbatim: the model can't change them
+        raw = {
+            **raw,
+            "inputs": [
+                {**i, "connector": dev_connectors[i["id"]]}
+                if isinstance(i, dict) and i.get("id") in dev_connectors
+                else i
+                for i in raw["inputs"]
+            ],
+        }
     try:
         spec = AppSpec.model_validate(raw)
     except Exception as e:  # noqa: BLE001 - surfaced to the agent, not raised past the tool
@@ -308,5 +324,25 @@ def finalize_app(ctx: ToolContext, args: FinalizeAppArgs) -> dict[str, Any]:
     errors = _spec_errors(spec)
     if errors:
         raise GuardError(errors)
+    for inp in spec.inputs:
+        if inp.id in dev_connectors and inp.connector is not None:
+            _check_connector_url(ctx, inp.connector)
     _save(ctx, spec.model_copy(update={"status": "pending_confirmation"}))
+    before = {i.id: i.connector for i in existing.inputs} if existing is not None else {}
+    for inp in spec.inputs:
+        if inp.id in dev_connectors and inp.connector is not None and before.get(inp.id) != inp.connector:
+            prev = before.get(inp.id)
+            ctx.db.add_change(
+                Change(
+                    id=str(uuid.uuid4()),
+                    app_id=ctx.app_id,
+                    kind="connector",
+                    target=inp.id,
+                    before=prev.model_dump(mode="json") if prev is not None else None,
+                    after=inp.connector.model_dump(mode="json"),
+                    reason=f"the dev's chosen source for {inp.id!r}, copied at compile",
+                    actor="dev",
+                    t=ctx.now_dt(),
+                )
+            )
     return {"app_id": ctx.app_id, "status": "pending_confirmation", "warnings": _spec_warnings(spec)}

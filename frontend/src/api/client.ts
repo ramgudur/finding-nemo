@@ -11,6 +11,8 @@ import type {
   InstructionRequest,
   MapResponse,
   PinRequest,
+  SourceSuggestion,
+  SuggestSourceRequest,
   TraceEntry,
   VerificationView,
   WeightsView,
@@ -52,6 +54,8 @@ export const api = {
   // builder (the console has no login; the authority key is issued at activation)
   compile: (appId: string, body: CompileRequest) => request<AppSpec>("POST", `${app(appId)}/compile`, undefined, body),
   activate: (appId: string) => request<ActivateResponse>("POST", `${app(appId)}/activate`),
+  suggestSource: (appId: string, body: SuggestSourceRequest) =>
+    request<SourceSuggestion>("POST", `${app(appId)}/sources/suggest`, undefined, body),
   // public: the caller's own position only (api/instructions.py)
   instruction: (appId: string, body: InstructionRequest) =>
     request<Instruction>("POST", `${app(appId)}/instruction`, undefined, body),

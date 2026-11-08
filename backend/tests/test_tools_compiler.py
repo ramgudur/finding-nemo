@@ -558,3 +558,62 @@ def test_compiler_prompt_is_domain_neutral():
 
     words = ("people", "person", "bird", "police", "wind", "weather", "news", "campus", "threat")
     assert not any(w in compiler.SYSTEM_PROMPT.lower() for w in words)
+
+
+def test_source_suggester_prompt_is_domain_neutral():
+    from app.agents import source_suggester
+
+    words = ("people", "person", "bird", "police", "wind", "weather", "news", "campus", "threat", "fire", "phone")
+    text = source_suggester.SYSTEM_PROMPT.lower()
+    assert not any(w in text for w in words)
+
+
+# -- #152: the dev's chosen source (CompileInput.connector) is copied verbatim -----------
+
+
+def _pull_spec_dict(connector: dict | None = None) -> dict:
+    spec = _good_spec_dict()
+    feed = {
+        "id": "feed",
+        "kind": "pull",
+        "shape": "document",
+        "tier": "stiff",
+        "meaning": "public reports about the area",
+        "operators": [{"op": "event_points", "weight": 0.3}],
+    }
+    if connector is not None:
+        feed["connector"] = connector
+    spec["inputs"].append(feed)
+    return spec
+
+
+def test_finalize_app_copies_the_devs_connector_over_the_models(ctx):
+    dev = {"type": "rss", "url": "https://feeds.example.org/area.xml", "poll_s": 120, "config": {}, "preset": None}
+    ctx.extra["dev_connectors"] = {"feed": dev}
+    r = _call(ctx, "finalize_app", {"spec": _pull_spec_dict({"type": "rss", "url": "https://other.example.net/x"})})
+    assert r["ok"] is True, r
+    feed = next(i for i in ctx.db.get_app("draft-app").inputs if i.id == "feed")
+    assert feed.connector.model_dump(mode="json") == dev
+    (change,) = ctx.db.list_changes("draft-app", kind="connector")
+    assert change.actor == "dev" and change.target == "feed" and change.after == dev
+
+
+def test_finalize_app_adds_the_devs_connector_when_the_model_left_it_out(ctx):
+    ctx.extra["dev_connectors"] = {"feed": {"type": "json_api", "preset": "open_meteo"}}
+    r = _call(ctx, "finalize_app", {"spec": _pull_spec_dict()})
+    assert r["ok"] is True, r
+    feed = next(i for i in ctx.db.get_app("draft-app").inputs if i.id == "feed")
+    assert feed.connector.type == "json_api" and feed.connector.preset == "open_meteo"
+
+
+def test_finalize_app_refuses_an_unsafe_dev_connector_url(ctx, monkeypatch):
+    from app.connectors import url_guard
+
+    def refuse(url, **kw):
+        raise url_guard.UnsafeUrl("that host is not allowed")
+
+    monkeypatch.setattr(url_guard, "check_url", refuse)
+    ctx.extra["dev_connectors"] = {"feed": {"type": "rss", "url": "http://internal.invalid/feed"}}
+    r = _call(ctx, "finalize_app", {"spec": _pull_spec_dict()})
+    assert r["ok"] is False and "connector URL refused" in r["error"]
+    assert ctx.db.get_app("draft-app").status == "draft"

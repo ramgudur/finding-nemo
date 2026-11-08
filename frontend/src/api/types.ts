@@ -398,6 +398,34 @@ export interface CompileInput {
   shape: InputShape;
   meaning: string; // the dev's words, verbatim
   fields?: InputField[];
+  /** Pull only: the dev's chosen source (URL or preset), copied verbatim into the spec. */
+  connector?: ConnectorConfig | null;
+}
+
+/** "Add a source" option types. No HTML scraper (rule 10). */
+export type SourceOptionType = "post_api" | "webhook" | "rss" | "json_api";
+
+/** Body of POST /v1/apps/{app}/sources/suggest. */
+export interface SuggestSourceRequest {
+  intent: string;
+  description: string;
+}
+
+/** config: {preset} for a json_api preset; {url} only when the dev's description contained that URL. */
+export interface SourceOption {
+  type: SourceOptionType;
+  label: string;
+  why: string;
+  config?: Record<string, unknown> | null;
+}
+
+/** Ranked best first; when the model couldn't answer, the full catalogue unranked (both kinds).
+ *  meaning is the description, verbatim. */
+export interface SourceSuggestion {
+  kind: InputKind;
+  shape: InputShape;
+  options: SourceOption[];
+  meaning: string;
 }
 
 /** Body of POST /v1/apps/{app}/compile. Response: AppSpec at "pending_confirmation". */
