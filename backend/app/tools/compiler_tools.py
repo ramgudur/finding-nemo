@@ -157,7 +157,25 @@ def _spec_warnings(spec: AppSpec) -> list[str]:
                 "the spec has authority (locked) inputs, so authority_confirmation should be "
                 f"verification priority 1 (current order: {order or 'none'})"
             )
+    if _nothing_public(spec):
+        warnings.append(
+            "Nothing is public: the end-user page will be empty (no public layer, no public place label, "
+            "routing disabled). If the intent is to inform the public, make score and its layers public."
+        )
     return warnings
+
+
+def _nothing_public(spec: AppSpec) -> bool:
+    """True when a request without the authority key would get nothing at all: no public output
+    layer (so no public map or hotspot), no place label that can be public, and no directions.
+    A destination label is always public (poi_tools.poi_visibility); any other label is public
+    only where its layers are, which needs a public layer first."""
+    if any(ol.visibility == "public" for ol in spec.outputs.layers):
+        return False
+    labels = spec.outputs.poi_labels
+    if labels.mode != "off" and any(lab.destination for lab in labels.label_set):
+        return False
+    return not spec.routing.enabled
 
 
 def _weighted_layer_ids(spec: AppSpec) -> list[str]:

@@ -47,6 +47,24 @@ For the whole spec:
   cross_input_agreement.
 - Output layers with visibility. If you mark the combined 'score' layer public, every
   weighted layer that feeds it must be public too, or validate_spec will reject it.
+- Who the app is for: if the intent says the app shows, highlights, warns, alerts, guides
+  or informs the public, residents, visitors or end users ("highlight areas ...", "warn
+  anyone nearby ...", "show where ...", "let users know ..."), the end-user page is the point of
+  the app. Then propose:
+  - 'score' public, and every weighted layer public too (list each one in outputs.layers);
+    override layers apply after the sum and may stay authority;
+  - poi_labels mode 'auto' (or 'on' when users are directed to places), with a label_set
+    from the kinds of places the intent names;
+  - routing consistent with the destinations: enabled only if a destination label or the
+    dev's destination_points exist (see Routing below).
+  Layers are aggregates on the grid, never raw events, so a public layer doesn't expose
+  individual reports. Still keep private what the public mustn't see: an input whose
+  meaning implies identifying data about individuals keeps visibility authority, and if one of its weighted
+  layers could single out an individual (one entity's own position or path), keep that
+  layer and 'score' authority and say why in your closing sentence. The dev reviews and
+  confirms every visibility; you only propose it.
+  If the intent is only for the dev or an authority (monitoring, internal analysis), keep
+  everything authority (the default).
 - Directions: if the intent asks to guide or direct users toward a kind of place (a way out,
   a safe spot, a meeting place), you MUST: set poi_labels.mode to 'on', include at least
   one label for that kind of place with destination=true, and set routing.enabled true.

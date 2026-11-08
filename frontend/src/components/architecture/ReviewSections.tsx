@@ -66,9 +66,12 @@ function reviewWarnings(spec: AppSpec): string[] {
       out.push(`${i.id}: no spoof-check limits (top speed, path shape), so only the basic checks run. Set them under More settings.`);
     }
   }
+  // as validate_spec: only weighted layers count (an override applies after the sum); unlisted means private
   const layers = spec.outputs?.layers ?? [];
   const score = layers.find((l) => l.id === "score");
-  if (score?.visibility === "public" && layers.some((l) => l.id !== "score" && l.visibility !== "public")) {
+  const isPublic = (id: string) => layers.some((l) => l.id === id && l.visibility === "public");
+  const weightedIds = (spec.inputs ?? []).flatMap((i) => (i.operators ?? []).filter((o) => o.op !== "override").map((o) => layerIdOf(i.id, o)));
+  if (score?.visibility === "public" && weightedIds.some((id) => !isPublic(id))) {
     out.push("The combined score is public while some layers are private; the server will reject this.");
   }
   if ((spec.routing?.fallback_text ?? "").length > FALLBACK_TEXT_MAX) {
