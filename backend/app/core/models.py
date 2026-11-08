@@ -225,6 +225,16 @@ class SourceOption(Model):
     config: dict[str, Any] | None = None
 
 
+class OperatorInfo(Model):
+    """One entry of `GET /v1/operators`: the public operator catalogue (no app data)."""
+
+    name: str
+    description: str
+    shapes: list[InputShape]
+    role: Literal["layer", "override"]
+    params: dict[str, Any] = Field(description="JSON schema of the operator's params.")
+
+
 class SourceSuggestion(Model):
     """Response of `POST /v1/apps/{app}/sources/suggest`. `options` are ranked best first; when the
     model's answer could not be used, they are the full catalogue, unranked. `meaning` is the
