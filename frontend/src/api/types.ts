@@ -13,7 +13,7 @@ export type ConnectorType = "rss" | "json_api";
 export type PoiLabelMode = "auto" | "on" | "off";
 export type PoiStatus = "active" | "retired";
 export type AgentName = "compiler" | "scout" | "critic" | "poi_labeler" | "message_guard";
-export type ChangeKind = "weight" | "trust" | "poi" | "connector" | "spec_confirm" | "spec_edit";
+export type ChangeKind = "weight" | "trust" | "poi" | "connector" | "webhook" | "spec_confirm" | "spec_edit";
 export type Actor = "agent" | "dev";
 export type Device = "cpu" | "gpu";
 export type IsoDateTime = string;
@@ -77,8 +77,29 @@ export interface InputSpec {
   meaning: string;
   fields?: InputField[];
   connector?: ConnectorConfig | null;
+  webhook?: WebhookMapping | null; // push only
   operators?: OperatorConfig[];
   plausibility?: Plausibility | null;
+}
+
+export type TsFormat = "iso" | "epoch_s" | "epoch_ms";
+
+/** Push-input webhook mapping: data only (rule 10). Paths are dotted field names with optional list indices. */
+export interface WebhookMapping {
+  items_path?: string; // "" = the body itself
+  lat: string;
+  lon: string;
+  ts?: string | null; // null = the item's receive time
+  ts_format?: TsFormat; // default "iso"
+  user_id?: string | null;
+  fields?: Record<string, string>; // declared field name -> path
+}
+
+/** 202 from POST /v1/apps/{app}/webhooks/{input}. */
+export interface WebhookReceipt {
+  received: number;
+  accepted: number;
+  rejected: { index: number; reason: string }[]; // first 20 only
 }
 
 export interface VerificationSpec {
@@ -400,6 +421,8 @@ export interface CompileInput {
   fields?: InputField[];
   /** Pull only: the dev's chosen source (URL or preset), copied verbatim into the spec. */
   connector?: ConnectorConfig | null;
+  /** Push only: the dev's webhook mapping, copied verbatim into the spec. */
+  webhook?: WebhookMapping | null;
 }
 
 /** "Add a source" option types. No HTML scraper (rule 10). */
