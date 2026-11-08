@@ -28,10 +28,13 @@ export interface BBox {
   max_lon: number;
 }
 
+/** Rows x cols (equirectangular, as engine/grid.py) must be <= MAX_GRID_CELLS or the server rejects it. */
 export interface GridSpec {
   cell_m: number;
   bbox: BBox;
 }
+
+export const MAX_GRID_CELLS = 250_000;
 
 export interface InputField {
   name: string;

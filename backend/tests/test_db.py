@@ -30,7 +30,7 @@ def make_spec(app_id: str = "campus-alert", status: str = "draft") -> AppSpec:
         app_id=app_id,
         intent="test app",
         status=status,
-        grid=GridSpec(cell_m=5.0, bbox=BBox(min_lat=0, min_lon=0, max_lat=1, max_lon=1)),
+        grid=GridSpec(cell_m=5.0, bbox=BBox(min_lat=0, min_lon=0, max_lat=0.01, max_lon=0.01)),
         inputs=[
             InputSpec(
                 id="panic",
