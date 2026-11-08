@@ -1,2 +1,17 @@
 .board/
 appmap.log
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# env and local data (never commit)
+.env
+data/
+
+# frontend
+node_modules/
+dist/
+*.tsbuildinfo
