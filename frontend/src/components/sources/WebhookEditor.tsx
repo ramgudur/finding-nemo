@@ -35,6 +35,7 @@ function Preview({ row, id }: { row: PreviewRow | undefined; id: string }) {
       <span className="min-w-0 break-words">
         <span className="sr-only">{row.ok ? "resolves to " : "problem: "}</span>
         {row.text}
+        {row.note && <span className="text-ink"> · {row.note}</span>}
       </span>
     </span>
   );

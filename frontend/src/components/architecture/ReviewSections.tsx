@@ -18,6 +18,7 @@ import type {
   Tier,
   Visibility,
 } from "../../api/types";
+import { WebhookSummary } from "../sources/WebhookSummary";
 import { TIER_SURFACE, TierBadge } from "./TierBadge";
 import { TIER_HELP, TIERS, layerIdOf, operatorChoices, useOperatorCatalog } from "./specLayers";
 
@@ -359,6 +360,8 @@ function InputCard({
           <span className="break-all font-mono text-[11.5px]">{input.connector.url ?? ""}</span>
         </p>
       )}
+
+      {input.kind === "push" && input.webhook && <WebhookSummary w={input.webhook} />}
 
       {/* This input's notes stay on the card, open or closed. */}
       {notes.errors.length > 0 && (

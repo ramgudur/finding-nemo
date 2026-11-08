@@ -95,15 +95,27 @@ export function connectorOf(o: SourceOption, d: ConnectorDraft): ConnectorConfig
   };
 }
 
-/** A SLUG-valid id from the dev's description ("Phones posting GPS" -> "phones_posting_gps"). */
+/** Filler words dropped from generated ids, so "the current wind speed" reads "wind_speed". Plain English
+ *  function words only, nothing about any domain. */
+const SLUG_STOPWORDS = new Set([
+  "a", "an", "the", "of", "and", "or", "for", "with", "from", "to", "in", "on", "at", "by", "into", "onto",
+  "about", "over", "per", "via", "as", "is", "are", "be", "its", "their", "our", "my", "your", "this", "that",
+  "these", "those", "any", "each", "every", "some", "all", "current", "latest", "live", "which", "who", "where",
+  "when", "it", "they", "we", "i", "you", "near", "around", "within",
+]);
+
+/** A SLUG-valid id from the dev's description ("The current wind speed" -> "wind_speed", "PM2.5 readings" -> "pm2_5_readings"). */
 export function slugFromDescription(text: string, taken: string[]): string {
-  const words = text
+  const all = text
     .toLowerCase()
     .normalize("NFKD")
+    .replace(/\p{M}/gu, "") // drop accents after NFKD
+    .replace(/(\d)\.(\d)/g, "$1_$2") // "PM2.5" -> "pm2_5"
     .replace(/[^a-z0-9\s_-]/g, " ")
     .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 4);
+    .filter(Boolean);
+  const kept = all.filter((w) => !SLUG_STOPWORDS.has(w));
+  const words = (kept.length ? kept : all).slice(0, 3);
   let base = words.join("_").replace(/^[_-]+/, "").slice(0, 40).replace(/[_-]+$/, "");
   if (!SLUG.test(base)) base = "source";
   let id = base;
@@ -336,6 +348,8 @@ export function webhookForCompile(w: WebhookMapping, fields: InputField[] | unde
 export interface PreviewRow {
   ok: boolean;
   text: string;
+  /** A soft note on an accepted value (e.g. a coordinate sent as text). Never blocks. */
+  note?: string;
 }
 
 export type SamplePreview =
@@ -393,11 +407,14 @@ export function previewWebhook(w: WebhookMapping, fields: InputField[] | undefin
     const r = digPath(item, p);
     rows[key] = r.ok ? check(r.value) : { ok: false, text: r.error };
   };
+  // A numeric string ("45.51") is accepted with a soft note: the server converts it (#260).
   const coord = (limit: number, name: string) => (v: unknown): PreviewRow => {
-    if (typeof v !== "number" || !Number.isFinite(v))
+    const text = typeof v === "string" && /^\s*[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?\s*$/.test(v);
+    const n = typeof v === "number" ? v : text ? Number(v) : NaN;
+    if (!Number.isFinite(n))
       return { ok: false, text: `${describeValue(v)} isn't a number${typeof v === "string" ? " (it's text)" : ""}` };
-    if (Math.abs(v) > limit) return { ok: false, text: `${v} is outside ±${limit}, so it can't be a ${name}` };
-    return { ok: true, text: String(v) };
+    if (Math.abs(n) > limit) return { ok: false, text: `${n} is outside ±${limit}, so it can't be a ${name}` };
+    return text ? { ok: true, text: String(n), note: "sent as text; the server converts it" } : { ok: true, text: String(n) };
   };
   const any = (v: unknown): PreviewRow => ({ ok: true, text: describeValue(v) });
   one("lat", w.lat, coord(90, "latitude"));
