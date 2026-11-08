@@ -9,7 +9,8 @@ In `auto` mode it may create nothing; a new label type is only *proposed* with `
 `PoiLabelerScheduler` decides *when*: as soon as an unlabeled candidate has persisted
 `PERSIST_TRIGGER_TICKS` ticks (once per candidate), throttled to one triggered run per
 `TRIGGER_COOLDOWN_S` per app, or a scheduled pass at least every `MIN_INTERVAL_S` while there are
-candidates. It reads only the latest tick result, so a run never blocks the tick (rule 2).
+candidates, or when the dev asks for a run now (`request_run`, same cooldown and budget). It
+reads only the latest tick result, so a run never blocks the tick (rule 2).
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ log = logging.getLogger(__name__)
 
 MIN_INTERVAL_S = 60.0
 TRIGGER_COOLDOWN_S = 15.0
+RUN_NOW_TRIGGER = "the dev asked for a run now"
 PERSIST_TRIGGER_TICKS = 3
 MAX_ITERATIONS = 6
 AGENT = "poi"  # model field and budget key
@@ -128,14 +130,29 @@ class PoiLabelerScheduler:
         self._running: set[tuple[str, str]] = set()  # (app_id, agent) runs in flight
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
+        self._wake = asyncio.Event()  # set by request_run so a queued run starts without a full poll wait
+
+    def request_run(self, app_id: str, now: float) -> float | None:
+        """Queue a triggered run for `app_id` (the dev's "run now"), through the same path as the
+        other triggers: the same per-app cooldown and rate budget. Returns None when queued, else
+        the seconds left in the cooldown. Call it from the scheduler's event loop."""
+        st = self._state.setdefault(app_id, _AppState(last_run_at=now))
+        left = TRIGGER_COOLDOWN_S - (now - st.last_triggered_at)
+        if left > 0:
+            return left
+        st.pending_trigger = RUN_NOW_TRIGGER
+        self._wake.set()
+        return None
 
     def _labeled(self, app_id: str) -> set[str]:
         return {p.candidate_id for p in self.db.list_pois(app_id, status="active")}
 
     async def _check_app(self, app_id: str, rt_spec: AppSpec, result: TickResult, now: float) -> None:
-        if rt_spec.outputs.poi_labels.mode == "off" or not result.candidates:
+        if rt_spec.outputs.poi_labels.mode == "off":
             return
         st = self._state.setdefault(app_id, _AppState(last_run_at=now))
+        if not result.candidates and st.pending_trigger != RUN_NOW_TRIGGER:
+            return  # nothing to label; only the dev's explicit request still runs (it then logs why)
         triggered = persist_trigger(st, result, self._labeled(app_id))
         reason, priority = None, None
         if st.pending_trigger is not None and now - st.last_triggered_at >= TRIGGER_COOLDOWN_S:
@@ -181,11 +198,20 @@ class PoiLabelerScheduler:
     async def run(self) -> None:
         self._stop.clear()
         while not self._stop.is_set():
+            self._wake.clear()
             await self.check_once()
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.poll_s)
+                await asyncio.wait_for(self._wake_or_stop(), timeout=self.poll_s)
             except TimeoutError:
                 pass
+
+    async def _wake_or_stop(self) -> None:
+        waits = [asyncio.ensure_future(self._stop.wait()), asyncio.ensure_future(self._wake.wait())]
+        try:
+            await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for w in waits:
+                w.cancel()
 
     def start(self) -> asyncio.Task[None]:
         if self._task is None or self._task.done():

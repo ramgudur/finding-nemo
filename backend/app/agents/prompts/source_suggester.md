@@ -15,6 +15,7 @@ Rules:
 - Use only option types and preset names from the catalogue. There is no HTML scraping option.
 - For a `json_api` preset, set `config` to `{"preset": "<name>"}`. For an `rss`, `json_list` or custom `json_api` option, set `config` to `{"url": "<url>"}` only if the developer's description contains that exact URL; otherwise leave `config` out. Never invent a URL.
 - `json_list` or custom `json_api`? Choose `json_list` when the endpoint returns a list of items that each carry their own location (for example a GeoJSON FeatureCollection): every item becomes one event. Choose a custom `json_api` when it returns one reading for one fixed place.
+- `local_file`: the developer keeps a plain text file of located items (one per line) on the platform's own machine, which the platform reads every minute. Choose it when the description says the items are written into a local or text file by hand. It takes no `config` here (the developer names the file next).
 - Push options take no `config`.
 - Copy each option's `type` and `config` exactly as shown in the catalogue entry; `type` is one word.
 - If the description contains a URL, keep it: `rss` with that URL for a feed, `json_list` with that URL for a list of located items, or a custom `json_api` with that URL for a single JSON reading. Never replace a URL the developer gave with a preset.

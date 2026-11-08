@@ -41,6 +41,7 @@ OPTION_KIND: dict[SourceOptionType, InputKind] = {
     "rss": "pull",
     "json_api": "pull",
     "json_list": "pull",
+    "local_file": "pull",
 }
 FALLBACK_KIND: InputKind = "push"
 FALLBACK_SHAPE: InputShape = "point"
@@ -88,6 +89,16 @@ def catalogue() -> list[SourceOption]:
             why=(
                 "The platform polls a URL that returns a list of located items (e.g. a GeoJSON "
                 "FeatureCollection); each item becomes one event, mapped by paths you set."
+            ),
+        )
+    )
+    out.append(
+        SourceOption(
+            type="local_file",
+            label="Local text file (we read it every minute)",
+            why=(
+                "You keep a text file in the platform's data/feeds folder, one located item per line "
+                "(lat, lon | text); each new line becomes one document."
             ),
         )
     )
@@ -205,7 +216,7 @@ def build_suggestion(raw: _ModelSuggestion, description: str) -> SourceSuggestio
         seen.add(k)
         base = by_key[k] if k in by_key else by_key[(o.type, None)]
         config: dict[str, Any] | None = None
-        if OPTION_KIND[o.type] == "pull":
+        if OPTION_KIND[o.type] == "pull" and o.type != "local_file":  # a file is named by the dev, not a URL
             cfg = dict(o.config or {})
             url = cfg.pop("url", None)
             if isinstance(url, str) and url and url in description and "preset" not in cfg:

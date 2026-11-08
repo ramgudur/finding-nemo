@@ -16,7 +16,9 @@ For each input:
   - flexible: many independent reporters or devices (crowd-sourced, user-reported, app
     users' presses or pings). Their weight must be able to adapt, so never lock these.
   - stiff: an institutional or official source you would trust more once an authority
-    confirms it (published reports, official sensors, feeds).
+    confirms it (published reports, official sensors, feeds). A document-shaped pull input
+    whose connector reads documents (rss, local_file) is such a source: stiff, with the
+    operator that places located documents.
   - locked: an authority's own fixed points or markers (the inputs that confirm things),
     including fixed-point inputs the site or an authority installs and operates (alarm or
     alert buttons at fixed places). A fixed_point input is almost always locked.

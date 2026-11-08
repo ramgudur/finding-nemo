@@ -205,3 +205,108 @@ def annotate(ctx: ToolContext, args: AnnotateArgs) -> dict[str, Any]:
         raise GuardError("annotate needs an agent name")
     ctx.db.add_trace(TraceEntry(t=ctx.now_dt(), app_id=ctx.app_id, agent=ctx.agent, action="annotate", why=args.text))
     return {"noted": True}
+
+
+# --- corroboration by reference inputs (Critic only, read-only) ------------------------------
+
+REFERENCE_TIERS = ("stiff", "locked")
+CORROBORATION_WINDOW_S = 600.0
+CORROBORATION_RADIUS_CELLS = 3.0
+MAX_CORROBORATION_USERS = 200
+CORROBORATED_SHARE = 0.5
+_REF_CHUNK = 512
+
+
+class CorroborationArgs(_Args):
+    window_s: float = Field(
+        default=CORROBORATION_WINDOW_S, gt=0, le=CORROBORATION_WINDOW_S, description="How far back to look, in seconds."
+    )
+
+
+def _min_dist(x: np.ndarray, y: np.ndarray, rx: np.ndarray, ry: np.ndarray) -> np.ndarray:
+    """Distance from each (x, y) to its nearest reference point (meters), in chunks."""
+    out = np.full(len(x), np.inf)
+    for i in range(0, len(rx), _REF_CHUNK):
+        dx = x[:, None] - rx[None, i : i + _REF_CHUNK]
+        dy = y[:, None] - ry[None, i : i + _REF_CHUNK]
+        out = np.minimum(out, np.sqrt(dx * dx + dy * dy).min(axis=1))
+    return out
+
+
+def get_corroboration(ctx: ToolContext, args: CorroborationArgs) -> dict[str, Any]:
+    """How much each crowd reporter is corroborated by the app's reference inputs.
+
+    Reference events: recent events of inputs whose tier is stiff or locked. Scored: every user of
+    every flexible point/track input, by the share of their recent events within
+    R = 3 x cell_m of any reference event. Deterministic code; the Critic only reads it."""
+    spec = ctx.spec
+    grid = ctx.runtime.grid
+    now = ctx.now()
+    since = now - args.window_s
+    radius = CORROBORATION_RADIUS_CELLS * float(grid.cell_m)
+    refs = [i for i in spec.inputs if i.tier in REFERENCE_TIERS]
+    ref_x, ref_y, ref_counts = [], [], {}
+    for inp in refs:
+        ev = ctx.engine.source.events(ctx.app_id, inp.id, since, now)
+        ref_counts[inp.id] = len(ev)
+        if len(ev):
+            x, y = grid.to_xy(ev.lat, ev.lon)
+            ref_x.append(x)
+            ref_y.append(y)
+    n_ref = sum(ref_counts.values())
+    base: dict[str, Any] = {
+        "window_s": args.window_s,
+        "radius_m": _r(radius, 1),
+        "reference_inputs": [{"input_id": i.id, "tier": i.tier, "events": ref_counts[i.id]} for i in refs],
+        "reference_events": n_ref,
+    }
+    if n_ref == 0:
+        reason = "no stiff or locked input in this app" if not refs else "no reference events in the window"
+        return {
+            **base,
+            "users": [],
+            "summary": {"users_scored": 0, "users_corroborated": 0, "users_uncorroborated": 0},
+            "note": f"{reason}: nothing to compare against, so corroboration gives no reason to change trust",
+        }
+    rx, ry = np.concatenate(ref_x), np.concatenate(ref_y)
+    trust = ctx.db.list_trust(ctx.app_id)
+    users: list[dict[str, Any]] = []
+    for inp in spec.inputs:
+        if inp.tier != "flexible" or inp.shape not in ("point", "track"):
+            continue
+        ev = ctx.engine.source.events(ctx.app_id, inp.id, since, now)
+        if not len(ev):
+            continue
+        x, y = grid.to_xy(ev.lat, ev.lon)
+        near = _min_dist(np.asarray(x, dtype=float), np.asarray(y, dtype=float), rx, ry) <= radius
+        uids = np.array([u or "" for u in ev.user_id], dtype=object)
+        for u in sorted({u for u in uids if u}):
+            mask = uids == u
+            n = int(mask.sum())
+            users.append(
+                {
+                    "user_id": u,
+                    "input_id": inp.id,
+                    "events": n,
+                    "corroborated_share": _r(float(near[mask].mean()), 3),
+                    "trust": _r(float(trust.get(u, trust_mod.DEFAULT_TRUST)), 3),
+                }
+            )
+    users.sort(key=lambda d: (-d["corroborated_share"], -d["events"], d["user_id"]))
+    corroborated = [d for d in users if d["corroborated_share"] >= CORROBORATED_SHARE]
+    shown = users
+    if len(users) > MAX_CORROBORATION_USERS:  # keep both ends: the most and the least corroborated
+        half = MAX_CORROBORATION_USERS // 2
+        shown = users[:half] + users[-(MAX_CORROBORATION_USERS - half) :]
+    return {
+        **base,
+        "users": shown,
+        "truncated": len(shown) < len(users),
+        "summary": {
+            "users_scored": len(users),
+            "users_corroborated": len(corroborated),
+            "users_uncorroborated": sum(1 for d in users if d["corroborated_share"] == 0),
+            "corroborated_below_full_trust": sum(1 for d in corroborated if d["trust"] < trust_mod.DEFAULT_TRUST),
+        },
+        "note": "users at full trust (1.0) cannot be raised further; only lowered users can be raised back",
+    }

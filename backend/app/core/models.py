@@ -10,6 +10,7 @@ Conventions: meters, seconds, UTC ISO-8601 datetimes. Coordinates are always nam
 from __future__ import annotations
 
 import math
+import re
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
@@ -25,7 +26,7 @@ InputShape = Literal["point", "track", "fixed_point", "field", "document"]
 AppStatus = Literal["draft", "pending_confirmation", "active"]
 VerificationMethod = Literal["authority_confirmation", "predictive_check", "cross_input_agreement"]
 FieldType = Literal["number", "integer", "string", "boolean"]
-ConnectorType = Literal["rss", "json_api", "json_list"]  # html is stubbed: rejected here
+ConnectorType = Literal["rss", "json_api", "json_list", "local_file"]  # html is stubbed: rejected here
 PoiLabelMode = Literal["auto", "on", "off"]
 PoiStatus = Literal["active", "retired"]
 LabelProposalStatus = Literal["open", "accepted", "dismissed"]
@@ -35,6 +36,22 @@ Actor = Literal["agent", "dev"]
 Device = Literal["cpu", "gpu"]
 
 SLUG = r"^[a-z0-9][a-z0-9_-]{0,63}$"
+# A `local_file` connector's file: a bare name read from `<dir of SQLITE_PATH>/feeds/`. No path, no
+# separators (rule 10: the connector only reads text from that one folder).
+LOCAL_FILE_NAME = r"^[A-Za-z0-9_.-]{1,64}\.txt$"
+LOCAL_FILE_POLL_S = 60.0
+_WINDOWS_DEVICE_NAMES = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(10)), *(f"lpt{i}" for i in range(10))}
+
+
+def local_file_name_error(name: Any) -> str | None:
+    """Why `name` is not a valid `local_file` file name, or None."""
+    if not isinstance(name, str) or not re.fullmatch(LOCAL_FILE_NAME, name):
+        return "config.filename must be a bare file name like 'reports.txt' (letters, digits, _ . -; ends in .txt)"
+    if name.startswith(".") or ".." in name:
+        return "config.filename must not start with '.' or contain '..'"
+    if name.split(".", 1)[0].lower() in _WINDOWS_DEVICE_NAMES:
+        return "config.filename is a reserved device name"
+    return None
 
 
 def _to_utc(d: datetime) -> datetime:
@@ -133,6 +150,20 @@ class ConnectorConfig(Model):
     preset: str | None = Field(
         default=None, description="Name of a ready-made config in the connectors/presets/ catalogue."
     )
+
+    @model_validator(mode="after")
+    def _local_file(self) -> ConnectorConfig:
+        """A `local_file` connector reads one bare file name from the feeds folder: no URL, no preset."""
+        if self.type != "local_file":
+            return self
+        if self.url is not None or self.preset is not None:
+            raise ValueError("a local_file connector takes only config.filename (no url, no preset)")
+        reason = local_file_name_error(self.config.get("filename"))
+        if reason is not None:
+            raise ValueError(reason)
+        if "poll_s" not in self.model_fields_set:
+            self.poll_s = LOCAL_FILE_POLL_S  # a local file is cheap to read: every minute by default
+        return self
 
 
 TsFormat = Literal["iso", "epoch_s", "epoch_ms"]
@@ -257,7 +288,9 @@ class CompileFailure(Model):
     warnings: list[str] = Field(default_factory=list)
 
 
-SourceOptionType = Literal["post_api", "webhook", "rss", "json_api", "json_list"]  # no HTML scraper (rule 10)
+SourceOptionType = Literal[
+    "post_api", "webhook", "rss", "json_api", "json_list", "local_file"
+]  # no HTML scraper (rule 10)
 
 
 class SuggestSourceRequest(Model):
@@ -713,28 +746,67 @@ class WebhookReceipt(Model):
 
 # --- Simulate (BE3, #268): POST /v1/apps/{app}/simulate (authority key) -------------
 
-SimulateMode = Literal["normal", "spoof"]
+SimulateMode = Literal["normal", "spoof", "line"]
+
+
+class SimPoint(Model):
+    lat: Lat = Field(ge=-90, le=90)
+    lon: Lon = Field(ge=-180, le=180)
 
 
 class SimulateRequest(Model):
     """Body of `POST /v1/apps/{app}/simulate`: generate test events for one push input. They go
-    through the same validation and storage as `/events` and carry a `sim-` / `spoof-` user_id
-    prefix so they stay identifiable."""
+    through the same validation and storage as `/events` and carry a `sim-` / `spoof-` / `line-`
+    user_id prefix so they stay identifiable.
+
+    `normal` / `spoof` need the centre `lat`/`lon`. `line` needs `from_point` and `to_point` (both
+    inside the area, else 422): `clusters` clusters sit evenly along the line, `count` events per
+    cluster per wave, and the server keeps posting a wave about every 10 s for `duration_s`."""
 
     input_id: str = Field(min_length=1, description="A push input of the app (else 422).")
-    count: int = Field(ge=1, le=200)
-    lat: Lat = Field(ge=-90, le=90, description="Centre; must be inside the app's area (else 422).")
-    lon: Lon = Field(ge=-180, le=180)
-    radius_m: float = Field(ge=10, le=5000)
+    count: int = Field(ge=1, le=200, description="normal/spoof: events; line: per cluster, per wave.")
+    lat: Lat | None = Field(default=None, ge=-90, le=90, description="Centre (normal/spoof); inside the area.")
+    lon: Lon | None = Field(default=None, ge=-180, le=180)
+    radius_m: float = Field(ge=10, le=5000, description="Spread (normal) or per-cluster spread (line).")
     mode: SimulateMode = "normal"
+    from_point: SimPoint | None = Field(default=None, description="Line mode: one end of the line.")
+    to_point: SimPoint | None = Field(default=None, description="Line mode: the other end.")
+    clusters: int = Field(default=8, ge=2, le=20, description="Line mode: clusters along the line.")
+    duration_s: int = Field(default=240, ge=0, le=900, description="Line mode: keep posting waves this long.")
+
+    @model_validator(mode="after")
+    def _mode_fields(self) -> SimulateRequest:
+        if self.mode == "line":
+            if self.from_point is None or self.to_point is None:
+                raise ValueError("line mode needs from_point and to_point")
+        elif self.lat is None or self.lon is None:
+            raise ValueError(f"{self.mode} mode needs lat and lon (the centre)")
+        return self
 
 
 class SimulateResult(Model):
-    """202 response: how many generated events were stored, and the user_id prefix they carry."""
+    """202 response: how many generated events were stored, and the user_id prefix they carry.
+    Line mode: `accepted`/`rejected` count the first wave; `job_id` and `duration_s` name the
+    background job that keeps posting (absent for normal/spoof and for a one-wave line)."""
 
     accepted: int = Field(ge=0)
     rejected: int = Field(ge=0)
     user_id_prefix: str
+    job_id: str | None = None
+    duration_s: int | None = None
+
+
+# --- Run an agent now (POST /v1/apps/{app}/agents/{agent}/run, authority key) ---------
+
+RunnableAgent = Literal["critic", "poi_labeler"]
+
+
+class AgentRunAccepted(Model):
+    """202 response: a triggered run was queued through the agent's normal trigger path (same
+    cooldown, same rate budget; an empty budget still skips with a trace entry)."""
+
+    agent: RunnableAgent
+    queued: bool = True
 
 
 # --- Public app info and smarter routing (#266, BE1) ----------------------------------
@@ -764,7 +836,7 @@ class PublicAppInfo(Model):
 
 # --- Source status (GET /v1/apps/{app}/sources/status, #267, BE2) ---------------------
 
-SourceVia = Literal["post_api", "webhook", "rss", "json_api", "json_list"]
+SourceVia = Literal["post_api", "webhook", "rss", "json_api", "json_list", "local_file"]
 
 
 class SourceStatus(Model):
