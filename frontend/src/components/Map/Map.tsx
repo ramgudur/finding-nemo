@@ -1,6 +1,6 @@
 import L from "leaflet";
 import { useEffect, useRef } from "react";
-import { cellValue, hotspotRadiusM, type CellCollection, type GeoJsonBBox, type Hotspot } from "../../api/outputs";
+import type { CellCollection, CellFeature, GeoJsonBBox, Hotspot } from "../../api/types";
 import { bboxToBounds, heatStyle, toLatLng } from "./geo";
 
 interface Props {
@@ -50,13 +50,13 @@ export function Map({ bbox, layers, visible, hotspots }: Props) {
       const fc = layers[id];
       if (!fc) continue;
       L.geoJSON(fc as GeoJSON.FeatureCollection, {
-        style: (f) => heatStyle(f ? cellValue(f as never) : 0),
+        style: (f) => heatStyle(f ? (f as unknown as CellFeature).properties.value : 0),
         interactive: false,
       }).addTo(group);
     }
     for (const h of hotspots) {
-      L.circle(toLatLng(h.lat, h.lon), { radius: hotspotRadiusM(h), color: "#7a00cc", weight: 2, fill: false })
-        .bindTooltip(`${h.id}: peak ${h.peak.toFixed(2)}`)
+      L.circle(toLatLng(h.lat, h.lon), { radius: h.radius_m, color: "#7a00cc", weight: 2, fill: false })
+        .bindTooltip(`${h.id}: score ${h.score.toFixed(2)}`)
         .addTo(group);
     }
   }, [layers, visible, hotspots]);

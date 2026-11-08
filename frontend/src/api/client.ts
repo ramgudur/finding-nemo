@@ -1,4 +1,4 @@
-import type { HotspotsResponse, MapResponse } from "./outputs";
+import type { HotspotsResponse, MapResponse } from "./types";
 
 export class ApiError extends Error {
   constructor(

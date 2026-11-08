@@ -1,7 +1,7 @@
 // Dev console (authority view): live score map, hotspots, layer toggles.
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api/client";
-import type { CellCollection, GeoJsonBBox, Hotspot } from "../api/outputs";
+import type { CellCollection, GeoJsonBBox, Hotspot } from "../api/types";
 import { LayerToggles } from "../components/LayerToggles/LayerToggles";
 import { Map } from "../components/Map/Map";
 
@@ -97,7 +97,7 @@ export function AppPage({ appId }: { appId: string }) {
               <ul style={{ margin: "4px 0", paddingLeft: 18 }}>
                 {hotspots.map((h) => (
                   <li key={h.id}>
-                    {h.id}: peak {h.peak.toFixed(2)}, {Math.round(h.area_m2)} m², {h.persisted_ticks} ticks
+                    {h.id}: score {h.score.toFixed(2)}, {Math.round(h.radius_m)} m, {h.persisted_ticks} ticks
                   </li>
                 ))}
               </ul>

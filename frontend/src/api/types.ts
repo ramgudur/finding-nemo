@@ -240,3 +240,51 @@ export interface Instruction {
   computed_at: IsoDateTime;
   guard: GuardResult;
 }
+
+// --- Outputs (GET /map?format=geojson, GET /hotspots) ---
+
+/** GeoJSON order: [min_lon, min_lat, max_lon, max_lat]. */
+export type GeoJsonBBox = [number, number, number, number];
+
+/** One grid cell. Cells with value < 0.01 are omitted: a missing cell means 0. */
+export interface CellFeature {
+  type: "Feature";
+  geometry: { type: "Polygon"; coordinates: number[][][] }; // [lon, lat] rings
+  properties: { value: number; row: number; col: number };
+}
+
+export interface CellCollection {
+  type: "FeatureCollection";
+  bbox?: GeoJsonBBox;
+  features: CellFeature[];
+}
+
+/** Without the authority key, `layers` holds only public layers. "score" is the combined map. */
+export interface MapResponse {
+  app_id: string;
+  t: IsoDateTime;
+  cell_m: number;
+  bbox: GeoJsonBBox;
+  layers: Record<string, CellCollection>;
+}
+
+/** `score` is the peak cell score; radius_m = sqrt(area_m2 / pi). */
+export interface Hotspot {
+  id: string;
+  lat: number;
+  lon: number;
+  radius_m: number;
+  score: number;
+  mean: number;
+  area_m2: number;
+  n_cells: number;
+  persisted_ticks: number;
+  contributing_layers: string[];
+  visibility: Visibility;
+}
+
+export interface HotspotsResponse {
+  app_id: string;
+  t: IsoDateTime;
+  hotspots: Hotspot[];
+}

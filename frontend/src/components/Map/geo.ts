@@ -1,6 +1,6 @@
 // The only place the frontend converts between GeoJSON [lon, lat] and Leaflet [lat, lon].
 import L from "leaflet";
-import type { GeoJsonBBox } from "../../api/outputs";
+import type { GeoJsonBBox } from "../../api/types";
 
 export function bboxToBounds([minLon, minLat, maxLon, maxLat]: GeoJsonBBox): L.LatLngBounds {
   return L.latLngBounds([minLat, minLon], [maxLat, maxLon]);
