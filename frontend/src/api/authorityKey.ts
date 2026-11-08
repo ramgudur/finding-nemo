@@ -1,3 +1,5 @@
+import type { AppSpec } from "./types";
+
 // Per-viewer storage of an app's authority key. Session-only by default; "remember" keeps it in
 // localStorage on this device. Storage can be unavailable (private mode), so every access is guarded.
 
@@ -77,4 +79,39 @@ export function listProjects(): ProjectRecord[] {
 
 export function removeProject(appId: string): void {
   writeProjects(readProjects().filter((p) => p.appId !== appId));
+}
+
+// --- Architecture page additions (fe-arch-shell): pending-spec snapshots ---
+// GET /v1/apps/{app} needs the authority key, and a pending app has none yet. So the Architecture page
+// keeps a local copy of a *pending* spec (the dev's own, unconfirmed config; no events, keys or trace)
+// to reopen it from Past Projects. Active apps are never snapshotted: they load from the server with
+// the key (rule 8), and activation deletes the snapshot.
+const snapName = (appId: string) => `pending-spec:${appId}`;
+
+export function saveSpecSnapshot(spec: AppSpec): void {
+  try {
+    if (spec.status === "active") localStorage.removeItem(snapName(spec.app_id));
+    else localStorage.setItem(snapName(spec.app_id), JSON.stringify(spec));
+  } catch {
+    // storage unavailable
+  }
+}
+
+export function loadSpecSnapshot(appId: string): AppSpec | null {
+  try {
+    const raw = localStorage.getItem(snapName(appId));
+    if (!raw) return null;
+    const spec = JSON.parse(raw) as AppSpec;
+    return spec && spec.app_id === appId && spec.status !== "active" ? spec : null;
+  } catch {
+    return null;
+  }
+}
+
+export function dropSpecSnapshot(appId: string): void {
+  try {
+    localStorage.removeItem(snapName(appId));
+  } catch {
+    // storage unavailable
+  }
 }

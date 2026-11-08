@@ -461,3 +461,19 @@ export interface OperatorInfo {
   role: "layer" | "override";
   params: Record<string, unknown>;
 }
+
+// --- Architecture page additions (fe-arch-shell) ---
+
+/** Errors and warnings from the platform's spec checks (models.py ValidateResult). */
+export interface ValidateResult {
+  errors: string[];
+  warnings: string[];
+}
+
+/** GET /v1/apps/{app}/compile/status: public-safe compile progress; 404 once the app is active. */
+export interface CompileStatus {
+  running: boolean;
+  step: number;
+  elapsed_s: number;
+  last_validate: ValidateResult | null;
+}
