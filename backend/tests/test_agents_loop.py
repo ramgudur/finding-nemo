@@ -113,7 +113,9 @@ def test_default_output_is_the_final_text_not_json_validated():
     )
     assert result == "All good, no changes."
     traces = ctx.db.list_trace("test-app")
-    assert traces[-1].action == "output" and traces[-1].result == "All good, no changes."
+    # the model's text is kept, labeled as its own summary; `result` says what actually changed
+    assert traces[-1].action == "output" and traces[-1].result == "no state change"
+    assert traces[-1].why.startswith("agent summary") and "All good, no changes." in traces[-1].why
 
 
 def test_critic_cold_start_fixture_reads_the_report_and_stops():
@@ -173,3 +175,63 @@ def test_a_slow_tool_does_not_block_the_event_loop(monkeypatch):
     out, ticks = asyncio.run(scenario())
     assert out == "finished"
     assert ticks >= 10  # about 20 beats in 0.4 s; zero if the tool blocked the loop
+
+
+def test_registry_marks_state_changing_tools_explicitly():
+    from app.tools.registry import TOOLS, changes_state
+
+    for name in ("apply_changes", "set_user_trust", "create_poi", "update_poi", "retire_poi", "finalize_app"):
+        assert changes_state(name), name
+    for name in ("annotate", "run_backtest", "run_backtest_batch", "get_map_summary", "validate_spec"):
+        assert not changes_state(name), name
+    assert not changes_state("made_up_tool")
+    assert all(isinstance(t.changes_state, bool) for t in TOOLS.values())
+
+
+def test_claimed_change_without_a_successful_state_tool_traces_no_state_change():
+    """The model says it changed something; its only state-changing call was rejected."""
+    ctx = _ctx()
+    script = {
+        "scenario": "s",
+        "description": "d",
+        "steps": [
+            {
+                "response": {
+                    "tool_calls": [
+                        {"id": "c1", "name": "annotate", "arguments": {"text": "looking"}},
+                        # an unknown backtest id: apply_changes refuses it
+                        {"id": "c2", "name": "apply_changes", "arguments": {"backtest_id": "bt_missing"}},
+                    ]
+                }
+            },
+            {"response": {"content": "I applied the new weights."}},
+        ],
+    }
+    result = asyncio.run(
+        run_agent(ctx, agent="critic", model_field="critic", system="s", task="t", llm=_router(script))
+    )
+    assert result == "I applied the new weights."
+    traces = ctx.db.list_trace("test-app")
+    step = next(t for t in traces if t.action == "tool_calls")
+    assert [c.ok for c in step.tool_calls] == [True, False] and step.why == "2 tool call(s), 1 failed"
+    closing = traces[-1]
+    assert closing.action == "output"
+    assert closing.result.startswith("no state change")
+    assert "1 rejected/failed: apply_changes" in closing.result
+    assert "annotate" not in closing.result  # trace-only tools are not state changes
+    assert closing.why.startswith("agent summary") and "I applied the new weights." in closing.why
+
+
+def test_gave_up_run_reports_its_rejected_state_changes():
+    ctx = _ctx()
+    call = {"tool_calls": [{"id": "c1", "name": "apply_changes", "arguments": {"backtest_id": "bt_missing"}}]}
+    script = {"scenario": "s", "description": "d", "steps": [{"response": call}, {"response": call}]}
+    result = asyncio.run(
+        run_agent(
+            ctx, agent="critic", model_field="critic", system="s", task="t", llm=_router(script), max_iterations=2
+        )
+    )
+    assert result is None
+    closing = ctx.db.list_trace("test-app")[-1]
+    assert closing.action == "gave up"
+    assert closing.result.startswith("no state change | 2 rejected/failed: apply_changes")

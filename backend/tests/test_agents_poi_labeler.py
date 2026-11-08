@@ -106,7 +106,10 @@ def test_labels_a_candidate_from_the_label_set_with_its_own_position():
     assert poi.label == "threat origin" and poi.candidate_id == cand.id
     assert (poi.lat, poi.lon, poi.radius_m) == (cand.lat, cand.lon, cand.radius_m)  # never invented
     assert poi.visibility == "authority"  # private layer
-    assert any(t.agent == "poi_labeler" and t.action == "output" for t in db.list_trace("poi-app"))
+    closing = [t for t in db.list_trace("poi-app") if t.agent == "poi_labeler" and t.action == "output"][-1]
+    # the closing trace lists the change from the successful create_poi call, not the model's word
+    assert closing.result.startswith("1 state change(s): create_poi") and poi.id in closing.result
+    assert closing.why.startswith("agent summary") and "Labeled 1 candidate." in closing.why
 
 
 def test_auto_mode_can_create_nothing_and_says_why():
@@ -152,6 +155,42 @@ def test_label_outside_the_label_set_is_rejected_by_the_tools():
     }
     out = asyncio.run(run_poi_labeler(_ctx(db, eng, clock), "scheduled check", _router(script)))
     assert "suggest" in out and db.list_pois("poi-app") == []
+
+
+def test_claimed_label_after_a_rejected_create_poi_traces_no_state_change():
+    """Issue #246: the closing text claims a label, but the run's only create_poi was rejected."""
+    db, eng, clock = _engine(_spec())
+    script = {
+        "scenario": "s",
+        "description": "d",
+        "steps": [
+            {"response": {"tool_calls": [{"id": "c1", "name": "get_poi_candidates", "arguments": {}}]}},
+            {
+                "response": {
+                    "tool_calls": [
+                        {
+                            "id": "c2",
+                            "name": "create_poi",
+                            "arguments": {
+                                "candidate_id": "${tool_result:c1:candidates.0.id}",
+                                "label": "gathering point",
+                                "confidence": 0.1,  # below min_confidence: rejected
+                                "evidence": [],
+                            },
+                        }
+                    ]
+                }
+            },
+            {"response": {"content": "I labeled candidate c1 as a gathering point."}},
+        ],
+    }
+    out = asyncio.run(run_poi_labeler(_ctx(db, eng, clock), "scheduled check", _router(script)))
+    assert out == "I labeled candidate c1 as a gathering point."
+    assert db.list_pois("poi-app") == []
+    closing = [t for t in db.list_trace("poi-app") if t.agent == "poi_labeler"][-1]
+    assert closing.action == "output"
+    assert closing.result.startswith("no state change | 1 rejected/failed: create_poi")
+    assert closing.why.startswith("agent summary") and "I labeled candidate c1" in closing.why
 
 
 def test_task_prompt_lists_labels_and_mode_without_coordinates():

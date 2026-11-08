@@ -16,6 +16,11 @@ Every step writes a `TraceEntry`: a model call that returns tool calls, the fina
 validated output, a failed/gave-up run, or -- when the provider's rate budget is empty --
 `skipped_reason='rate budget'`. A skip returns immediately; it never blocks the tick
 (rule 2).
+
+The closing entry never takes the model's word for what happened (rule 11): its `result`
+is derived from the run's state-changing tool calls (`Tool.changes_state` in the
+registry): the ones that succeeded, or "no state change", plus any that were rejected.
+The model's own closing text goes in `why`, labeled as the agent's unverified summary.
 """
 
 from __future__ import annotations
@@ -32,7 +37,7 @@ from app.agents.llm import LlmRouter, RateLimited
 from app.core.config import AgentField
 from app.core.models import AgentName, ToolCall, TraceEntry
 from app.tools.context import ToolContext
-from app.tools.registry import call_tool, tool_schemas
+from app.tools.registry import call_tool, changes_state, tool_schemas
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +49,31 @@ _REPAIR_SYSTEM = (
     "The following JSON must validate against the given JSON Schema but does not. "
     "Return ONLY the corrected JSON, no commentary."
 )
+
+
+NO_STATE_CHANGE = "no state change"
+SUMMARY_PREFIX = "agent summary (unverified; see result for what changed): "
+
+
+def _outcome(calls: list[ToolCall]) -> str:
+    """What the run actually changed, from its tool calls -- never from the model's text."""
+    changing = [c for c in calls if changes_state(c.name)]
+    done = [c for c in changing if c.ok]
+    failed = [c for c in changing if not c.ok]
+    parts = [
+        f"{len(done)} state change(s): " + "; ".join(f"{c.name} -> {c.result_summary[:120]}" for c in done)
+        if done
+        else NO_STATE_CHANGE
+    ]
+    if failed:
+        parts.append(
+            f"{len(failed)} rejected/failed: " + "; ".join(f"{c.name} -> {c.result_summary[:120]}" for c in failed)
+        )
+    return " | ".join(parts)[:500]
+
+
+def _summary(content: str) -> str:
+    return SUMMARY_PREFIX + (content.strip()[:500] or "(empty)")
 
 
 def _trace(ctx: ToolContext, agent: AgentName, **fields: Any) -> TraceEntry:
@@ -73,8 +103,11 @@ async def _run_tool_calls(
     model_id: str,
     tool_calls: list[Any],
     on_tool_result: OnToolResult | None,
+    run_calls: list[ToolCall],
 ) -> list[dict[str, Any]]:
-    """Executes each call, appends a `TraceEntry`, and returns the `tool` messages to feed back."""
+    """Executes each call, appends a `TraceEntry`, records each call in `run_calls`, and returns
+    the `tool` messages to feed back. A failed or rejected call is marked `ok=False`, and the
+    step's `why` counts the failures."""
     trace_calls: list[ToolCall] = []
     tool_messages: list[dict[str, Any]] = []
     for tc in tool_calls:
@@ -90,14 +123,14 @@ async def _run_tool_calls(
             result = await asyncio.to_thread(call_tool, ctx, tc.function.name, args)
         if on_tool_result is not None:
             on_tool_result(tc.function.name, args, result)
-        summary = str(result.get("result") if result.get("ok") else result.get("error"))[:200]
-        trace_calls.append(
-            ToolCall(name=tc.function.name, args=args, ok=result.get("ok", False), result_summary=summary)
-        )
+        ok = bool(result.get("ok", False))
+        summary = str(result.get("result") if ok else result.get("error"))
+        trace_calls.append(ToolCall(name=tc.function.name, args=args, ok=ok, result_summary=summary[:200]))
         tool_messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, default=str)})
-    _trace(
-        ctx, agent, model=model_id, action="tool_calls", tool_calls=trace_calls, why=f"{len(tool_calls)} tool call(s)"
-    )
+    run_calls.extend(trace_calls)
+    n_failed = sum(not c.ok for c in trace_calls)
+    why = f"{len(tool_calls)} tool call(s)" + (f", {n_failed} failed" if n_failed else "")
+    _trace(ctx, agent, model=model_id, action="tool_calls", tool_calls=trace_calls, why=why)
     return tool_messages
 
 
@@ -145,15 +178,27 @@ async def run_agent(
     model = llm.settings.agent_model(model_field)
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}, {"role": "user", "content": task}]
     schemas = tool_schemas(agent) or None
+    run_calls: list[ToolCall] = []  # every tool call this run, for the closing entry's outcome
+
+    def outcome() -> str:
+        return _outcome(run_calls) if run_calls else ""
 
     for _ in range(max_iterations):
         try:
             resp = await llm.chat(model_field, messages, tools=schemas, enable_thinking=enable_thinking)
         except RateLimited as e:
-            _trace(ctx, agent, model=model.model_id, action="skipped", skipped_reason="rate budget", why=str(e))
+            _trace(
+                ctx,
+                agent,
+                model=model.model_id,
+                action="skipped",
+                skipped_reason="rate budget",
+                result=outcome(),
+                why=str(e),
+            )
             return None
         except Exception as e:  # noqa: BLE001 - a provider failure must not crash the caller
-            _trace(ctx, agent, model=model.model_id, action="error", why=f"{type(e).__name__}: {e}")
+            _trace(ctx, agent, model=model.model_id, action="error", result=outcome(), why=f"{type(e).__name__}: {e}")
             return None
 
         message = resp.choices[0].message
@@ -162,7 +207,9 @@ async def run_agent(
         if not tool_calls:
             content = message.content or ""
             if output_model is None:
-                _trace(ctx, agent, model=model.model_id, action="output", result=content[:500], why="final answer")
+                _trace(
+                    ctx, agent, model=model.model_id, action="output", result=_outcome(run_calls), why=_summary(content)
+                )
                 return content
             try:
                 result = output_model.model_validate_json(content)
@@ -175,7 +222,14 @@ async def run_agent(
             _trace(ctx, agent, model=model.model_id, action="output", result=content[:500], why="validated")
             return result
 
-        messages.extend(await _run_tool_calls(ctx, agent, model.model_id, tool_calls, on_tool_result))
+        messages.extend(await _run_tool_calls(ctx, agent, model.model_id, tool_calls, on_tool_result, run_calls))
 
-    _trace(ctx, agent, model=model.model_id, action="gave up", why=f"exceeded {max_iterations} iterations")
+    _trace(
+        ctx,
+        agent,
+        model=model.model_id,
+        action="gave up",
+        result=_outcome(run_calls),
+        why=f"exceeded {max_iterations} iterations",
+    )
     return None
