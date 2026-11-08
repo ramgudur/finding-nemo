@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from app.api import apps as apps_api
 from app.api import ingest as ingest_api
 from app.api import outputs as outputs_api
+from app.api import ws as ws_api
 from app.core.config import get_settings
 from app.core.db import Db
 from app.engine.operators.base import Events
@@ -55,6 +56,7 @@ def create_app(*, db: Db | None = None, engine: TickEngine | None = None, autost
     fastapi_app.include_router(apps_api.router)
     fastapi_app.include_router(ingest_api.router)
     fastapi_app.include_router(outputs_api.router)
+    fastapi_app.include_router(ws_api.router)
 
     @fastapi_app.get("/v1/health")
     def health() -> dict[str, str]:

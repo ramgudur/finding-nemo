@@ -120,6 +120,26 @@ def test_hotspots_are_authority_only_for_this_spec(setup):
         assert h["visibility"] == "authority"
 
 
+def test_hotspot_is_public_when_every_contributing_layer_is_public():
+    db = Db(":memory:")
+    clock = SimClock(start=T0)
+    engine = TickEngine(DbEventSource(db), clock=clock)
+    app_obj = create_app(db=db, engine=engine, autostart_engine=False)
+    spec = _spec()
+    spec["outputs"]["layers"] = [
+        {"id": "score", "visibility": "public"},
+        {"id": "pings.density", "visibility": "public"},
+    ]
+    with TestClient(app_obj) as client:
+        client.post("/v1/apps", json=spec)
+        keys = client.post("/v1/apps/test-app/activate").json()
+        _post_pings(client, keys["ingest_key"])
+        engine.tick_once()
+        pub = client.get("/v1/apps/test-app/hotspots").json()
+        assert pub["hotspots"]
+        assert all(h["visibility"] == "public" for h in pub["hotspots"])
+
+
 def test_map_with_wrong_authority_key_is_401_not_public(setup):
     client, db, engine, clock, keys = setup
     _post_pings(client, keys["ingest_key"])
