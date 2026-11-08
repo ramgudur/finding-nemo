@@ -292,8 +292,9 @@ def set_user_trust(ctx: ToolContext, args: SetUserTrustArgs) -> dict[str, Any]:
     return {"user_id": args.user_id, "before": c.before["trust"], "after": c.after["trust"], "change_id": c.id}
 
 
-def pin_weight(ctx: ToolContext, args: PinWeightArgs) -> dict[str, Any]:
-    """Dev only. A pinned weight never moves (renormalization included) until unpinned."""
+def pin_weight(ctx: ToolContext, args: PinWeightArgs, *, reverts: str | None = None) -> dict[str, Any]:
+    """Dev only. A pinned weight never moves (renormalization included) until unpinned.
+    ``reverts``: the Change id this pin undoes (``tools/revert_tools.py``)."""
     guards.require_dev(ctx, "pinning a weight")
     rt = ctx.runtime
     if args.layer_id not in rt.weights:
@@ -310,6 +311,7 @@ def pin_weight(ctx: ToolContext, args: PinWeightArgs) -> dict[str, Any]:
         reason=guards.require_reason(args.reason),
         actor="dev",
         t=ctx.now_dt(),
+        reverts=reverts,
     )
     ctx.db.add_change(c)
     return {"layer_id": args.layer_id, "pinned": args.pinned, "weight": w, "change_id": c.id}

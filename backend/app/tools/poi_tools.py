@@ -265,7 +265,7 @@ def _evidence(items: list[EvidenceIn] | None) -> list[Evidence]:
     return [Evidence(kind=e.kind, text=e.text, data=e.data) for e in (items or [])]
 
 
-def _record(ctx: ToolContext, poi_id: str, before: Any, after: Any, reason: str) -> Change:
+def _record(ctx: ToolContext, poi_id: str, before: Any, after: Any, reason: str, reverts: str | None = None) -> Change:
     c = Change(
         id=guards.new_change_id(),
         app_id=ctx.app_id,
@@ -276,6 +276,7 @@ def _record(ctx: ToolContext, poi_id: str, before: Any, after: Any, reason: str)
         reason=reason,
         actor=ctx.actor,
         t=ctx.now_dt(),
+        reverts=reverts,
     )
     ctx.db.add_change(c)
     return c
@@ -319,7 +320,9 @@ def _poi(ctx: ToolContext, poi_id: str) -> POI:
     return p
 
 
-def update_poi(ctx: ToolContext, args: UpdatePoiArgs) -> dict[str, Any]:
+def update_poi(
+    ctx: ToolContext, args: UpdatePoiArgs, *, reverts: str | None = None, reason: str = "updated POI"
+) -> dict[str, Any]:
     _check_writable(ctx)
     p = _poi(ctx, args.poi_id)
     if p.status != "active":
@@ -338,11 +341,11 @@ def update_poi(ctx: ToolContext, args: UpdatePoiArgs) -> dict[str, Any]:
         update["visibility"] = poi_visibility(ctx, label, None)
     new = p.model_copy(update=update)
     ctx.db.upsert_poi(ctx.app_id, new, ctx.now())
-    ch = _record(ctx, p.id, _poi_state(p), _poi_state(new), "updated POI")
+    ch = _record(ctx, p.id, _poi_state(p), _poi_state(new), reason, reverts)
     return {"poi_id": p.id, "label": new.label, "visibility": new.visibility, "change_id": ch.id}
 
 
-def retire_poi(ctx: ToolContext, args: RetirePoiArgs) -> dict[str, Any]:
+def retire_poi(ctx: ToolContext, args: RetirePoiArgs, *, reverts: str | None = None) -> dict[str, Any]:
     _check_writable(ctx)
     reason = guards.require_reason(args.reason)
     p = _poi(ctx, args.poi_id)
@@ -350,5 +353,44 @@ def retire_poi(ctx: ToolContext, args: RetirePoiArgs) -> dict[str, Any]:
         raise GuardError(f"POI {p.id} is already retired")
     new = p.model_copy(update={"status": "retired", "updated_at": ctx.now_dt()})
     ctx.db.upsert_poi(ctx.app_id, new, ctx.now())
-    ch = _record(ctx, p.id, _poi_state(p), _poi_state(new), reason)
+    ch = _record(ctx, p.id, _poi_state(p), _poi_state(new), reason, reverts)
     return {"poi_id": p.id, "status": "retired", "change_id": ch.id}
+
+
+def reactivate_poi(
+    ctx: ToolContext, poi_id: str, label: str, confidence: float, *, reason: str, reverts: str | None = None
+) -> dict[str, Any]:
+    """Dev only (reverting a retire): bring a retired POI back, under the same rules as create_poi.
+    Its candidate must still be a current code-made candidate (rule 7: positions only from
+    candidates) with no other active POI; position and visibility are re-taken from it."""
+    guards.require_dev(ctx, "reactivating a POI")
+    reason = guards.require_reason(reason)
+    _check_writable(ctx)
+    p = _poi(ctx, poi_id)
+    if p.status == "active":
+        raise GuardError(f"POI {p.id} is already active")
+    cand = _candidates(ctx).get(p.candidate_id)
+    if cand is None:
+        raise GuardError(
+            f"POI {p.id}'s candidate {p.candidate_id!r} is no longer a current candidate; "
+            "POIs come only from current code-made candidates"
+        )
+    if any(o.candidate_id == cand.id for o in _active_pois(ctx)):
+        raise GuardError(f"candidate {cand.id} already has an active POI")
+    _check_label(ctx, label)
+    _check_confidence(ctx, confidence)
+    new = p.model_copy(
+        update={
+            "status": "active",
+            "label": label,
+            "confidence": confidence,
+            "lat": cand.lat,
+            "lon": cand.lon,
+            "radius_m": cand.radius_m,
+            "visibility": poi_visibility(ctx, label, cand),
+            "updated_at": ctx.now_dt(),
+        }
+    )
+    ctx.db.upsert_poi(ctx.app_id, new, ctx.now())
+    ch = _record(ctx, p.id, _poi_state(p), _poi_state(new), reason, reverts)
+    return {"poi_id": p.id, "status": "active", "change_id": ch.id}

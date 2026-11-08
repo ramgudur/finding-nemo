@@ -246,32 +246,44 @@ def _check_connector_url(ctx: ToolContext, config: ConnectorConfig) -> None:
 
 
 def create_connector(ctx: ToolContext, args: CreateConnectorArgs) -> dict[str, Any]:
-    spec = _spec(ctx)
-    inp = next((i for i in spec.inputs if i.id == args.input_id), None)
-    if inp is None:
-        raise GuardError(f"input {args.input_id!r} does not exist; create it first")
-    if inp.kind != "pull":
-        raise GuardError(f"input {args.input_id!r} is {inp.kind!r}; only a pull input takes a connector")
-    before = inp.connector.model_dump(mode="json") if inp.connector else None
     config = ConnectorConfig(type=args.type, url=args.url, poll_s=args.poll_s, config=args.config, preset=args.preset)
-    _check_connector_url(ctx, config)
-    new_inputs = [i.model_copy(update={"connector": config}) if i.id == args.input_id else i for i in spec.inputs]
-    _save(ctx, spec.model_copy(update={"inputs": new_inputs}))
-    ctx.db.add_change(
-        Change(
-            id=str(uuid.uuid4()),
-            app_id=ctx.app_id,
-            kind="connector",
-            target=args.input_id,
-            before=before,
-            after=config.model_dump(mode="json"),
-            reason=f"{ctx.agent or ctx.actor} configured a connector for {args.input_id!r}",
-            actor=ctx.actor,
-            t=ctx.now_dt(),
-        )
+    set_connector(
+        ctx, args.input_id, config, reason=f"{ctx.agent or ctx.actor} configured a connector for {args.input_id!r}"
     )
     # connector_id == input_id: each pull input has at most one connector today.
     return {"connector_id": args.input_id, "input_id": args.input_id, "connector": config.model_dump(mode="json")}
+
+
+def set_connector(
+    ctx: ToolContext, input_id: str, config: ConnectorConfig | None, *, reason: str, reverts: str | None = None
+) -> Change:
+    """Store (or, with ``config=None``, remove) a pull input's connector and record a Change.
+    The path behind ``create_connector`` and the dev's revert (``tools/revert_tools.py``)."""
+    spec = _spec(ctx)
+    inp = next((i for i in spec.inputs if i.id == input_id), None)
+    if inp is None:
+        raise GuardError(f"input {input_id!r} does not exist; create it first")
+    if inp.kind != "pull":
+        raise GuardError(f"input {input_id!r} is {inp.kind!r}; only a pull input takes a connector")
+    before = inp.connector.model_dump(mode="json") if inp.connector else None
+    if config is not None:
+        _check_connector_url(ctx, config)
+    new_inputs = [i.model_copy(update={"connector": config}) if i.id == input_id else i for i in spec.inputs]
+    _save(ctx, spec.model_copy(update={"inputs": new_inputs}))
+    change = Change(
+        id=str(uuid.uuid4()),
+        app_id=ctx.app_id,
+        kind="connector",
+        target=input_id,
+        before=before,
+        after=config.model_dump(mode="json") if config is not None else None,
+        reason=reason,
+        actor=ctx.actor,
+        t=ctx.now_dt(),
+        reverts=reverts,
+    )
+    ctx.db.add_change(change)
+    return change
 
 
 def test_connector(ctx: ToolContext, args: TestConnectorArgs) -> dict[str, Any]:

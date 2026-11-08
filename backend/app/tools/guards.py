@@ -132,8 +132,16 @@ def live_trust_map(ctx: ToolContext) -> dict[str, float]:
     return dict(ctx.engine.trust(ctx.app_id)) if ctx.engine.trust else {}
 
 
-def apply_weights(ctx: ToolContext, new: Mapping[str, float], *, reason: str, backtest_id: str | None) -> list[Change]:
-    """Write the change everywhere: live engine, weights history, Change log. Returns the Changes."""
+def apply_weights(
+    ctx: ToolContext,
+    new: Mapping[str, float],
+    *,
+    reason: str,
+    backtest_id: str | None,
+    reverts: Mapping[str, str] | None = None,
+) -> list[Change]:
+    """Write the change everywhere: live engine, weights history, Change log. Returns the Changes.
+    ``reverts`` maps layer_id -> the Change id each new Change reverts (dev reverts only)."""
     rt = ctx.runtime
     tier_of = layer_tiers(ctx)
     now, now_dt = ctx.now(), ctx.now_dt()
@@ -156,6 +164,7 @@ def apply_weights(ctx: ToolContext, new: Mapping[str, float], *, reason: str, ba
             backtest_id=backtest_id,
             actor=ctx.actor,
             t=now_dt,
+            reverts=(reverts or {}).get(layer_id),
         )
         ctx.db.add_change(c)
         changes.append(c)
@@ -186,7 +195,15 @@ def current_trust(ctx: ToolContext, user_id: str) -> tuple[float, float | None]:
     return score, max(increases, default=None)
 
 
-def apply_trust(ctx: ToolContext, user_id: str, after: float, *, reason: str, backtest_id: str | None) -> Change:
+def apply_trust(
+    ctx: ToolContext,
+    user_id: str,
+    after: float,
+    *,
+    reason: str,
+    backtest_id: str | None,
+    reverts: str | None = None,
+) -> Change:
     before, last_inc = current_trust(ctx, user_id)
     check_trust(before, after, last_inc, ctx.now(), reason)
     ctx.db.set_trust(ctx.app_id, user_id, after, ctx.now())
@@ -201,6 +218,7 @@ def apply_trust(ctx: ToolContext, user_id: str, after: float, *, reason: str, ba
         backtest_id=backtest_id,
         actor=ctx.actor,
         t=ctx.now_dt(),
+        reverts=reverts,
     )
     ctx.db.add_change(c)
     return c
