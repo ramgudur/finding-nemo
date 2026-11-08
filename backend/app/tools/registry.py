@@ -19,6 +19,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from app.tools import compiler_tools as ct
+from app.tools import poi_tools as pt
 from app.tools import read_tools as rd
 from app.tools import scoring_tools as st
 from app.tools.context import ToolContext
@@ -170,6 +171,73 @@ TOOLS: dict[str, Tool] = {
             ct.FinalizeAppArgs,
             ct.finalize_app,
             frozenset({"compiler"}),
+        ),
+        Tool(
+            "get_poi_candidates",
+            "Current code-made candidates (id, position, radius, source, persistence, stats, existing label) plus"
+            " the app's label_set, mode, min_confidence and intent.",
+            pt.NoArgs,
+            pt.get_poi_candidates,
+            frozenset({"poi_labeler"}),
+        ),
+        Tool(
+            "find_candidates",
+            "Filter current candidates by persistence, generator, or unlabeled only.",
+            pt.FindCandidatesArgs,
+            pt.find_candidates,
+            frozenset({"poi_labeler"}),
+        ),
+        Tool(
+            "osm_features_near",
+            "Mapped features (OpenStreetMap) near a candidate: name and a few tags, with distance. Cached and "
+            "rate-limited.",
+            pt.CandidateRadiusArgs,
+            pt.osm_features_near,
+            frozenset({"poi_labeler"}),
+        ),
+        Tool(
+            "input_values_at",
+            "What each of the app's inputs reported near a candidate over a window: event counts, distinct "
+            "sources, and declared numeric fields (mean/min/max).",
+            pt.CandidateWindowArgs,
+            pt.input_values_at,
+            frozenset({"poi_labeler"}),
+        ),
+        Tool(
+            "get_layer_stats_at",
+            "Score and each layer's normalized mean/max around a candidate in the latest tick.",
+            pt.CandidateArgs,
+            pt.get_layer_stats_at,
+            frozenset({"poi_labeler"}),
+        ),
+        Tool(
+            "get_time_pattern",
+            "Event counts near a candidate in equal time buckets per input, with first/last seen.",
+            pt.CandidateWindowArgs,
+            pt.get_time_pattern,
+            frozenset({"poi_labeler"}),
+        ),
+        Tool(
+            "create_poi",
+            "Label a current candidate with a label from the app's label_set (position comes from the candidate)."
+            " Below min_confidence or unknown labels are rejected; propose new label types with annotate.",
+            pt.CreatePoiArgs,
+            pt.create_poi,
+            frozenset({"poi_labeler"}),
+        ),
+        Tool(
+            "update_poi",
+            "Change an active POI's label, confidence or evidence (label_set and min_confidence still apply).",
+            pt.UpdatePoiArgs,
+            pt.update_poi,
+            frozenset({"poi_labeler"}),
+        ),
+        Tool(
+            "retire_poi",
+            "Retire a POI that no longer holds, with a reason.",
+            pt.RetirePoiArgs,
+            pt.retire_poi,
+            frozenset({"poi_labeler"}),
         ),
     )
 }
