@@ -8,7 +8,8 @@ Single path (`run_backtest`, used for trust changes; also takes candidate weight
    normalized stacks. Stacks don't depend on weights, so weights are applied at scoring time.
 3. Score both (baseline, candidate) with `engine/verification` on each segment separately
    (segment ticks and segment events only, so train never peeks at holdout).
-4. Accept when the highest-priority method with data improves on the holdout (see `accept`).
+4. Accept when the highest-priority method with data improves on the holdout and no other method
+   with data gets worse by more than ε (see `accept`).
 
 The batch path (vectorized weight search) is a separate issue.
 """
@@ -44,6 +45,7 @@ class BacktestParams:
     window_s: float = 600.0
     train_frac: float = 0.7
     min_holdout_events: int = MIN_HOLDOUT_EVENTS
+    epsilon: float = 0.02  # how much worse a non-deciding method may get on holdout
     replay_step_s: float = 10.0
     verification: VerificationParams = field(default_factory=VerificationParams)
 
@@ -98,21 +100,26 @@ def accept(
     baseline: Mapping[VerificationMethod, float],
     candidate: Mapping[VerificationMethod, float],
     priority: Sequence[VerificationMethod],
+    epsilon: float,
 ) -> tuple[bool, VerificationMethod | None, str]:
     """Holdout acceptance rule; `priority` is highest first.
 
     Walk methods by priority. A method the baseline has data for but the candidate lost is a
     rejection (the change destroyed evidence). A method only the candidate has data for can't
-    be compared and is skipped. The first method with data on both sides decides: it must improve.
-    No higher-priority method can then have comparable data, so the spec's "no higher-priority
-    method worse by more than ε" clause has nothing to check on this path.
+    be compared and is skipped. The first method with data on both sides decides and must
+    improve; every other method with data on both sides may not get worse by more than ε.
     """
-    for m in priority:
+    for i, m in enumerate(priority):
         if m in baseline and m not in candidate:
             return False, m, f"{m} lost its holdout data under the candidate"
         if m in baseline and m in candidate:
-            verdict = "improved" if candidate[m] > baseline[m] else "did not improve"
-            return candidate[m] > baseline[m], m, f"{m} {verdict} on holdout ({baseline[m]:.3f} -> {candidate[m]:.3f})"
+            if candidate[m] <= baseline[m]:
+                return False, m, f"{m} did not improve on holdout ({baseline[m]:.3f} -> {candidate[m]:.3f})"
+            for other in priority[i + 1 :]:
+                if other in baseline and other in candidate and candidate[other] < baseline[other] - epsilon:
+                    worse = f"{baseline[other]:.3f} -> {candidate[other]:.3f}"
+                    return False, m, f"{m} improved but {other} got worse on holdout by more than ε ({worse})"
+            return True, m, f"{m} improved on holdout ({baseline[m]:.3f} -> {candidate[m]:.3f})"
     return False, None, "no verification method has holdout data"
 
 
@@ -185,7 +192,7 @@ def run_backtest(
 
     base_train, base_hold = score(base_win, w_base, start, split), score(base_win, w_base, split, now)
     cand_train, cand_hold = score(cand_win, w_cand, start, split), score(cand_win, w_cand, split, now)
-    passed, method, reason = accept(base_hold, cand_hold, priority)
+    passed, method, reason = accept(base_hold, cand_hold, priority, p.epsilon)
     return outcome(
         passed,
         reason,

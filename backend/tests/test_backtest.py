@@ -139,10 +139,24 @@ ORDER = ["authority_confirmation", "predictive_check", "cross_input_agreement"]
     [
         ({"predictive_check": 0.5}, {"predictive_check": 0.6}, True, "predictive_check"),
         ({"predictive_check": 0.5}, {"predictive_check": 0.5}, False, "predictive_check"),
-        # the highest-priority method with data decides; lower ones don't matter
+        # the highest-priority method with data decides; a lower one may drop by up to ε
+        (
+            {"authority_confirmation": 0.2, "predictive_check": 0.9},
+            {"authority_confirmation": 0.3, "predictive_check": 0.89},
+            True,
+            "authority_confirmation",
+        ),
+        # ... but not by more than ε
         (
             {"authority_confirmation": 0.2, "predictive_check": 0.9},
             {"authority_confirmation": 0.3, "predictive_check": 0.1},
+            False,
+            "authority_confirmation",
+        ),
+        # a lower method only one side has data for is not compared
+        (
+            {"authority_confirmation": 0.2, "cross_input_agreement": 0.9},
+            {"authority_confirmation": 0.3},
             True,
             "authority_confirmation",
         ),
@@ -159,5 +173,5 @@ ORDER = ["authority_confirmation", "predictive_check", "cross_input_agreement"]
     ],
 )
 def test_accept_rule(base, cand, passed, method):
-    ok, m, reason = accept(base, cand, ORDER)
+    ok, m, reason = accept(base, cand, ORDER, epsilon=0.02)
     assert ok is passed and m == method and reason
