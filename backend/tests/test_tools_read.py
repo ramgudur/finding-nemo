@@ -167,4 +167,15 @@ def test_critic_sees_read_and_write_tools():
         "apply_changes",
         "set_user_trust",
     }
-    assert {t["function"]["name"] for t in registry.tool_schemas("poi_labeler")} == {"annotate"}
+    assert {t["function"]["name"] for t in registry.tool_schemas("poi_labeler")} == {
+        "annotate",
+        "get_poi_candidates",
+        "find_candidates",
+        "osm_features_near",
+        "input_values_at",
+        "get_layer_stats_at",
+        "get_time_pattern",
+        "create_poi",
+        "update_poi",
+        "retire_poi",
+    }
