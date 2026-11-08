@@ -349,3 +349,39 @@ export interface ErrorSeries {
   series: ErrorPoint[];
   changes: ChangeMarker[];
 }
+
+// --- Console reads (authority only; api/trace.py) ---
+
+export interface LayerWeight {
+  layer_id: string;
+  weight: number;
+  tier: Tier;
+  pinned: boolean;
+}
+
+export interface WeightsView {
+  app_id: string;
+  t: IsoDateTime;
+  layers: LayerWeight[];
+  flexible_total: number; // renormalization keeps it fixed
+}
+
+export interface MethodScore {
+  method: VerificationMethod;
+  priority: number;
+  has_data: boolean;
+  value: number | null;
+}
+
+export interface VerificationView {
+  app_id: string;
+  window_s: number;
+  ticks: number;
+  methods: MethodScore[];
+  cold_start: boolean; // fewer than two methods have data
+}
+
+export interface PinRequest {
+  pinned?: boolean; // default true
+  reason?: string;
+}
