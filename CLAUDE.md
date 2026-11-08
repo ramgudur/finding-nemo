@@ -215,7 +215,8 @@ Ingest keys and authority keys are generated per app at activation and stored in
 
 **Outputs.** Without the `X-Authority-Key` header, responses contain only `public` items. This applies to REST and WebSocket alike. Browsers can't set WebSocket headers, so the WS client sends `{type: "auth", key}` as its first frame; until a valid key arrives the stream is public-only. Never echo or log the key.
 
-- **WS frames:** server replies `{type: "auth_ok", authority: bool}` to an auth frame (`false` for a bad key; the socket stays public-only). Each tick sends `{type: "tick", t, map: MapResponse, hotspots: HotspotsResponse}`, filtered like REST.
+- **WS frames:** server replies `{type: "auth_ok", authority: bool}` to an auth frame (`false` for a bad key; the socket stays public-only). Each tick sends `{type: "tick", t, map: MapResponse, hotspots: HotspotsResponse}`, filtered like REST. A malformed or unknown inbound frame gets `{type: "error", reason}` (a fixed reason such as `"malformed frame"`, never echoing the frame's content), and the socket stays open with its current visibility.
+- **Key checks:** every key comparison (ingest and authority, REST and WS) goes through `core/db.py`, is constant-time, and treats anything that isn't a non-empty string as a wrong key. It never raises, whatever the caller sends.
 - **REST keys:** no `X-Authority-Key` → public data. A wrong key → `401`.
 
 | Endpoint | Visibility |
@@ -436,3 +437,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-07:** Hotspot visibility: a hotspot is `public` only if `contributing_layers` is non-empty and every one of them is public in `spec.outputs.layers`; otherwise `authority`. Set in `tick.py` (Kida A), filtered in `outputs.py`.
 - **2026-11-07:** `specs/campus-alert.json`: the `panic` input carries its own on-foot `plausibility` (`max_speed_mps: 12`, `flag_constant_speed: true`, `flag_straight_line: true`), so the demo keeps flagging spoofers after #45 makes the platform defaults neutral (Allen).
 - **2026-11-07:** Spoof defaults are neutral: with no `plausibility`, no speed limit and no constant-speed/straight-line checks; entity-agnostic checks still run. Guard against silent weak detection: the Compiler proposes `plausibility` for every point/track input, `validate_spec` warns when a flexible point/track input lacks it, and the builder shows it at confirmation. Campus Alert pins its own values (#62).
+- **2026-11-07:** WS: malformed or unknown frames get `{type: "error", reason}` with a fixed reason, and the socket stays open. Key checks never raise: non-string, empty or non-ASCII keys are just wrong keys (fixed once in `db.py`). Hotspots stay authority-only until #67 lands the contributor fix (rule 8 fail-safe).
