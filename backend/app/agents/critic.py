@@ -26,11 +26,23 @@ from app.agents import budget
 from app.agents.llm import LlmRouter
 from app.agents.loop import run_agent
 from app.core.db import Db
+from app.core.models import TraceEntry
 from app.engine.tick import TickEngine, TickResult
 from app.tools.context import ToolContext
 from app.tools.registry import call_tool
 
 log = logging.getLogger(__name__)
+
+
+def _trace_skip(ctx: ToolContext, reason: str) -> None:
+    """Rule 2: deciding not to even start a run is still a skip, and still gets a trace entry --
+    not just a call that fails mid-run (loop.py's own rate-budget catch)."""
+    ctx.db.add_trace(
+        TraceEntry(
+            t=ctx.now_dt(), app_id=ctx.app_id, agent="critic", action="skipped", skipped_reason=reason, why=reason
+        )
+    )
+
 
 MIN_INTERVAL_S = 60.0
 TRIGGER_COOLDOWN_S = 15.0
@@ -230,7 +242,9 @@ class CriticScheduler:
         if (app_id, AGENT) in self._running:
             return  # never more than one in-flight run per app and agent
         if not self.llm.admit(AGENT, budget.EST_CALLS[AGENT], priority):
-            # defer, don't skip: keep a trigger for the next poll; a scheduled check just waits
+            # the run itself is deferred (kept pending for triggered, just waits for scheduled),
+            # but the decision not to start it now is still a skip (rule 2)
+            _trace_skip(ctx, "rate budget")
             if priority == "triggered":
                 st.pending_trigger = reason
             return

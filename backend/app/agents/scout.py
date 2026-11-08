@@ -202,11 +202,16 @@ class ScoutRunner:
     async def check_once(self) -> None:
         for app_id in list(self.engine.apps):
             for req in pending_requests(self.db, app_id):
-                # #221: a request is a triggered run; without budget it stays pending (no handled
-                # marker is written) and runs on a later poll
-                if not self.llm.admit("scout", budget.EST_CALLS["scout"], "triggered"):
-                    return
                 ctx = ToolContext(app_id=app_id, db=self.db, engine=self.engine, agent="scout", clock=self.engine.clock)
+                # #221: a request is a triggered run; admission is checked before starting so a
+                # doomed run never begins. Still writes the usual skipped trace (rule 2) and
+                # leaves the request unhandled, so it runs on a later poll -- same shared bucket,
+                # so every other pending request would fail admission too right now; stop here.
+                if not self.llm.admit("scout", budget.EST_CALLS["scout"], "triggered"):
+                    _trace(
+                        ctx, action="skipped", saw=req.saw, skipped_reason="rate budget", why="deferred before starting"
+                    )
+                    return
                 try:
                     await run_scout(ctx, req.saw, request_instructions(req), self.llm)
                 except Exception:  # noqa: BLE001 - one request must not stop the others

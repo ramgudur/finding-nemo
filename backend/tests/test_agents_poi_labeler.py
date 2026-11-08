@@ -213,3 +213,51 @@ def test_scheduler_skips_mode_off_and_apps_without_candidates(monkeypatch):
     eng.tick_once()
     asyncio.run(sched.check_once())
     assert runs == []
+
+
+def test_scheduler_defers_a_triggered_run_when_the_budget_is_low_then_runs_it_later(monkeypatch):
+    db, eng, clock = _engine(_spec(), ticks=PERSIST_TRIGGER_TICKS + 1)
+    runs = []
+
+    async def fake_run(ctx, reason, llm=None):
+        runs.append(reason)
+
+    monkeypatch.setattr(pl, "run_poi_labeler", fake_run)
+    sched = PoiLabelerScheduler(db, eng, llm=_router({"scenario": "s", "description": "d", "steps": []}))
+    sched.llm._provider("nvidia").bucket.tokens = 0.0  # #221: nothing is admitted right now
+
+    asyncio.run(sched.check_once())
+    assert runs == []  # deferred, not run
+    trace = db.list_trace("poi-app")
+    assert any(e.agent == "poi_labeler" and e.skipped_reason == "rate budget" for e in trace)
+
+    # budget frees up: the deferred trigger fires without needing a brand new persist trigger
+    sched.llm._provider("nvidia").bucket.tokens = sched.llm._provider("nvidia").bucket.capacity
+    clock.advance(pl.TRIGGER_COOLDOWN_S + 1.0)
+    asyncio.run(sched.check_once())
+    assert len(runs) == 1 and "persisted" in runs[0]
+
+
+def test_scheduler_never_runs_more_than_one_poi_labeler_per_app_at_once(monkeypatch):
+    db, eng, clock = _engine(_spec(), ticks=PERSIST_TRIGGER_TICKS + 1)
+    runs = []
+    release = asyncio.Event()
+    entered = asyncio.Event()
+
+    async def slow_run(ctx, reason, llm=None):
+        runs.append(reason)
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(pl, "run_poi_labeler", slow_run)
+    sched = PoiLabelerScheduler(db, eng, llm=_router({"scenario": "s", "description": "d", "steps": []}))
+
+    async def scenario():
+        first = asyncio.ensure_future(sched.check_once())
+        await entered.wait()
+        await sched.check_once()  # same app, still in flight: must not start a second run
+        release.set()
+        await first
+
+    asyncio.run(scenario())
+    assert len(runs) == 1

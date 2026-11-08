@@ -150,8 +150,11 @@ class PoiLabelerScheduler:
             return
         if (app_id, AGENT) in self._running:
             return  # never more than one in-flight run per app and agent
+        ctx = ToolContext(app_id=app_id, db=self.db, engine=self.engine, agent="poi_labeler", clock=self.engine.clock)
         if not self.llm.admit(AGENT, budget.EST_CALLS[AGENT], priority):
-            # defer, don't skip: keep a trigger for the next poll; a scheduled check just waits
+            # the run itself is deferred (kept pending for triggered, just waits for scheduled),
+            # but the decision not to start it now is still a skip (rule 2)
+            _trace_skip(ctx, "rate budget")
             if priority == "triggered":
                 st.pending_trigger = reason
             return
@@ -161,9 +164,6 @@ class PoiLabelerScheduler:
         st.last_run_at = now
         self._running.add((app_id, AGENT))
         try:
-            ctx = ToolContext(
-                app_id=app_id, db=self.db, engine=self.engine, agent="poi_labeler", clock=self.engine.clock
-            )
             await run_poi_labeler(ctx, reason, self.llm)
         finally:
             self._running.discard((app_id, AGENT))

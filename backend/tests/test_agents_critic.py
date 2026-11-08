@@ -357,6 +357,59 @@ def test_scheduler_falls_back_to_a_scheduled_check_after_min_interval(monkeypatc
     assert calls == ["scheduled check"]
 
 
+def test_scheduler_defers_a_triggered_run_when_the_budget_is_low_then_runs_it_later(monkeypatch):
+    ctx, engine = _ticked_ctx()
+    calls = []
+
+    async def fake_run_critic(ctx, trigger, llm=None):
+        calls.append(trigger)
+        return None
+
+    monkeypatch.setattr(critic_mod, "run_critic", fake_run_critic)
+    scheduler = CriticScheduler(ctx.db, engine)
+    scheduler.llm._provider("nvidia").bucket.tokens = 0.0  # #221: nothing is admitted right now
+
+    engine.apps["test-app"].last.hotspots = [_hotspot("h1")]
+    asyncio.run(scheduler.check_once())
+    assert calls == []  # deferred, not run
+    trace = ctx.db.list_trace("test-app")
+    assert any(e.agent == "critic" and e.skipped_reason == "rate budget" for e in trace)
+
+    # budget frees up: the deferred trigger fires on the next check, past the cooldown, without
+    # needing a brand new trigger (the hotspot hasn't changed)
+    scheduler.llm._provider("nvidia").bucket.tokens = scheduler.llm._provider("nvidia").bucket.capacity
+    engine.clock.set(T0 + critic_mod.TRIGGER_COOLDOWN_S + 1.0)
+    asyncio.run(scheduler.check_once())
+    assert calls == ["a new hotspot appeared (1)"]
+
+
+def test_scheduler_never_runs_more_than_one_critic_per_app_at_once(monkeypatch):
+    ctx, engine = _ticked_ctx()
+    calls = []
+    release = asyncio.Event()
+    entered = asyncio.Event()
+
+    async def slow_run_critic(ctx, trigger, llm=None):
+        calls.append(trigger)
+        entered.set()
+        await release.wait()
+        return None
+
+    monkeypatch.setattr(critic_mod, "run_critic", slow_run_critic)
+    scheduler = CriticScheduler(ctx.db, engine)
+    engine.apps["test-app"].last.hotspots = [_hotspot("h1")]
+
+    async def scenario():
+        first = asyncio.ensure_future(scheduler.check_once())
+        await entered.wait()
+        await scheduler.check_once()  # same app, still in flight: must not start a second run
+        release.set()
+        await first
+
+    asyncio.run(scenario())
+    assert calls == ["a new hotspot appeared (1)"]  # only the first call ran
+
+
 def test_scheduler_start_and_stop_lifecycle(monkeypatch):
     ctx, engine = _ticked_ctx()
     calls = []
