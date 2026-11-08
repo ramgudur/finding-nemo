@@ -36,7 +36,7 @@ class DbEventSource:
 
 def create_app(*, db: Db | None = None, engine: TickEngine | None = None, autostart_engine: bool = True) -> FastAPI:
     db = db if db is not None else Db(get_settings().sqlite_path)
-    engine = engine if engine is not None else TickEngine(DbEventSource(db))
+    engine = engine if engine is not None else TickEngine(DbEventSource(db), trust=db.list_trust)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

@@ -166,21 +166,39 @@ def test_current_weight_missing_returns_none(db):
 
 
 def test_trust_tracks_last_increase_only_on_increase(db):
-    db.set_trust("app", "u1", 1.0, t=10.0)
+    db.set_trust("app", "u1", 0.8, t=10.0)
     r = db.get_trust("app", "u1")
-    assert r.score == 1.0 and r.last_increase_at == 10.0
+    assert r.score == 0.8 and r.last_increase_at is None  # below the 1.0 default: not an increase
 
     db.set_trust("app", "u1", 0.5, t=20.0)  # decrease: last_increase_at unchanged
     r = db.get_trust("app", "u1")
-    assert r.score == 0.5 and r.last_increase_at == 10.0
+    assert r.score == 0.5 and r.last_increase_at is None
 
     db.set_trust("app", "u1", 0.6, t=30.0)  # increase: last_increase_at advances
     r = db.get_trust("app", "u1")
     assert r.score == 0.6 and r.last_increase_at == 30.0
 
 
+def test_a_first_write_above_the_default_counts_as_an_increase(db):
+    # never-seen users have an implicit trust of 1.0 (engine/trust.py DEFAULT_TRUST)
+    r = db.set_trust("app", "u1", 1.0, t=10.0)
+    assert r.last_increase_at is None  # exactly the default: no increase happened
+
+    r = db.set_trust("app", "u2", 0.4, t=10.0)
+    assert r.last_increase_at is None  # a first-ever decrease must never look like an increase
+
+
 def test_get_trust_missing_returns_none(db):
     assert db.get_trust("app", "nope") is None
+
+
+def test_list_trust_covers_every_recorded_user(db):
+    assert db.list_trust("app") == {}
+    db.set_trust("app", "u1", 0.8, t=1.0)
+    db.set_trust("app", "u2", 0.3, t=1.0)
+    db.set_trust("app", "u1", 0.9, t=2.0)
+    assert db.list_trust("app") == {"u1": 0.9, "u2": 0.3}
+    assert db.list_trust("other-app") == {}
 
 
 # -- pois -----------------------------------------------------------------------------
