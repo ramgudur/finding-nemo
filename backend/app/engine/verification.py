@@ -11,8 +11,9 @@ Events are passed as cells (`CellEvents`), so nothing here depends on the grid's
 - predictive_check (leave-one-input-out): for each input with new events in (t, t + horizon],
   rebuild the score at t WITHOUT that input's layers and count the share of its new events
   that land in the top `top_frac` of cells. Average across inputs. An input can't predict itself.
-- cross_input_agreement: Spearman rank correlation between per-input layers of DIFFERENT inputs
-  (over cells where either is above `agreement_eps`), averaged with pair weights wᵢ·wⱼ. Has data only when
+- cross_input_agreement: Spearman rank correlation between per-input layers (each input's
+  unweighted layer sum) of DIFFERENT inputs, over cells where either is above `agreement_eps`,
+  averaged with pair weights Wᵢ·Wⱼ (Wᵢ = sum of input i's layer weights). Has data only when
   at least two inputs have non-zero layers.
 
 Every method returns a `MethodScore` with `has_data`; cold start needs >= 2 methods with data.
@@ -210,43 +211,53 @@ def spearman(a: np.ndarray, b: np.ndarray) -> float | None:
     return float(np.corrcoef(ra, rb)[0, 1])
 
 
-def cross_input_agreement(window: CacheWindow, weights: np.ndarray, ctx: VerificationContext) -> MethodScore:
-    w = np.asarray(weights, dtype=float)
+def _agreement_pairs(window: CacheWindow, ctx: VerificationContext) -> tuple[list[tuple[str, str, float]], int]:
+    """Spearman rho for every pair of live inputs at every strided tick, from each input's
+    unweighted layer sum (ranks don't depend on weights; weights enter only as pair weights)."""
     inputs = sorted(set(ctx.layer_inputs))
     idx = {inp: [i for i, li in enumerate(ctx.layer_inputs) if li == inp] for inp in inputs}
-    total, wsum, n_ticks = 0.0, 0.0, 0
-    pairs: dict[str, list[float]] = {}
+    eps = ctx.params.agreement_eps
+    out: list[tuple[str, str, float]] = []
+    n_ticks = 0
     for k in _strided(window.t, ctx.params.stride_s):
-        # per-input layer: the input's layers summed with their (non-negative) weights, or plain sum if all 0
-        per = {}
-        for inp in inputs:
-            lw = np.maximum(w[idx[inp]], 0.0)
-            stack = window.layers[k][idx[inp]]
-            per[inp] = (np.einsum("l,lhw->hw", lw, stack) if lw.sum() > 0 else stack.sum(axis=0), lw.sum())
-        eps = ctx.params.agreement_eps
-        live = [inp for inp in inputs if (per[inp][0] > eps).any()]
+        per = {inp: window.layers[k][idx[inp]].sum(axis=0) for inp in inputs}
+        live = [inp for inp in inputs if (per[inp] > eps).any()]
         if len(live) < 2:
             continue
         n_ticks += 1
         for a_i, a in enumerate(live):
             for b in live[a_i + 1 :]:
-                la, lb = per[a][0], per[b][0]
-                support = (la > eps) | (lb > eps)
+                support = (per[a] > eps) | (per[b] > eps)
                 if support.sum() < 3:
                     continue
-                rho = spearman(la[support], lb[support])
-                if rho is None:
-                    continue
-                pw = max(per[a][1] * per[b][1], 1e-12)
-                total += pw * rho
-                wsum += pw
-                pairs.setdefault(f"{a}~{b}", []).append(rho)
-    if wsum == 0:
+                rho = spearman(per[a][support], per[b][support])
+                if rho is not None:
+                    out.append((a, b, rho))
+    return out, n_ticks
+
+
+def _input_weight(w: np.ndarray, layer_inputs: Sequence[str], inp: str) -> np.ndarray:
+    """Sum of an input's (non-negative) layer weights; works on [L] or [K, L]."""
+    cols = [i for i, li in enumerate(layer_inputs) if li == inp]
+    return np.maximum(w[..., cols], 0.0).sum(axis=-1)
+
+
+def cross_input_agreement(window: CacheWindow, weights: np.ndarray, ctx: VerificationContext) -> MethodScore:
+    w = np.asarray(weights, dtype=float)
+    pairs, n_ticks = _agreement_pairs(window, ctx)
+    if not pairs:
         return MethodScore(None, False, {"reason": "fewer than two inputs with non-zero layers"})
+    total = wsum = 0.0
+    per_pair: dict[str, list[float]] = {}
+    for a, b, rho in pairs:
+        pw = max(float(_input_weight(w, ctx.layer_inputs, a) * _input_weight(w, ctx.layer_inputs, b)), 1e-12)
+        total += pw * rho
+        wsum += pw
+        per_pair.setdefault(f"{a}~{b}", []).append(rho)
     return MethodScore(
         float(total / wsum),
         True,
-        {"pairs": {k: float(np.mean(v)) for k, v in pairs.items()}, "ticks": n_ticks},
+        {"pairs": {k: float(np.mean(v)) for k, v in per_pair.items()}, "ticks": n_ticks},
     )
 
 
@@ -276,3 +287,105 @@ def evaluate(
 def methods_with_data(results: Mapping[VerificationMethod, MethodScore]) -> list[VerificationMethod]:
     """Methods that had data. Cold start rejects flexible weight changes while this has < 2 entries."""
     return [m for m, r in results.items() if r.has_data]
+
+
+# -- batch (vectorized over K weight vectors) -------------------------------------------
+
+
+def _predictive_batch(window: CacheWindow, w: Any, ctx: VerificationContext, xp: Any) -> np.ndarray:
+    p = ctx.params
+    k_count = w.shape[0]
+    layer_inputs = np.array(ctx.layer_inputs, dtype=object)
+    hits: dict[str, Any] = {}
+    totals: dict[str, int] = {}
+    for k in _strided(window.t, p.stride_s):
+        t = window.t[k]
+        for inp, ev in ctx.events.items():
+            new = ev.between(t, t + p.horizon_s)
+            if not len(new):
+                continue
+            keep = np.nonzero(layer_inputs != inp)[0]
+            score = xp.clip(xp.einsum("kl,lhw->khw", w[:, keep], xp.asarray(window.layers[k][keep])), 0.0, 1.0)
+            if inp not in ctx.override_inputs:
+                score = xp.maximum(score, xp.asarray(window.overrides[k])[None])
+            thr = xp.quantile(score.reshape(k_count, -1), 1.0 - p.top_frac, axis=1)
+            vals = score[:, xp.asarray(new.row), xp.asarray(new.col)]
+            h = ((vals >= thr[:, None]) & (vals > 0)).sum(axis=1)
+            hits[inp] = hits.get(inp, 0) + h
+            totals[inp] = totals.get(inp, 0) + len(new)
+    if not totals:
+        return np.full(k_count, np.nan)
+    shares = xp.stack([hits[i] / totals[i] for i in totals])
+    return _to_numpy(shares.mean(axis=0), xp)
+
+
+def _authority_batch(window: CacheWindow, w: Any, ctx: VerificationContext, xp: Any) -> np.ndarray:
+    p = ctx.params
+    k_count = w.shape[0]
+    arrivals = [ev for inp, ev in ctx.events.items() if inp in ctx.authority_inputs]
+    if not arrivals or not len(window.t):
+        return np.full(k_count, np.nan)
+    t = np.concatenate([a.t for a in arrivals])
+    row = np.concatenate([a.row for a in arrivals])
+    col = np.concatenate([a.col for a in arrivals])
+    h, wd = window.layers.shape[2:]
+    rr, cc = np.indices((h, wd))
+    expected = max(1.0, p.lookback_s / _tick_s(window.t))
+    per_event = []
+    for ta, r, c in zip(t, row, col, strict=True):
+        before = np.nonzero((window.t < ta) & (window.t >= ta - p.lookback_s))[0]
+        if not len(before):
+            continue
+        within = xp.asarray(np.hypot(rr - r, cc - c) <= p.radius_m / ctx.cell_m)  # [H, W]
+        near = xp.zeros(k_count)
+        for k in before:
+            s = xp.clip(xp.einsum("kl,lhw->khw", w, xp.asarray(window.layers[k])), 0.0, 1.0)
+            top = s.reshape(k_count, -1).max(axis=1)
+            peak = s >= (top - 1e-12)[:, None, None]
+            near = near + ((peak & within[None]).reshape(k_count, -1).any(axis=1) & (top > 0))
+        per_event.append(xp.minimum(1.0, near / expected))
+    if not per_event:
+        return np.full(k_count, np.nan)
+    return _to_numpy(xp.stack(per_event).mean(axis=0), xp)
+
+
+def _agreement_batch(window: CacheWindow, w: np.ndarray, ctx: VerificationContext) -> np.ndarray:
+    pairs, _ = _agreement_pairs(window, ctx)  # weight-independent: computed once for all K
+    if not pairs:
+        return np.full(w.shape[0], np.nan)
+    total = np.zeros(w.shape[0])
+    wsum = np.zeros(w.shape[0])
+    for a, b, rho in pairs:
+        pw = np.maximum(_input_weight(w, ctx.layer_inputs, a) * _input_weight(w, ctx.layer_inputs, b), 1e-12)
+        total += pw * rho
+        wsum += pw
+    return total / wsum
+
+
+def _to_numpy(a: Any, xp: Any) -> np.ndarray:
+    return np.asarray(a.get() if hasattr(a, "get") else a, dtype=float)
+
+
+def evaluate_batch(
+    window: CacheWindow,
+    weights: np.ndarray,
+    ctx: VerificationContext,
+    methods: Sequence[VerificationMethod] = METHODS,
+    xp: Any = np,
+) -> dict[VerificationMethod, np.ndarray]:
+    """Like `evaluate` for K weight vectors at once ([K, L]); `xp` is numpy or cupy.
+    Returns per method a [K] numpy array, NaN where the method has no data.
+    Matches `evaluate` row by row (tested), so batch train scores and single holdout scores agree."""
+    w_np = np.atleast_2d(np.asarray(weights, dtype=float))
+    if len(ctx.layer_inputs) != len(window.layer_ids) or w_np.shape[1] != len(window.layer_ids):
+        raise ValueError("weights and layer_inputs must align with window.layer_ids")
+    w = xp.asarray(w_np)
+    out: dict[VerificationMethod, np.ndarray] = {}
+    for m in methods:
+        if m == "predictive_check":
+            out[m] = _predictive_batch(window, w, ctx, xp)
+        elif m == "authority_confirmation":
+            out[m] = _authority_batch(window, w, ctx, xp)
+        else:
+            out[m] = _agreement_batch(window, w_np, ctx)
+    return out
