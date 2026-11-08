@@ -73,10 +73,11 @@ Assigned by the lead on 2026-11-07. Paths are under `backend/app/` unless they s
 | Lead: scope, routing, contracts | `@ramgudur` | `CLAUDE.md`, `AGENTS.md`; approves every change to `core/models.py`, `frontend/src/api/types.ts`, `specs/*.json` | Routes issues and checks PR scope. |
 | Scoring model (physics-informed / physics-based ML) | `@kida-k:b` | `engine/operators/` (incl. `flow_source.py`), `engine/combine.py`, `engine/layer_cache.py`, `engine/verification.py`, `engine/backtest.py`, `engine/trust.py`, `reference/` | |
 | Frontend, sim, specs, fixtures, end-user path | `@AllenZheng-05` | `frontend/`, `sim/`, `specs/`, `backend/tests/fixtures/`, `api/instructions.py`, `api/debug.py`, `api/trace.py` | Back 2026-11-08. Issues #107 (instructions API + end-user page), #108 (step-7 live path). `specs/` changes still need lead approval. |
-| Engine runtime + tool layer | `@kida-k:a`; `tools/compiler_tools.py`: `@Navmi-Srithaj` | `engine/tick.py`, `engine/grid.py`, `engine/tiers.py`, `core/clock.py`, `tools/` (incl. `guards.py`, `message_guard.py`, `poi_tools.py`) | If seat a is unavailable, seat b reviews tick.py changes. |
+| Engine runtime + tool layer | `@kida-k:a`; `tools/compiler_tools.py`: `@kida-k:b` | `engine/tick.py`, `engine/grid.py`, `engine/tiers.py`, `core/clock.py`, `tools/` (incl. `guards.py`, `message_guard.py`, `poi_tools.py`) | If seat a is unavailable, seat b reviews tick.py changes. |
 | Routing, GPU path check | `@kida-k:a` | `engine/routing.py` | Issues #94, #95 (done); #86 (CuPy batch check, moved from seat b; touches `engine/backtest.py` only to fix GPU bugs, coordinate with seat b). |
 | Candidate generators, POI Labeler | `@kida-k:b` | `engine/candidates/`, `agents/poi_labeler.py` + its prompt | Issues #102, #106. |
-| API, data, connectors, Nemotron agents | `@Navmi-Srithaj` | `api/` (except `instructions.py`, `debug.py`, `trace.py`), `main.py`, `core/db.py`, `core/config.py`, `core/access.py`, `connectors/`, `agents/` (except `poi_labeler.py`) | |
+| API, data, connectors | `@AllenZheng-05` (from `@Navmi-Srithaj`, 2026-11-08) | `api/` (incl. `instructions.py`, `debug.py`, `trace.py`), `main.py`, `core/db.py`, `core/config.py`, `core/access.py`, `connectors/` | Navmi finishes #127 and the reviews she already has (#124, #130's main.py line), then takes no new tasks. |
+| Nemotron agents | `@kida-k:b` (from `@Navmi-Srithaj`, 2026-11-08) | `agents/` (incl. `compiler.py`, `critic.py`, `scout.py`, `llm.py`, `loop.py`, prompts), `tools/compiler_tools.py` | Scout #105. |
 
 ## 5. Escalation: when to stop and ask
 
