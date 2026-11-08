@@ -175,6 +175,7 @@ OPENROUTER_RPM=18          # free models: 20 RPM; daily cap of 50 unless the acc
 TAVILY_API_KEY=
 NOMINATIM_USER_AGENT=      # required by Nominatim policy; generic app name + team contact
 SQLITE_PATH=./data/app.db
+COMPILE_MIN_GAP_S=10       # optional: minimum seconds between compiles of one app (/compile returns 429 + Retry-After)
 DEMO_MODE=0                # 1 enables /v1/debug/* (ground-truth error chart)
 ```
 
@@ -216,6 +217,7 @@ Ingest keys and authority keys are generated per app at activation and stored in
 - `GET /v1/apps/{app}/label-proposals`, which returns `LabelProposal[] {id, label, sensitive, destination, why, status: open|accepted|dismissed, t}`.
 - `POST /v1/apps/{app}/label-proposals/{id}/accept`, optional body `{sensitive?, destination?}`, which returns `{proposal, label_set}`. It adds the label to the running spec and writes a `spec_edit` Change.
 - `POST /v1/apps/{app}/label-proposals/{id}/dismiss`.
+- `POST /v1/apps/{app}/scout`, body `ScoutRequest {input_id, request (1..500 chars)}`, returns `202 ScoutJobAccepted {job_id, app_id, input_id}`. 409 if the app isn't active; 422 for a push input. The request text goes only to the authority trace.
 - The POI Labeler proposes labels with the `propose_label` tool (at most 5 open per app). `why` is agent text and is authority-only.
 
 **Event (push):** `POST /v1/apps/{app}/inputs/{input}/events`
@@ -280,7 +282,8 @@ Ingest keys and authority keys are generated per app at activation and stored in
 
 **Verification** (`engine/verification.py`):
 - `authority_confirmation`: when an authority input arrives, how early and how close each layer's peak was.
-- `predictive_check` (**leave-one-input-out**): for each input with new events in (t, t+60 s], recompute the score map with that input's layers removed, then measure the share of its new events that land in the top 10% of cells. Average across inputs. This stops crowd events from "predicting" themselves.
+- `predictive_check` (**leave-one-input-out**): for each input with new events in (t, t+60 s], recompute the score map with that input's layers removed, then measure the share of its new events that land in the top 10% of cells (its hit rate). The value is the **weight-share-weighted** mean of the hit rates (share = the input's weight / total weight), so inputs the others corroborate gain value as they gain weight. With equal weights it equals the plain mean. An input's events are never scored against a map that includes it, which stops crowd events from "predicting" themselves (#211).
+- **Weight floor:** no flexible weight may go below 10% of its creation-time value, whoever moves it (#211).
 - `cross_input_agreement`: rank correlation between layers from **different inputs**. It counts as "having data" only when at least two independent inputs have non-zero layers.
 
 **Backtests** (`engine/backtest.py`):
@@ -488,3 +491,11 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
   - The Compiler gives a single-location field weight 0, or uses it as a vector field (live: 4 of 4).
   - Dev reverts keep the flexible ±25% per-step limit (Ram: devs rarely set weights by hand).
   - Core contracts now cover compile status/failure, revert, and label proposals.
+- **2026-11-08:** How weights work (Ram):
+  - The Compiler (Nemotron) picks the factors (operators) and their starting weights.
+  - The scoring engine combines them in code.
+  - The Critic (Nemotron) corrects the weights, gated by held-out backtests.
+- **2026-11-08:** #211: `predictive_check` is weight-share-weighted, so crowd-only apps can tune their weights. A flexible weight never goes below 10% of its creation-time value. Also approved:
+  - `COMPILE_MIN_GAP_S`, an optional env var, and `/compile` returning 429 (#212).
+  - The Scout contract (#209).
+  - Kida A takes data retention.
