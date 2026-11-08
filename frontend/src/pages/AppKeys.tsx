@@ -6,8 +6,9 @@ import { useEffect, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { loadKey, saveKey } from "../api/authorityKey";
 import { api } from "../api/client";
-import type { AppSpec, FieldType, InputSpec } from "../api/types";
+import type { AppSpec, FieldType, InputSpec, WebhookMapping } from "../api/types";
 import { AppShell, Breadcrumb, CopyButton, StatusChip, primaryBtn } from "../components/app/AppShell";
+import { webhookMappingParts } from "../components/sources/WebhookSummary";
 import { useBuilderStore } from "../store/useBuilderStore";
 
 const INGEST_PLACEHOLDER = "<your ingest key>";
@@ -77,6 +78,147 @@ function exampleFor(shell: Shell, base: string, spec: AppSpec, input: InputSpec,
   const url = `${base}/v1/apps/${encodeURIComponent(spec.app_id)}/inputs/${encodeURIComponent(input.id)}/events`;
   const body = sampleBody(spec, input);
   return shell === "bash" ? curlBash(url, body, ingestKey) : irmPowerShell(url, body, ingestKey);
+}
+
+/** Put `value` at a dotted path ("data.0.lat"), creating objects, or lists for integer parts. A path that
+ *  runs through a value already set elsewhere is skipped (the sample stays valid JSON either way). */
+function setPath(root: Record<string, unknown> | unknown[], path: string, value: unknown) {
+  const parts = path.split(".");
+  let node: Record<string, unknown> | unknown[] = root;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i] ?? "";
+    if (Array.isArray(node) && !/^\d+$/.test(part)) return;
+    const key: string | number = Array.isArray(node) ? Number(part) : part;
+    const bag = node as Record<string | number, unknown>;
+    if (i === parts.length - 1) {
+      bag[key] = value;
+      return;
+    }
+    const cur = bag[key];
+    if (cur === undefined) {
+      const fresh: Record<string, unknown> | unknown[] = /^\d+$/.test(parts[i + 1] ?? "") ? [] : {};
+      bag[key] = fresh;
+      node = fresh;
+    } else if (cur !== null && typeof cur === "object") {
+      node = cur as Record<string, unknown> | unknown[];
+    } else {
+      return;
+    }
+  }
+}
+
+/** Fill list holes left by an index past 0 (JSON has no holes) with empty objects. */
+function fillHoles(v: unknown): unknown {
+  if (Array.isArray(v)) return Array.from(v, (x) => (x === undefined ? {} : fillHoles(x)));
+  if (v !== null && typeof v === "object") {
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, fillHoles(x)]));
+  }
+  return v;
+}
+
+/** A minimal body the mapping reads: one item at the grid centre, wrapped at items_path when set. */
+function sampleWebhookBody(spec: AppSpec, input: InputSpec, w: WebhookMapping): unknown {
+  const b = spec.grid.bbox;
+  const item: Record<string, unknown> = {};
+  setPath(item, w.lat, Number(((b.min_lat + b.max_lat) / 2).toFixed(6)));
+  setPath(item, w.lon, Number(((b.min_lon + b.max_lon) / 2).toFixed(6)));
+  if (w.ts) setPath(item, w.ts, TS_TOKEN);
+  if (w.user_id) setPath(item, w.user_id, "device-1");
+  for (const f of input.fields ?? []) {
+    const path = w.fields?.[f.name];
+    if (path) setPath(item, path, sampleValue(f.type));
+  }
+  const items = (w.items_path ?? "").trim();
+  if (!items) return fillHoles(item);
+  const root: Record<string, unknown> | unknown[] = /^\d+(\.|$)/.test(items) ? [] : {};
+  setPath(root, items, [item]);
+  return fillHoles(root);
+}
+
+type TsFmt = WebhookMapping["ts_format"];
+
+/** bash: the pretty JSON body, single-quoted; the time is spliced in from `date` when the command runs. */
+function webhookBash(url: string, body: unknown, fmt: TsFmt, ingestKey: string): string {
+  const now =
+    fmt === "epoch_s"
+      ? `'"$(date +%s)"'`
+      : fmt === "epoch_ms"
+        ? `'"$(date +%s)000"'`
+        : `"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"`;
+  const json = JSON.stringify(body, null, 2).replace(/'/g, `'\\''`).replace(`"${TS_TOKEN}"`, now);
+  return [
+    `curl -X POST "${url}" \\`,
+    `  -H "Content-Type: application/json" \\`,
+    `  -H "X-Ingest-Key: ${ingestKey}" \\`,
+    `  -d '${json}'`,
+  ].join("\n");
+}
+
+/** A PowerShell literal for a JSON value: hashtables and @() lists, the time as a clock expression. */
+function psLiteral(v: unknown, fmt: TsFmt, pad: string): string {
+  if (v === TS_TOKEN) {
+    return fmt === "epoch_s"
+      ? "[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()"
+      : fmt === "epoch_ms"
+        ? "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()"
+        : "(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')";
+  }
+  const inner = `${pad}  `;
+  if (Array.isArray(v)) return `@(\n${v.map((x) => `${inner}${psLiteral(x, fmt, inner)}`).join(",\n")}\n${pad})`;
+  if (v !== null && typeof v === "object") {
+    const rows = Object.entries(v as Record<string, unknown>).map(([k, x]) => `${inner}${psStr(k)} = ${psLiteral(x, fmt, inner)}`);
+    return `@{\n${rows.join("\n")}\n${pad}}`;
+  }
+  return v === null ? "$null" : psVal(v);
+}
+
+/** PowerShell (5.1 and 7): the nested body through ConvertTo-Json -Depth, so lists stay lists. */
+function webhookPowerShell(url: string, body: unknown, fmt: TsFmt, ingestKey: string): string {
+  return [
+    `$body = ${psLiteral(body, fmt, "")}`,
+    `Invoke-RestMethod -Method Post -Uri ${psStr(url)} \``,
+    `  -ContentType 'application/json' \``,
+    `  -Headers @{ 'X-Ingest-Key' = ${psStr(ingestKey)} } \``,
+    `  -Body (ConvertTo-Json -InputObject $body -Depth 20)`,
+  ].join("\n");
+}
+
+function webhookExampleFor(shell: Shell, url: string, spec: AppSpec, input: InputSpec, w: WebhookMapping, key: string): string {
+  const body = sampleWebhookBody(spec, input, w);
+  const fmt = w.ts_format ?? "iso";
+  return shell === "bash" ? webhookBash(url, body, fmt, key) : webhookPowerShell(url, body, fmt, key);
+}
+
+/** The webhook URL for one push input, what its mapping reads, and an example that sends a matching body. */
+function WebhookBlock(props: { spec: AppSpec; input: InputSpec; w: WebhookMapping; shell: Shell; url: string; ingestKey: string }) {
+  const { spec, input, w, shell, url, ingestKey } = props;
+  return (
+    <div className="space-y-2 border-t border-inkSoft/25 pt-3">
+      <p className="text-[13px] text-slate">
+        <span className="font-semibold">Webhook URL</span>{" "}
+        <span className="text-ink">for another service's JSON, read with your mapping (ingest key as X-Ingest-Key or ?key=)</span>
+      </p>
+      <div className="flex items-center gap-2">
+        <code className="min-w-0 flex-1 break-all rounded-lg bg-white/70 px-2.5 py-1.5 font-mono text-[12.5px] text-slate">{url}</code>
+        <CopyButton value={url} />
+      </div>
+      <dl aria-label={`${input.id} webhook mapping`} className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[12.5px]">
+        {webhookMappingParts(w).map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="text-ink">{k}</dt>
+            <dd className="min-w-0 break-all font-mono text-slate">← {v}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="max-w-[70ch] text-[12.5px] text-ink">
+        The example sends one item shaped like your mapping, at the centre of your grid, stamped with the time you run it.
+      </p>
+      <CodeBlock
+        code={webhookExampleFor(shell, url, spec, input, w, ingestKey)}
+        label={`${shell === "bash" ? "curl" : "PowerShell"} webhook example for ${input.id}`}
+      />
+    </div>
+  );
 }
 
 function ShellTabs({ shell, onChange }: { shell: Shell; onChange: (s: Shell) => void }) {
@@ -274,23 +416,14 @@ export default function AppKeys() {
                 label={`${shell === "bash" ? "curl" : "PowerShell"} example for ${i.id}`}
               />
               {i.webhook && (
-                <div className="space-y-1">
-                  <p className="text-[13px] text-slate">
-                    <span className="font-semibold">Webhook URL</span>{" "}
-                    <span className="text-ink">for another service's JSON, mapped by your field paths (ingest key as X-Ingest-Key or ?key=)</span>
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <code className="min-w-0 flex-1 break-all rounded-lg bg-white/70 px-2.5 py-1.5 font-mono text-[12.5px] text-slate">
-                      {apiBase}/v1/apps/{appId}/webhooks/{i.id}
-                    </code>
-                    <CopyButton value={`${apiBase}/v1/apps/${encodeURIComponent(appId)}/webhooks/${encodeURIComponent(i.id)}`} />
-                  </div>
-                  <p className="font-mono text-[12px] text-ink">
-                    lat ← {i.webhook.lat} · lon ← {i.webhook.lon}
-                    {i.webhook.items_path ? ` · items ← ${i.webhook.items_path}` : ""}
-                    {i.webhook.ts ? ` · ts ← ${i.webhook.ts}` : ""}
-                  </p>
-                </div>
+                <WebhookBlock
+                  spec={spec}
+                  input={i}
+                  w={i.webhook}
+                  shell={shell}
+                  url={`${apiBase}/v1/apps/${encodeURIComponent(appId)}/webhooks/${encodeURIComponent(i.id)}`}
+                  ingestKey={ingestKey}
+                />
               )}
             </article>
           ))}

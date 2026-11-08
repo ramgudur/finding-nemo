@@ -1,6 +1,8 @@
 // Persistent bottom bar for each step: Back on the left, what's still missing (or a ready line) in the middle,
-// and the step's primary action on the right. The action stays disabled until the step is valid.
-import { ArrowLeft, ArrowRight } from "lucide-react";
+// and the step's primary action on the right. The action stays disabled until the step is valid. With several
+// blocking problems the bar shows the first and a "+N more" toggle that opens the full list above the bar.
+import { ArrowLeft, ArrowRight, ChevronDown } from "lucide-react";
+import { useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 
@@ -18,8 +20,35 @@ interface Props {
 
 export function StepFooter({ back, summary, problems, readyText, action, next, live = true }: Props) {
   const blocked = problems.length > 0;
+  const more = problems.length - 1;
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const showList = open && more > 0;
+  useEffect(() => {
+    if (more <= 0) setOpen(false);
+  }, [more]);
   return (
-    <div className="fixed inset-x-0 bottom-0 z-20 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-5">
+    <div
+      className="fixed inset-x-0 bottom-0 z-20 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-5"
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && showList) {
+          e.stopPropagation();
+          setOpen(false);
+        }
+      }}
+    >
+      {showList && (
+        <div className="mx-auto mb-2 max-w-3xl rounded-[18px] border border-white/70 bg-cream/95 px-4 py-3 shadow-[0_18px_50px_-24px_rgba(53,89,107,0.7)] backdrop-blur-md">
+          <p className="text-xs font-semibold text-slate">Still to fix before you continue</p>
+          <ul id={listId} className="mt-1.5 max-h-[40vh] list-disc space-y-1 overflow-y-auto pl-4 text-[13px] text-ink marker:text-inkSoft">
+            {problems.map((x) => (
+              <li key={x} className="[overflow-wrap:anywhere]">
+                {x}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="mx-auto flex max-w-3xl items-center gap-3 rounded-[24px] border border-white/70 bg-cream/90 px-2 py-2 sm:px-3 sm:py-2.5 shadow-[0_18px_50px_-24px_rgba(53,89,107,0.7)] backdrop-blur-md sm:px-4">
         {back ? (
           <Link
@@ -41,6 +70,22 @@ export function StepFooter({ back, summary, problems, readyText, action, next, l
           >
             {blocked ? problems[0] : readyText}
           </p>
+          {more > 0 && (
+            <button
+              type="button"
+              aria-expanded={showList}
+              aria-controls={showList ? listId : undefined}
+              onClick={() => setOpen((o) => !o)}
+              className="hit relative flex w-fit items-center gap-0.5 rounded-md text-xs font-semibold text-slate underline underline-offset-[3px] hover:text-primaryHover"
+            >
+              {showList ? "Hide the list" : `+${more} more`}
+              <ChevronDown
+                size={12}
+                aria-hidden
+                className={`transition-transform duration-150 motion-reduce:transition-none ${showList ? "" : "rotate-180"}`}
+              />
+            </button>
+          )}
         </div>
         {action}
         {next && (

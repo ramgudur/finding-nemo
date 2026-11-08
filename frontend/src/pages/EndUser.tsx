@@ -336,7 +336,7 @@ export function EndUser({ appId }: { appId: string }) {
   const showIns = live && ins !== null && !outside;
 
   return (
-    <div className="mx-auto grid max-w-[640px] gap-3 px-4 pb-[calc(16px+env(safe-area-inset-bottom))] pt-4">
+    <div className="mx-auto grid max-w-[640px] gap-3 pb-[calc(16px+env(safe-area-inset-bottom))] pl-[max(16px,env(safe-area-inset-left))] pr-[max(16px,env(safe-area-inset-right))] pt-[max(16px,env(safe-area-inset-top))]">
       <section
         aria-live="polite"
         className={`rounded-lg border-2 px-4 py-3.5 text-[20px] leading-snug ${panel} ${showIns && stale ? "opacity-70" : ""}`}
