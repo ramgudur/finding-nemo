@@ -1,4 +1,4 @@
-"""main.py lifespan: the tick engine, Critic, POI Labeler and connector engine start on startup and
+"""main.py lifespan: the tick engine, Critic, POI Labeler, connector engine and Scout runner start on startup and
 stop on shutdown. Fakes only; no network, no LLM."""
 
 from fastapi.testclient import TestClient
@@ -46,17 +46,19 @@ def build(log, **over):
         "critic_scheduler": FakeCritic(log),
         "poi_labeler_scheduler": FakeLoop("poi_labeler", log),
         "connector_engine": FakeLoop("connectors", log),
+        "scout_runner": FakeLoop("scout", log),
     }
     parts.update(over)
     return create_app(db=Db(":memory:"), autostart_engine=True, **parts), parts
 
 
-def test_startup_and_shutdown_run_all_four_loops_in_order():
+def test_startup_and_shutdown_run_all_five_loops_in_order():
     log: list[str] = []
     app, parts = build(log)
     with TestClient(app):
-        assert log == ["start engine", "start critic", "start poi_labeler", "start connectors"]
-    assert log[4:] == ["stop connectors", "stop poi_labeler", "stop critic", "stop engine"]
+        assert log == ["start engine", "start critic", "start poi_labeler", "start connectors", "start scout"]
+    assert log[5:] == ["stop scout", "stop connectors", "stop poi_labeler", "stop critic", "stop engine"]
+    assert app.state.scout_runner is parts["scout_runner"]
     assert app.state.poi_labeler_scheduler is parts["poi_labeler_scheduler"]
     assert app.state.connector_engine is parts["connector_engine"]
 
@@ -66,7 +68,7 @@ def test_one_failing_stop_does_not_leave_others_running():
     app, _ = build(log, poi_labeler_scheduler=FakeLoop("poi_labeler", log, fail_stop=True))
     with TestClient(app):
         pass
-    assert log[4:] == ["stop connectors", "stop poi_labeler", "stop critic", "stop engine"]
+    assert log[5:] == ["stop scout", "stop connectors", "stop poi_labeler", "stop critic", "stop engine"]
 
 
 def test_nothing_starts_without_autostart():
@@ -76,6 +78,7 @@ def test_nothing_starts_without_autostart():
         "critic_scheduler": FakeCritic(log),
         "poi_labeler_scheduler": FakeLoop("poi_labeler", log),
         "connector_engine": FakeLoop("connectors", log),
+        "scout_runner": FakeLoop("scout", log),
     }
     with TestClient(create_app(db=Db(":memory:"), autostart_engine=False, **parts)):
         pass
@@ -94,3 +97,12 @@ def test_default_poi_labeler_shares_the_critics_llm_router():
         autostart_engine=False,
     )
     assert app.state.poi_labeler_scheduler.llm is critic.llm
+
+
+def test_default_scout_and_connector_locator_share_the_router():
+    """The Scout runner and the connector engine's article locator use the same LlmRouter as the Critic."""
+    log: list[str] = []
+    critic = FakeCritic(log)
+    app = create_app(db=Db(":memory:"), engine=FakeEngine(log), critic_scheduler=critic, autostart_engine=False)
+    assert app.state.scout_runner.llm is critic.llm
+    assert app.state.connector_engine.locate is not None  # RSS items without coordinates get located

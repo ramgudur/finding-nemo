@@ -14,18 +14,21 @@ from app.agents.compiler import CompilerCache
 from app.agents.critic import CriticScheduler
 from app.agents.llm import LlmRouter
 from app.agents.poi_labeler import PoiLabelerScheduler
+from app.agents.scout import ScoutRunner, article_extractor
 from app.api import apps as apps_api
 from app.api import debug as debug_api
 from app.api import ingest as ingest_api
 from app.api import instructions as instructions_api
 from app.api import outputs as outputs_api
 from app.api import trace as trace_api
+from app.api import webhooks as webhooks_api
 from app.api import ws as ws_api
-from app.connectors.engine import ConnectorEngine
+from app.connectors.engine import ConnectorEngine, make_extract_locator
 from app.core.config import get_settings
 from app.core.db import Db
 from app.engine.operators.base import Events
 from app.engine.tick import TickEngine, empty_events
+from app.tools.geo_tools import geocode_place
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +58,7 @@ def create_app(
     compiler_cache: CompilerCache | None = None,
     poi_labeler_scheduler: PoiLabelerScheduler | None = None,
     connector_engine: ConnectorEngine | None = None,
+    scout_runner: ScoutRunner | None = None,
     autostart_engine: bool = True,
 ) -> FastAPI:
     db = db if db is not None else Db(get_settings().sqlite_path)
@@ -69,7 +73,13 @@ def create_app(
     poi_labeler_scheduler = (
         poi_labeler_scheduler if poi_labeler_scheduler is not None else PoiLabelerScheduler(db, engine, llm=llm)
     )
-    connector_engine = connector_engine if connector_engine is not None else ConnectorEngine(db)
+    # RSS items without coordinates: the Scout's per-article extraction + an area-bounded geocoder (#135)
+    connector_engine = (
+        connector_engine
+        if connector_engine is not None
+        else ConnectorEngine(db, locate=make_extract_locator(article_extractor(db, engine, llm=llm), geocode_place))
+    )
+    scout_runner = scout_runner if scout_runner is not None else ScoutRunner(db, engine, llm=llm)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -84,10 +94,11 @@ def create_app(
             critic_scheduler.start()
             poi_labeler_scheduler.start()
             connector_engine.start()
+            scout_runner.start()
         yield
         if autostart_engine:
             # Reverse order; one loop failing to stop must not leave the others running.
-            for loop_ in (connector_engine, poi_labeler_scheduler, critic_scheduler, engine):
+            for loop_ in (scout_runner, connector_engine, poi_labeler_scheduler, critic_scheduler, engine):
                 try:
                     await loop_.stop()
                 except Exception:  # noqa: BLE001
@@ -101,12 +112,14 @@ def create_app(
     fastapi_app.state.compiler_cache = compiler_cache
     fastapi_app.state.poi_labeler_scheduler = poi_labeler_scheduler
     fastapi_app.state.connector_engine = connector_engine
+    fastapi_app.state.scout_runner = scout_runner
     fastapi_app.include_router(apps_api.router)
     fastapi_app.include_router(ingest_api.router)
     fastapi_app.include_router(outputs_api.router)
     fastapi_app.include_router(ws_api.router)
     fastapi_app.include_router(instructions_api.router)  # public end-user instructions
     fastapi_app.include_router(trace_api.router)  # authority-only console reads + dev pin
+    fastapi_app.include_router(webhooks_api.router)  # 501 stub (CLAUDE.md Scope)
     if get_settings().demo_mode:  # /v1/debug/* exists only in demo mode; it alone reads sim ground truth (rule 9)
         debug_api.install(fastapi_app, engine)
 
