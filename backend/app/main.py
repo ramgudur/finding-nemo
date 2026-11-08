@@ -9,7 +9,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.agents.compiler import CompilerCache
 from app.agents.critic import CriticScheduler
+from app.agents.llm import LlmRouter
 from app.api import apps as apps_api
 from app.api import debug as debug_api
 from app.api import ingest as ingest_api
@@ -43,11 +45,19 @@ def create_app(
     db: Db | None = None,
     engine: TickEngine | None = None,
     critic_scheduler: CriticScheduler | None = None,
+    llm: LlmRouter | None = None,
+    compiler_cache: CompilerCache | None = None,
     autostart_engine: bool = True,
 ) -> FastAPI:
     db = db if db is not None else Db(get_settings().sqlite_path)
     engine = engine if engine is not None else TickEngine(DbEventSource(db), trust=db.list_trust)
     critic_scheduler = critic_scheduler if critic_scheduler is not None else CriticScheduler(db, engine)
+    # Shares the Critic's router by default (one set of provider clients/token buckets),
+    # unless a caller (tests, mainly) injects its own.
+    llm = llm if llm is not None else critic_scheduler.llm
+    # A fresh cache per app instance (never the module-level default) so tests never leak
+    # a compiled spec across unrelated test functions sharing the same process.
+    compiler_cache = compiler_cache if compiler_cache is not None else CompilerCache()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -69,6 +79,8 @@ def create_app(
     fastapi_app.state.db = db
     fastapi_app.state.engine = engine
     fastapi_app.state.critic_scheduler = critic_scheduler
+    fastapi_app.state.llm = llm
+    fastapi_app.state.compiler_cache = compiler_cache
     fastapi_app.include_router(apps_api.router)
     fastapi_app.include_router(ingest_api.router)
     fastapi_app.include_router(outputs_api.router)
