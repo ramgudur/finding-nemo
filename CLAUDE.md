@@ -113,8 +113,8 @@ backend/
       backtest.py           single-candidate (re-runs operators) and batch (vectorized; numpy or CuPy)
       routing.py            grid A* for end-user instructions
       operators/            registry.py, flow_source.py, density.py, dwell.py, field.py, event_points.py, override.py
-      candidates/           registry.py, dwell_clusters.py, flow_endpoints.py
-                            (persistent_hotspots.py and event_clusters.py stay on disk but are UNREGISTERED)
+      candidates/           registry.py, dwell_clusters.py, flow_endpoints.py, event_clusters.py,
+                            persistent_hotspots.py
     agents/
       llm.py                OpenAI-compatible clients per provider, per-provider token buckets, retry/backoff
       loop.py               generic tool-calling loop; writes TraceEntries; caps iterations
@@ -259,7 +259,9 @@ Ingest keys and authority keys are generated per app at activation and stored in
 - Trust is applied inside operators, so normalized layers don't depend on weights.
 - `layer_cache.py` stores each tick's normalized stack `[L, H, W]` and override mask for the replay window.
 
-**Candidates** (`engine/candidates/`): only `dwell_clusters` and `flow_endpoints` are registered. They output candidates, never labels.
+**Candidates** (`engine/candidates/`): four generators cover apps with or without tracks. They output candidates, never labels.
+- `dwell_clusters` (from `dwell`), `flow_endpoints` (from `flow_source`) and `event_clusters` (from `event_points`' located documents) read operator extras.
+- `persistent_hotspots` reads the tick's hotspots, so any app gets candidates where the combined score stays high. It is skipped where an operator candidate already covers the place, and followed across ticks by position.
 
 **Verification** (`engine/verification.py`):
 - `authority_confirmation`: when an authority input arrives, how early and how close each layer's peak was.
@@ -337,7 +339,6 @@ The engine reads time only from `core/clock.py`. Use fixed seeds in tests.
 - **Stubbed:**
   - webhooks (501)
   - HTML connector (the config type is rejected)
-  - `persistent_hotspots` and `event_clusters` (unregistered)
   - Scout periodic re-evaluation (off; connectors still poll)
 - **Not building now** (pitch as future/production paths only):
   - cuOpt (future: dispatching responders across several shelter-in-place groups)
@@ -448,3 +449,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-08:** Rule 13 added: we code the platform, never the demos. Wildfire and Bird tracking are built in the video by using the platform. No demo specs, demo-specific code, cached compiles or rehearsal builds ahead of time; test with neutral examples; fix needs as general platform features. #154 (rehearsals) is closed.
 - **2026-11-08:** Rule 13 clarified: data simulators in `sim/` are allowed. They only post through the public ingest API and never create or configure the app; #153 continues. The next platform work on Ram's machine is POI candidates: apps without tracks currently get no candidates, so register general generators for them.
 - **2026-11-08:** Demo scripting is a human task after the platform is finished; it doubles as the test of the platform. Removed `tools/demo` and `docs/DEMO.md`, and cut the per-demo plans from the Demo apps section. #108 closed; #153 (wildfire sim) on hold until humans script the demos. `tools/phone_check.py` stays: it checks the platform's end-user page at phone width.
+- **2026-11-08:** POI candidates for every app (#160): `persistent_hotspots` (from the tick's hotspots) and `event_clusters` (from `event_points` documents, which now carry a capped `docs` list of positions in their extras) are registered. An app without tracks used to get no candidates, so the POI Labeler could name nothing. Hotspot candidates are skipped where an operator candidate already covers the place, and are tracked by position. Scope updated.
