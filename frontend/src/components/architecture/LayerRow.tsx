@@ -97,7 +97,7 @@ export function LayerRow({ layer, info, weight, maxWeight, status, selected, onT
         <motion.div
           initial={{ opacity: 0, y: -4 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.22 }}
+          transition={{ duration: 0.18 }}
           className="mx-2 -mt-2 rounded-b-2xl border border-t-0 border-paleWater bg-cream/60 px-3.5 pb-3 pt-4"
         >
           {children}
@@ -109,7 +109,7 @@ export function LayerRow({ layer, info, weight, maxWeight, status, selected, onT
 
 export const rowVariants = {
   hidden: { opacity: 0, y: 8 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.32, ease: [0.22, 1, 0.36, 1] } },
+  show: { opacity: 1, y: 0, transition: { duration: 0.2, ease: [0.16, 1, 0.3, 1] } },
 };
 
 export default LayerRow;
