@@ -65,7 +65,7 @@
   ],
   "outputs": {
     "layers": [
-      { "id": "score", "visibility": "public" },
+      { "id": "score", "visibility": "authority" },
       { "id": "tags.dwell", "visibility": "authority" },
       { "id": "tags.density", "visibility": "authority" },
       { "id": "wind.field", "visibility": "public" }

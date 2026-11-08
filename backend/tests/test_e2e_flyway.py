@@ -93,9 +93,9 @@ def test_hotspots_sit_on_the_occupied_stopovers(run):
         assert min(_dist(h["lat"], h["lon"], s["lat"], s["lon"]) for s in sites.values()) < NEAR_M
 
 
-def test_public_sees_the_score_but_not_raw_tags(run):
+def test_public_sees_only_the_vector_field(run):
     public = run["public_map"]["layers"]
-    assert set(public) == {"score", "wind.field"}  # the spec's public layers only
+    assert set(public) == {"wind.field"}  # score derives from private tag layers, so it is authority too
     assert public["wind.field"]["features"] == []  # no wind data until the connector engine lands
-    assert {"tags.dwell", "tags.density"} <= set(run["map"]["layers"])
+    assert {"score", "tags.dwell", "tags.density"} <= set(run["map"]["layers"])
     assert run["public_hotspots"] == []  # hotspots built from authority-only tag layers stay authority
