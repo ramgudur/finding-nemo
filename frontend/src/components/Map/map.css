@@ -1,0 +1,64 @@
+/* Heatmap styling for components/Map. Watercolor-console look: washed-out tiles, translucent cells,
+   soft glow under hot cells, gentle value transitions. prefers-reduced-motion is handled both here
+   and by globals.css's backstop. */
+
+.hm-map.leaflet-container {
+  background: #dceef1; /* mist: never pure white while tiles load */
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+/* Muted, washed-out base map so the data reads first. */
+.hm-map .leaflet-tile-pane {
+  filter: grayscale(0.6) sepia(0.2) hue-rotate(150deg) saturate(0.5) brightness(1.1) contrast(0.72);
+  opacity: 0.62;
+}
+
+.hm-map .leaflet-hm-glow-pane svg {
+  filter: blur(14px);
+  opacity: 0.5;
+}
+
+.hm-cell {
+  transition:
+    fill-opacity 700ms ease,
+    fill 700ms ease;
+}
+
+.hm-hotspot {
+  transition: stroke-opacity 500ms ease;
+}
+
+.hm-map .leaflet-control-zoom a {
+  background: rgba(240, 235, 221, 0.9);
+  color: #35596b;
+  border-color: rgba(99, 143, 145, 0.25);
+}
+.hm-map .leaflet-control-zoom {
+  border: 1px solid rgba(99, 143, 145, 0.25) !important;
+  box-shadow: 0 2px 8px rgba(53, 89, 107, 0.08);
+}
+.hm-map .leaflet-control-attribution {
+  background: rgba(240, 235, 221, 0.75);
+  color: #8199a0;
+  font-size: 10px;
+}
+.hm-map .leaflet-control-attribution a {
+  color: #638f91;
+}
+
+.hm-tooltip.leaflet-tooltip {
+  background: rgba(240, 235, 221, 0.95);
+  border: 1px solid rgba(99, 143, 145, 0.3);
+  color: #35596b;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  box-shadow: 0 4px 14px rgba(53, 89, 107, 0.12);
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hm-cell,
+  .hm-hotspot {
+    transition: none;
+  }
+}
