@@ -34,3 +34,103 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------------------------------------------------------------------------------------------
+   Sources page (fe-sources): watercolor sky wash, drifting mist, paper grain, pills, map tint.
+   --------------------------------------------------------------------------------------------- */
+.sky-wash {
+  background-color: #d5e8eb;
+  background-image:
+    radial-gradient(ellipse 70% 45% at 18% 8%, rgba(255, 255, 255, 0.75), transparent 70%),
+    radial-gradient(ellipse 55% 40% at 85% 18%, rgba(169, 210, 213, 0.55), transparent 72%),
+    radial-gradient(ellipse 60% 50% at 70% 70%, rgba(187, 220, 227, 0.8), transparent 70%),
+    radial-gradient(ellipse 65% 45% at 10% 85%, rgba(141, 185, 183, 0.28), transparent 70%),
+    linear-gradient(180deg, #cfe5ec 0%, #d9ecef 45%, #dcedf0 100%);
+  background-attachment: fixed;
+}
+.sky-mist > span {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(48px);
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0));
+  will-change: transform;
+}
+.sky-mist .mist-a {
+  width: 62vw;
+  height: 26vw;
+  left: -12vw;
+  top: 16vh;
+  animation: mist-drift-a 46s ease-in-out infinite alternate;
+}
+.sky-mist .mist-b {
+  width: 48vw;
+  height: 22vw;
+  right: -10vw;
+  top: 44vh;
+  opacity: 0.8;
+  animation: mist-drift-b 58s ease-in-out infinite alternate;
+}
+.sky-mist .mist-c {
+  width: 70vw;
+  height: 24vw;
+  left: 14vw;
+  bottom: -8vw;
+  opacity: 0.65;
+  animation: mist-drift-a 64s ease-in-out infinite alternate-reverse;
+}
+@keyframes mist-drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(8vw, -2vh, 0) scale(1.06); }
+}
+@keyframes mist-drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1.04); }
+  to { transform: translate3d(-7vw, 3vh, 0) scale(0.97); }
+}
+.paper-grain {
+  z-index: 0;
+  opacity: 0.09;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.32  0 0 0 0 0.42  0 0 0 0 0.46  0 0 0 0.9 0'/></filter><rect width='100%25' height='100%25' filter='url(%23g)'/></svg>");
+}
+@media (prefers-reduced-motion: reduce) {
+  .sky-mist > span { animation: none !important; }
+}
+
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 9999px;
+  padding: 0.45rem 0.95rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.2s, box-shadow 0.2s, opacity 0.2s;
+}
+.pill-btn:not(:disabled):hover { transform: translateY(-1px); }
+.pill-btn:disabled { cursor: not-allowed; opacity: 0.5; }
+.pill-primary {
+  background: #4f80b0;
+  color: #f0ebdd;
+  box-shadow: 0 6px 18px -10px rgba(47, 88, 114, 0.9);
+}
+.pill-primary:not(:disabled):hover { background: #46739f; }
+.pill-quiet { background: rgba(240, 235, 221, 0.7); color: #35596b; }
+.pill-quiet:hover { background: rgba(240, 235, 221, 0.95); }
+.pill-active { background: #638f91; color: #f0ebdd; }
+
+/* Leaflet inside the Sources area panel: faded, watercolor-ish tiles so the map sits in the palette. */
+.sources-map { border: 1px solid rgba(255, 255, 255, 0.7); background: #cfe3e7; }
+.sources-map .leaflet-tile-pane { filter: saturate(0.55) sepia(0.12) hue-rotate(-8deg) brightness(1.04) contrast(0.92); }
+.sources-map .leaflet-control-zoom a { color: #35596b; background: rgba(240, 235, 221, 0.92); border-color: rgba(129, 153, 160, 0.3); }
+.sources-map .leaflet-control-attribution { background: rgba(240, 235, 221, 0.75); color: #526f7c; font-size: 10px; }
+.sources-tooltip {
+  background: rgba(240, 235, 221, 0.95);
+  border: 1px solid rgba(99, 143, 145, 0.35);
+  color: #35596b;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  box-shadow: 0 4px 12px -6px rgba(53, 89, 107, 0.5);
+}
+
+.chip-scroll { scrollbar-width: thin; scrollbar-color: rgba(129, 153, 160, 0.4) transparent; }

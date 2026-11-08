@@ -470,18 +470,25 @@ export interface Change {
   reverts?: string | null; // id of the Change this one reverts; null otherwise
 }
 
-// --- Architecture page additions (fe-arch-shell) ---
+// --- Compile progress and failure (api/apps.py; added for the Sources page) ---
 
-/** Errors and warnings from the platform's spec checks (models.py ValidateResult). */
+/** Errors and warnings from the platform's spec checks, as plain strings. */
 export interface ValidateResult {
   errors: string[];
   warnings: string[];
 }
 
-/** GET /v1/apps/{app}/compile/status: public-safe compile progress; 404 once the app is active. */
+/** GET /v1/apps/{app}/compile/status: public-safe progress (apps not active only; 404 otherwise). */
 export interface CompileStatus {
   running: boolean;
-  step: number;
-  elapsed_s: number;
-  last_validate: ValidateResult | null;
+  step: number; // Compiler trace entries (model steps) since this compile started
+  elapsed_s: number; // 0 when not running
+  last_validate?: ValidateResult | null;
+}
+
+/** `detail` of the 422 from POST /v1/apps/{app}/compile when the Compiler never finalized. */
+export interface CompileFailure {
+  reason: string;
+  errors: string[];
+  warnings: string[];
 }

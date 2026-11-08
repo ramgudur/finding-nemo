@@ -4,8 +4,8 @@ import type {
   Change,
   ClockControl,
   ClockState,
-  CompileStatus,
   CompileRequest,
+  CompileStatus,
   ErrorSeries,
   Event,
   HotspotsResponse,
@@ -29,6 +29,10 @@ export class ApiError extends Error {
     message: string,
     /** Every message when the server sent a list as `detail` (e.g. a 422 with all spec errors). */
     readonly details: string[] = [],
+    /** The raw `detail` the server sent (e.g. a CompileFailure object on compile's 422). */
+    readonly detail: unknown = undefined,
+    /** Seconds from a Retry-After header (503/429), when present. */
+    readonly retryAfterS: number | null = null,
   ) {
     super(message);
   }
@@ -53,9 +57,15 @@ async function request<T>(method: "GET" | "POST" | "PUT", path: string, authorit
   if (!r.ok) {
     let detail = "";
     let details: string[] = [];
+    let rawDetail: unknown = undefined;
+    const ra = Number(r.headers.get("Retry-After"));
+    const retryAfterS = r.headers.has("Retry-After") && Number.isFinite(ra) ? ra : null;
     try {
       const body = (await r.json()) as { detail?: unknown };
+      rawDetail = body.detail;
       if (typeof body.detail === "string") detail = body.detail;
+      else if (body.detail && typeof body.detail === "object" && typeof (body.detail as { reason?: unknown }).reason === "string")
+        detail = (body.detail as { reason: string }).reason; // CompileFailure
       else if (Array.isArray(body.detail)) {
         details = body.detail.map(detailText);
         detail = details.join("; ");
@@ -63,7 +73,7 @@ async function request<T>(method: "GET" | "POST" | "PUT", path: string, authorit
     } catch {
       // not JSON
     }
-    throw new ApiError(r.status, detail || `${r.status} ${r.statusText} for ${path}`, details);
+    throw new ApiError(r.status, detail || `${r.status} ${r.statusText} for ${path}`, details, rawDetail, retryAfterS);
   }
   return (await r.json()) as T;
 }
@@ -112,6 +122,10 @@ export const api = {
   controlClock: (appId: string, key: string, body: ClockControl) =>
     request<ClockState>("POST", `/debug${app(appId)}/clock`, key, body),
   errorSeries: (appId: string, key: string) => get<ErrorSeries>(`/debug${app(appId)}/error`, key),
+
+  // --- Sources page (fe-sources) ---
+  // public-safe compile progress (step count, elapsed, last validation); 404 when nothing is known
+  compileStatus: (appId: string) => get<CompileStatus>(`${app(appId)}/compile/status`),
 };
 
 // --- Architecture page additions (fe-arch-shell) ---
@@ -120,5 +134,5 @@ export const archApi = {
   /** Full spec; `key` may be empty (no header). The server answers 401 without the authority key. */
   getAppMaybeKey: (appId: string, key: string) => get<AppSpec>(`${app(appId)}`, key || undefined),
   /** Public: 200 while the app is not active, 404 ("no compile for this app") once it is active. */
-  compileStatus: (appId: string) => get<CompileStatus>(`${app(appId)}/compile/status`),
+  compileStatus: api.compileStatus,
 };
