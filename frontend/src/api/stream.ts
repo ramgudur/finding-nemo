@@ -22,6 +22,9 @@ export function openStream(appId: string, authorityKey: string, { onFrame, onSta
     onState("connecting");
     const proto = location.protocol === "https:" ? "wss" : "ws";
     ws = new WebSocket(`${proto}://${location.host}/v1/apps/${encodeURIComponent(appId)}/stream`);
+    // The server may send public tick frames before it has processed our auth frame; with a key,
+    // drop ticks until auth_ok so a public frame never overwrites the authority view.
+    let authed = !authorityKey;
     ws.onopen = () => {
       backoff = 1000;
       if (authorityKey) ws?.send(JSON.stringify({ type: "auth", key: authorityKey } satisfies StreamAuthFrame));
@@ -30,7 +33,10 @@ export function openStream(appId: string, authorityKey: string, { onFrame, onSta
     ws.onmessage = (e) => {
       try {
         const f = JSON.parse(String(e.data)) as StreamFrame;
-        if (f && (f.type === "tick" || f.type === "auth_ok")) onFrame(f);
+        if (f?.type === "auth_ok") {
+          authed = true;
+          onFrame(f);
+        } else if (f?.type === "tick" && authed) onFrame(f);
       } catch {
         // ignore frames that aren't JSON
       }
