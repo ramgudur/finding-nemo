@@ -6,8 +6,9 @@ Guards (CLAUDE.md rules 7, 8, 11):
 - Labels come only from the spec's ``label_set``. A new label type is a proposal: the tool
   rejects it and says to use ``annotate`` so it shows in the trace for the dev.
 - ``poi_labels.mode == "off"`` blocks all writes. Confidence below ``min_confidence`` is rejected.
-- Visibility: a sensitive label is always authority. Otherwise public only if the candidate has
-  contributing layers and all of them are public output layers (the hotspot rule); else authority.
+- Visibility: a sensitive label is always authority; a destination label is public (the public
+  route already reveals it). Otherwise public only if the candidate has contributing layers and
+  all of them are public output layers (the hotspot rule); else authority.
 - One active POI per candidate (relabel with ``update_poi``). Every write records a ``Change``.
 - POIs are outputs only: nothing here touches the engine, weights or scores.
 
@@ -244,9 +245,16 @@ def _check_confidence(ctx: ToolContext, confidence: float) -> None:
         raise GuardError(f"confidence {confidence:.2f} is below min_confidence {floor:.2f}")
 
 
-def poi_visibility(ctx: ToolContext, label: str, cand: Candidate) -> Visibility:
+def poi_visibility(ctx: ToolContext, label: str, cand: Candidate | None) -> Visibility:
+    """Sensitive -> authority. Destination -> public (the public route already reveals it, and a
+    destination label can't be sensitive). Otherwise public only if every contributing layer of the
+    candidate is a public output layer; with no candidate to judge, authority."""
     lbl = next(lb for lb in ctx.spec.outputs.poi_labels.label_set if lb.label == label)
     if lbl.sensitive:
+        return "authority"
+    if lbl.destination:
+        return "public"
+    if cand is None:
         return "authority"
     public = {o.id for o in ctx.spec.outputs.layers if o.visibility == "public"}
     contributing = cand.contributing_layers
@@ -326,9 +334,8 @@ def update_poi(ctx: ToolContext, args: UpdatePoiArgs) -> dict[str, Any]:
         update["evidence"] = _evidence(args.evidence)
     if cand is not None:  # follow the candidate; positions only ever come from candidates
         update.update(lat=cand.lat, lon=cand.lon, radius_m=cand.radius_m, visibility=poi_visibility(ctx, label, cand))
-    elif label != p.label:
-        lbl = next(lb for lb in ctx.spec.outputs.poi_labels.label_set if lb.label == label)
-        update["visibility"] = "authority" if lbl.sensitive else p.visibility
+    elif label != p.label:  # candidate gone: judge by the label alone (authority unless destination)
+        update["visibility"] = poi_visibility(ctx, label, None)
     new = p.model_copy(update=update)
     ctx.db.upsert_poi(ctx.app_id, new, ctx.now())
     ch = _record(ctx, p.id, _poi_state(p), _poi_state(new), "updated POI")

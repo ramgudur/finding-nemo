@@ -48,6 +48,7 @@ def make_spec(mode="auto", public_layers=()):
                     "min_confidence": 0.6,
                     "label_set": [
                         {"label": "gathering spot", "destination": True},
+                        {"label": "busy area"},
                         {"label": "private group", "sensitive": True},
                     ],
                 },
@@ -113,7 +114,7 @@ def test_get_candidates_and_label_set(env):
     assert r["ok"], r
     res = r["result"]
     assert [c["id"] for c in res["candidates"]] == ["c1"]
-    assert {lb["label"] for lb in res["label_set"]} == {"gathering spot", "private group"}
+    assert {lb["label"] for lb in res["label_set"]} == {"gathering spot", "busy area", "private group"}
     assert res["mode"] == "auto" and res["candidates"][0]["label"] is None
 
 
@@ -126,7 +127,7 @@ def test_create_poi_copies_position_from_candidate_and_writes_change(env):
     poi = st["db"].get_poi("poi-app", r["result"]["poi_id"])
     cand = st["rt"].last.candidates[0]
     assert (poi.lat, poi.lon, poi.radius_m) == (cand.lat, cand.lon, cand.radius_m)
-    assert poi.visibility == "authority"  # its contributing layer isn't public
+    assert poi.visibility == "public"  # destination label: the public route already reveals it
     changes = st["db"].list_changes("poi-app", kind="poi")
     assert len(changes) == 1 and changes[0].before is None and changes[0].after["label"] == "gathering spot"
     # coordinates can't be passed in at all
@@ -229,3 +230,28 @@ def test_pois_never_feed_back_into_scores(env):
     call(ctx(), "create_poi", candidate_id="c1", label="gathering spot", confidence=0.9)
     after = st["eng"].tick_once()[0].score
     np.testing.assert_array_equal(before, after)
+
+
+def test_destination_labels_are_public_even_from_private_layers(env):
+    """Lead decision (#113): a destination POI is public; the public route already reveals it."""
+    build, st = env
+    ctx = build()  # no public layers at all
+    r = call(ctx(), "create_poi", candidate_id="c1", label="gathering spot", confidence=0.8)
+    assert r["result"]["visibility"] == "public"
+    pid = r["result"]["poi_id"]
+    st["rt"].last.candidates = []  # candidate gone: relabel is judged by the label alone
+    r = call(ctx(), "update_poi", poi_id=pid, label="busy area")
+    assert r["ok"] and r["result"]["visibility"] == "authority"
+    r = call(ctx(), "update_poi", poi_id=pid, label="gathering spot")
+    assert r["result"]["visibility"] == "public"
+    r = call(ctx(), "update_poi", poi_id=pid, label="private group")
+    assert r["result"]["visibility"] == "authority"
+
+
+def test_non_destination_label_follows_layer_rule(env):
+    build, _ = env
+    r = call(build()(), "create_poi", candidate_id="c1", label="busy area", confidence=0.8)
+    assert r["result"]["visibility"] == "authority"
+    ctx = build(make_spec(public_layers=["pings.density"]))
+    r = call(ctx(), "create_poi", candidate_id="c1", label="busy area", confidence=0.8)
+    assert r["result"]["visibility"] == "public"
