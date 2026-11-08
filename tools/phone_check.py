@@ -45,7 +45,7 @@ def shoot(exe: str, url: str, out: Path, width: int, height: int, wait_ms: int) 
         frame = Path(tmp) / "frame.html"
         frame.write_text(
             '<!doctype html><meta charset="utf-8"><body style="margin:0;background:#888">'
-            f'<iframe src="{html.escape(url, quote=True)}" '
+            f'<iframe src="{html.escape(url, quote=True)}" allow="geolocation" '
             f'style="width:{width}px;height:{height}px;border:0;background:#fff">'
             "</iframe>",
             encoding="utf-8",
@@ -82,7 +82,7 @@ def main() -> int:
     ap.add_argument("urls", nargs="+")
     ap.add_argument("--width", type=int, default=390)
     ap.add_argument("--height", type=int, default=844)
-    ap.add_argument("--wait-ms", type=int, default=6000, help="time for the page to load and fetch data")
+    ap.add_argument("--wait-ms", type=int, default=20000, help="time for the page to load, retry and fetch data")
     args = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     exe = browser()
