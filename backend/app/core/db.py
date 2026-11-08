@@ -333,11 +333,14 @@ class Db:
 
     def set_trust(self, app_id: str, user_id: str, score: float, t: float) -> TrustRecord:
         """Set a user's trust. ``last_increase_at`` only advances when ``score`` rises
-        relative to the current value, so guards can enforce the per-5-minute cap."""
+        relative to the current value (a never-seen user's implicit value is
+        ``DEFAULT_TRUST`` = 1.0, per `engine/trust.py`), so guards can enforce the
+        per-5-minute increase cap without mistaking a first-ever decrease for a rise."""
         with self._lock:
             prev = self.get_trust(app_id, user_id)
+            baseline = prev.score if prev else 1.0
             last_increase_at = prev.last_increase_at if prev else None
-            if prev is None or score > prev.score:
+            if score > baseline:
                 last_increase_at = t
             self._conn.execute(
                 "INSERT INTO trust (app_id, user_id, score, updated_at, last_increase_at) VALUES (?, ?, ?, ?, ?) "
@@ -347,6 +350,12 @@ class Db:
             )
             self._conn.commit()
             return TrustRecord(user_id, score, t, last_increase_at)
+
+    def list_trust(self, app_id: str) -> dict[str, float]:
+        """Current trust per user who has a record for this app. A missing user has the
+        implicit default (1.0, per `engine/trust.py`); callers merge that in themselves."""
+        rows = self._conn.execute("SELECT user_id, score FROM trust WHERE app_id = ?", (app_id,)).fetchall()
+        return {r["user_id"]: r["score"] for r in rows}
 
     # -- pois -----------------------------------------------------------------------
 

@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from app.core.models import AppSpec, BBox, Event, Instruction, PoiLabel
+from app.core.models import AppSpec, BBox, CellCollection, Event, Hotspot, Instruction, MapResponse, PoiLabel
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -125,3 +125,28 @@ def test_naive_datetimes_rejected_and_aware_ones_normalized_to_utc():
 def test_instruction_text_capped_at_360():
     with pytest.raises(ValidationError):
         Instruction(text="x" * 361, computed_at=NOW, guard={"passed": True})
+
+
+def test_map_response_accepts_grid_to_geojson_output():
+    import numpy as np
+
+    from app.engine.grid import Grid
+
+    grid = Grid(bbox=(0.0, 0.0, 0.01, 0.01), cell_m=50.0)
+    values = np.zeros(grid.shape)
+    values[0, 0] = 0.5
+    fc = grid.to_geojson(values, min_value=0.0099, property_name="value")
+    coll = CellCollection.model_validate(fc)
+    assert len(coll.features) == 1
+    assert coll.features[0].properties.value == 0.5
+
+    m = MapResponse(app_id="a", t=NOW, cell_m=grid.cell_m, bbox=grid.bbox, layers={"score": fc})
+    assert m.layers["score"].features[0].properties.row == 0
+
+
+def test_hotspot_rejects_both_sensitive_defaults_and_bad_radius():
+    Hotspot(id="h1", lat=1.0, lon=2.0, radius_m=5.0, score=0.9, mean=0.5, area_m2=78.5, n_cells=1,
+             persisted_ticks=0, visibility="authority")  # fmt: skip
+    with pytest.raises(ValidationError):
+        Hotspot(id="h1", lat=1.0, lon=2.0, radius_m=-1.0, score=0.9, mean=0.5, area_m2=78.5, n_cells=1,
+                 persisted_ticks=0, visibility="authority")  # fmt: skip

@@ -346,3 +346,60 @@ class Instruction(Model):
     distance_m: float = Field(default=0, ge=0)
     computed_at: UtcDatetime
     guard: GuardResult
+
+
+# --- Outputs (GET /map?format=geojson, GET /hotspots) ----------------------------
+
+GeoJsonBBox = tuple[Lon, Lat, Lon, Lat]
+
+
+class CellProperties(Model):
+    value: float
+    row: int
+    col: int
+
+
+class CellFeature(Model):
+    type: Literal["Feature"] = "Feature"
+    geometry: dict[str, Any] = Field(description='{"type": "Polygon", "coordinates": [[lon, lat], ...]}')
+    properties: CellProperties
+
+
+class CellCollection(Model):
+    """One layer's cells. Cells with value < 0.01 are omitted: a missing cell means 0."""
+
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    bbox: GeoJsonBBox | None = None
+    features: list[CellFeature] = Field(default_factory=list)
+
+
+class MapResponse(Model):
+    """Without the authority key, `layers` holds only public layers. 'score' is the combined map."""
+
+    app_id: str
+    t: UtcDatetime
+    cell_m: float
+    bbox: GeoJsonBBox
+    layers: dict[str, CellCollection] = Field(default_factory=dict)
+
+
+class Hotspot(Model):
+    """`score` is the peak cell score; `radius_m` = sqrt(area_m2 / pi)."""
+
+    id: str
+    lat: Lat
+    lon: Lon
+    radius_m: float = Field(ge=0)
+    score: float
+    mean: float
+    area_m2: float = Field(ge=0)
+    n_cells: int = Field(ge=0)
+    persisted_ticks: int = Field(ge=0)
+    contributing_layers: list[str] = Field(default_factory=list)
+    visibility: Visibility
+
+
+class HotspotsResponse(Model):
+    app_id: str
+    t: UtcDatetime
+    hotspots: list[Hotspot] = Field(default_factory=list)
