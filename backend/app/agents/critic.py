@@ -75,7 +75,9 @@ def _backtest_deltas(
         baseline_holdout, best_holdout = r.get("baseline_holdout") or {}, r.get("best_holdout") or {}
         common = set(baseline_holdout) & set(best_holdout)
         holdout_delta = max((best_holdout[m] - baseline_holdout[m] for m in common), default=None)
-        search_spec = {"layers": args.get("layers"), "samples": args.get("samples")} if holdout_delta else None
+        search_spec = (
+            {"layers": args.get("layers"), "samples": args.get("samples")} if holdout_delta is not None else None
+        )
         return search_spec, None, holdout_delta
     return None, None, None
 

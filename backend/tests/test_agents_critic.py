@@ -234,6 +234,21 @@ def test_backtest_deltas_from_run_backtest_batch_result():
     assert holdout_delta == pytest.approx(0.1)
 
 
+def test_backtest_deltas_keeps_search_spec_when_holdout_delta_is_exactly_zero():
+    # regression: `if holdout_delta` is falsy for 0.0, which would wrongly drop search_spec
+    args = {"layers": {"panic.density": [0.1, 0.9]}, "samples": 64}
+    result = {
+        "ok": True,
+        "result": {
+            "baseline_holdout": {"predictive_check": 0.4},
+            "best_holdout": {"predictive_check": 0.4},
+        },
+    }
+    search_spec, _, holdout_delta = _backtest_deltas("run_backtest_batch", args, result)
+    assert holdout_delta == 0.0
+    assert search_spec == args
+
+
 def test_backtest_deltas_ignores_a_rejected_call():
     result = {"ok": False, "error": "rejected: cold start"}
     assert _backtest_deltas("run_backtest", {}, result) == (None, None, None)
