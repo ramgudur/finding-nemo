@@ -26,7 +26,7 @@ def _spec(**fields_over) -> dict:
                 "shape": "field",
                 "tier": "stiff",
                 "meaning": "wind speed",
-                "connector": {"type": "open_meteo"},
+                "connector": {"type": "json_api", "preset": "open_meteo"},
             },
         ],
         "outputs": {"layers": [{"id": "score", "visibility": "public"}]},
