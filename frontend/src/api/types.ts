@@ -515,3 +515,42 @@ export interface CompileFailure {
   errors: string[];
   warnings: string[];
 }
+
+// --- Console: label proposals and dev-requested Scout runs (api/labels.py, api/scout.py) ---
+
+export type LabelProposalStatus = "open" | "accepted" | "dismissed";
+
+/** A label type the POI Labeler proposed. `why` is agent text: authority view only (rule 8). */
+export interface LabelProposal {
+  id: string;
+  label: string; // 1..60 chars
+  sensitive?: boolean; // default false
+  destination?: boolean; // default false
+  why: string; // <= 500 chars
+  status?: LabelProposalStatus; // default "open"
+  t: string;
+}
+
+/** Optional body of POST /label-proposals/{id}/accept: override the proposed flags. */
+export interface LabelProposalAccept {
+  sensitive?: boolean | null;
+  destination?: boolean | null;
+}
+
+export interface LabelProposalAcceptResponse {
+  proposal: LabelProposal;
+  label_set: PoiLabel[];
+}
+
+/** Body of POST /v1/apps/{app}/scout (authority key): one pull input, request 1..500 chars. */
+export interface ScoutRequest {
+  input_id: string;
+  request: string;
+}
+
+/** 202 from POST /scout: queued; the Scout's steps appear in the trace. */
+export interface ScoutJobAccepted {
+  job_id: string;
+  app_id: string;
+  input_id: string;
+}

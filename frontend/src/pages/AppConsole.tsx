@@ -3,7 +3,7 @@
 // unlock field, never a full-page gate. Rule 8: the spec, weights, verification, trace and changes are
 // requested only with a key, and a rejected key drops back to public data at once. A proposed app
 // redirects to its review.
-import { Activity, FlaskConical, History, KeyRound, Layers, Lock, Scale, type LucideIcon } from "lucide-react";
+import { Activity, Bot, FlaskConical, History, KeyRound, Layers, Lock, Scale, type LucideIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
@@ -23,13 +23,16 @@ import { useAuthorityConsoleData } from "../hooks/useAuthorityConsoleData";
 import { useLiveAppData } from "../hooks/useLiveAppData";
 import { useBuilderStore } from "../store/useBuilderStore";
 import { isProposed } from "../components/app/appState";
+import { LabelProposals } from "../components/app/LabelProposals";
+import { ScoutRequestForm } from "../components/app/ScoutRequestForm";
 
 type Status = "loading" | "live" | "proposed" | "notFound" | "error";
-type Tab = "layers" | "weights" | "verification" | "trace" | "changes";
+type Tab = "layers" | "weights" | "verification" | "agents" | "trace" | "changes";
 const TABS: { id: Tab; label: string; Icon: LucideIcon; authority: boolean }[] = [
   { id: "layers", label: "Layers", Icon: Layers, authority: false },
   { id: "weights", label: "Weights", Icon: Scale, authority: true },
   { id: "verification", label: "Verification", Icon: FlaskConical, authority: true },
+  { id: "agents", label: "Agents", Icon: Bot, authority: true },
   { id: "trace", label: "Trace", Icon: Activity, authority: true },
   { id: "changes", label: "Changes", Icon: History, authority: true },
 ];
@@ -238,7 +241,7 @@ export default function AppConsole() {
                       transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
                     />
                   )}
-                  {lockedTab ? <Lock aria-hidden className="relative h-3 w-3" /> : <Icon aria-hidden className="relative h-3.5 w-3.5" />}
+                  {lockedTab ? <Lock aria-hidden className="relative h-3 w-3" /> : <Icon aria-hidden className="relative h-3.5 w-3.5 lg:max-2xl:hidden" />}
                   <span className="relative">{label}</span>
                   {id === "changes" && authority && data.changes.length > 0 && (
                     <span className="relative font-mono text-[11px] text-ink">{data.changes.length}</span>
@@ -274,7 +277,7 @@ export default function AppConsole() {
                 <p className="flex items-center gap-1.5 font-semibold">
                   <Lock aria-hidden className="h-3.5 w-3.5" /> Authority view only
                 </p>
-                <p className="text-ink">Weights, verification, the agent trace and the change log need this app's authority key.</p>
+                <p className="text-ink">Weights, verification, agent requests, the agent trace and the change log need this app's authority key.</p>
                 <button type="button" onClick={() => keyInput.current?.focus()} className={`${ghostBtn} -ml-3`}>
                   <KeyRound aria-hidden className="h-3.5 w-3.5" /> Enter the key
                 </button>
@@ -300,6 +303,26 @@ export default function AppConsole() {
               ) : (
                 <p className="text-[13px] text-ink">Verification scores appear once inputs have events.</p>
               )
+            ) : tab === "agents" && spec && key ? (
+              <div className="space-y-5">
+                <LabelProposals
+                  appId={appId}
+                  authorityKey={key}
+                  labelSet={spec.outputs?.poi_labels?.label_set ?? []}
+                  onRejected={reject}
+                />
+                <div aria-hidden className="h-px bg-paleWater/80" />
+                <ScoutRequestForm
+                  appId={appId}
+                  authorityKey={key}
+                  inputs={spec.inputs ?? []}
+                  onRejected={reject}
+                  onOpenTrace={() => {
+                    setTab("trace");
+                    requestAnimationFrame(() => document.getElementById("tab-trace")?.focus());
+                  }}
+                />
+              </div>
             ) : tab === "trace" ? (
               <AgentTrace entries={data.trace} />
             ) : (
