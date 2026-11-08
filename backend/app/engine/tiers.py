@@ -26,15 +26,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from enum import StrEnum
+from typing import cast, get_args
 
 import numpy as np
 
+from app.core.models import Tier
 
-class Tier(StrEnum):
-    LOCKED = "locked"
-    STIFF = "stiff"
-    FLEXIBLE = "flexible"
+TIERS: tuple[str, ...] = get_args(Tier)
 
 
 STIFF_MAX_REL_PER_HOUR = 0.10
@@ -71,14 +69,13 @@ class CheckResult:
     reasons: list[str] = field(default_factory=list)
 
 
-def as_tier(value: str | Tier) -> Tier:
-    try:
-        return Tier(value)
-    except ValueError:
-        raise ValueError(f"unknown tier {value!r}; expected one of {[t.value for t in Tier]}") from None
+def as_tier(value: str) -> Tier:
+    if value not in TIERS:
+        raise ValueError(f"unknown tier {value!r}; expected one of {list(TIERS)}")
+    return cast(Tier, value)
 
 
-def check_tier_change(old: str | Tier, new: str | Tier, actor: str) -> tuple[bool, str]:
+def check_tier_change(old: str, new: str, actor: str) -> tuple[bool, str]:
     """Agents never change tiers. A dev may, but only through spec confirmation."""
     if as_tier(old) == as_tier(new):
         return True, "tier unchanged"
@@ -89,7 +86,7 @@ def check_tier_change(old: str | Tier, new: str | Tier, actor: str) -> tuple[boo
 
 def flexible_total(slots: Iterable[WeightSlot]) -> float:
     """Sum of flexible weights. Call this at creation and store it; later calls just verify."""
-    return float(sum(s.weight for s in slots if as_tier(s.tier) is Tier.FLEXIBLE))
+    return float(sum(s.weight for s in slots if as_tier(s.tier) == "flexible"))
 
 
 def stiff_reference(slot: WeightSlot, now: float, window_s: float = STIFF_WINDOW_S) -> float:
@@ -122,9 +119,9 @@ def slot_bounds(
     tier = as_tier(slot.tier)
     if slot.pinned:
         return w, w, f"{slot.layer_id}: pinned by dev"
-    if tier is Tier.LOCKED:
+    if tier == "locked":
         return w, w, f"{slot.layer_id}: locked tier never changes"
-    if tier is Tier.STIFF:
+    if tier == "stiff":
         if not authority_evidence:
             return w, w, f"{slot.layer_id}: stiff tier needs authority-confirmation evidence"
         ref = stiff_reference(slot, now)
@@ -152,8 +149,8 @@ def renormalize(weights: Mapping[str, float], slots: Sequence[WeightSlot], total
     target can't be reached (unpinned flexible sum is zero, or pinned already exceed it).
     """
     out = {k: float(v) for k, v in weights.items()}
-    free = [s.layer_id for s in slots if as_tier(s.tier) is Tier.FLEXIBLE and not s.pinned]
-    pinned_sum = sum(out[s.layer_id] for s in slots if as_tier(s.tier) is Tier.FLEXIBLE and s.pinned)
+    free = [s.layer_id for s in slots if as_tier(s.tier) == "flexible" and not s.pinned]
+    pinned_sum = sum(out[s.layer_id] for s in slots if as_tier(s.tier) == "flexible" and s.pinned)
     if not free:
         return out
     target = total - pinned_sum
@@ -222,7 +219,7 @@ def check_update(
         )
         v = final[s.layer_id]
         if v < lo - _EPS or v > hi + _EPS:
-            limit = why or f"allowed [{lo:.4g}, {hi:.4g}] for tier {as_tier(s.tier).value}"
+            limit = why or f"allowed [{lo:.4g}, {hi:.4g}] for tier {as_tier(s.tier)}"
             reasons.append(f"{s.layer_id}: {current[s.layer_id]:.4g} -> {v:.4g} out of bounds ({limit})")
     if reasons:
         return CheckResult(False, current, reasons)
@@ -263,8 +260,8 @@ def bounds(
         hi.append(b)
         if why:
             reasons.append(why)
-    free = np.array([as_tier(s.tier) is Tier.FLEXIBLE and not s.pinned for s in slots], dtype=bool)
-    pinned_sum = float(sum(s.weight for s in slots if as_tier(s.tier) is Tier.FLEXIBLE and s.pinned))
+    free = np.array([as_tier(s.tier) == "flexible" and not s.pinned for s in slots], dtype=bool)
+    pinned_sum = float(sum(s.weight for s in slots if as_tier(s.tier) == "flexible" and s.pinned))
     return BatchBounds(
         layer_ids=tuple(s.layer_id for s in slots),
         current=np.array([s.weight for s in slots], dtype=np.float64),
