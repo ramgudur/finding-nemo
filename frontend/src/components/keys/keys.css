@@ -1,0 +1,41 @@
+/* Keys page motion: transform + opacity only, one strong ease-out, under 250 ms. The global
+   prefers-reduced-motion backstop (globals.css) cuts every duration to ~0. */
+:root {
+  --keys-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* A disclosure body or a result fades in from just above; never from nothing. */
+.keys-reveal {
+  animation: keys-reveal 200ms var(--keys-ease-out) both;
+}
+@keyframes keys-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* Chevron turns with the disclosure state (a transition, so a fast double click retargets). */
+.keys-chevron {
+  transition: transform 200ms var(--keys-ease-out);
+}
+[aria-expanded="true"] > .keys-chevron {
+  transform: rotate(90deg);
+}
+
+/* Press feedback for every control on the page. */
+.keys-press {
+  transition: transform 150ms var(--keys-ease-out), background-color 150ms ease, box-shadow 150ms ease;
+}
+.keys-press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .keys-reveal {
+    animation: none;
+  }
+  .keys-press:active:not(:disabled) {
+    transform: none;
+  }
+}
