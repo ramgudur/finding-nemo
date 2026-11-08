@@ -159,7 +159,10 @@ def test_compile_returns_422_with_the_last_trace_reason_when_it_never_finalizes(
     with TestClient(app) as client:
         r = client.post("/v1/apps/some-app/compile", json=_compile_request())
     assert r.status_code == 422
-    assert r.json()["detail"] == "final answer"
+    detail = r.json()["detail"]
+    assert set(detail) == {"reason", "errors", "warnings"}
+    assert "without finalizing" in detail["reason"]
+    assert detail["errors"] == [] and detail["warnings"] == []
 
 
 def test_compile_returns_503_with_the_skipped_reason_when_rate_limited():
@@ -169,6 +172,8 @@ def test_compile_returns_503_with_the_skipped_reason_when_rate_limited():
         r = client.post("/v1/apps/some-app/compile", json=_compile_request())
     assert r.status_code == 503
     assert "rate budget" in r.json()["detail"]
+    assert r.headers["Retry-After"] == "2"  # ceil(60 s / 35 RPM): one request's refill
+    assert "2 s" in r.json()["detail"]
 
 
 def test_compile_second_call_with_same_intent_and_inputs_is_a_cache_hit():
@@ -285,3 +290,135 @@ def test_compile_rejects_a_connector_on_a_push_input():
     with TestClient(app) as client:
         r = client.post("/v1/apps/some-app/compile", json=req)
     assert r.status_code == 422
+
+
+# -- #167: compile progress and readable failures ------------------------------------------
+
+
+def _bad_spec() -> dict:
+    spec = _spec("some-app")
+    spec["inputs"][0]["operators"] = [{"op": "no_such_op", "weight": 1.0, "layer_id": "pings.density"}]
+    return spec
+
+
+def test_compile_422_lists_the_last_proposed_specs_errors_and_warnings():
+    script = {
+        "scenario": "s",
+        "description": "validates a spec with an unknown operator, then stops without finalizing",
+        "steps": [
+            {"response": {"tool_calls": [{"id": "c1", "name": "validate_spec", "arguments": {"spec": _bad_spec()}}]}},
+            {"response": {"content": "giving up"}},
+        ],
+    }
+    app = _app_with_llm(script)
+    with TestClient(app) as client:
+        r = client.post("/v1/apps/some-app/compile", json=_compile_request())
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert any("unknown operator 'no_such_op'" in e for e in detail["errors"]), detail
+    assert any("plausibility" in w for w in detail["warnings"])  # flexible point input without it
+    assert not any("pydantic.dev" in e or "input_value" in e for e in detail["errors"])  # plain language
+
+
+def test_compile_422_reports_spec_shape_errors_in_plain_language():
+    spec = _spec("some-app")
+    spec["outputs"]["layers"].append({"id": "nowhere.layer"})
+    script = {
+        "scenario": "s",
+        "description": "finalizes a spec whose outputs name a layer no input makes",
+        "steps": [
+            {"response": {"tool_calls": [{"id": "c1", "name": "finalize_app", "arguments": {"spec": spec}}]}},
+            {"response": {"content": "done"}},
+        ],
+    }
+    with TestClient(_app_with_llm(script)) as client:
+        r = client.post("/v1/apps/some-app/compile", json=_compile_request())
+    assert r.status_code == 422
+    errors = r.json()["detail"]["errors"]
+    assert any("nowhere.layer" in e for e in errors), errors
+
+
+def test_compile_status_is_404_for_an_unknown_app(client):
+    assert client.get("/v1/apps/nothing-here/compile/status").status_code == 404
+
+
+def test_compile_status_reports_step_elapsed_and_last_validate_without_trace_content(app, client):
+    from datetime import UTC, datetime
+
+    from app.api.apps import _CompileRun
+    from app.core import clock as clock_mod
+    from app.core.models import ToolCall, TraceEntry
+
+    t0 = clock_mod.now()
+    client.get("/v1/apps/nothing-here/compile/status")  # creates app.state.compile_runs
+    app.state.compile_runs["some-app"] = _CompileRun(started_at=t0)
+    db = app.state.db
+    at = datetime.fromtimestamp(t0 + 1, tz=UTC)
+    secret = "SECRET-ARG-TEXT"
+    bad = {**_bad_spec(), "intent": secret}
+    db.add_trace(
+        TraceEntry(
+            t=at,
+            app_id="some-app",
+            agent="compiler",
+            action="tool_calls",
+            why=f"why {secret}",
+            tool_calls=[ToolCall(name="validate_spec", args={"spec": bad}, ok=True, result_summary=secret)],
+        )
+    )
+    db.add_trace(
+        TraceEntry(
+            t=at,
+            app_id="some-app",
+            agent="compiler",
+            action="tool_calls",
+            tool_calls=[ToolCall(name="made_up_tool", args={"x": secret}, result_summary=secret)],
+        )
+    )
+    db.add_trace(TraceEntry(t=at, app_id="some-app", agent="compiler", action="suggest_source", why="suggest_source"))
+
+    r = client.get("/v1/apps/some-app/compile/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {"running", "step", "elapsed_s", "last_validate"}
+    assert body["running"] is True
+    assert body["step"] == 2  # the source suggestion isn't a compile step
+    assert body["elapsed_s"] >= 0
+    assert any("unknown operator 'no_such_op'" in e for e in body["last_validate"]["errors"])
+    assert secret not in r.text and "made_up_tool" not in r.text
+
+    # a proposal that doesn't even parse: plain "where: what" lines, the values never echoed
+    db.add_trace(
+        TraceEntry(
+            t=at,
+            app_id="some-app",
+            agent="compiler",
+            action="tool_calls",
+            tool_calls=[ToolCall(name="finalize_app", args={"spec": {"intent": secret}}, ok=False)],
+        )
+    )
+    r = client.get("/v1/apps/some-app/compile/status")
+    assert r.json()["step"] == 3
+    errors = r.json()["last_validate"]["errors"]
+    assert errors and not any("pydantic.dev" in e for e in errors)
+    assert secret not in r.text
+
+
+def test_compile_status_after_a_compile_then_404_once_active():
+    app = _app_with_llm("compiler_campus_alert")
+    with TestClient(app) as client:
+        assert client.post("/v1/apps/campus-alert/compile", json=_compile_request()).status_code == 200
+        r = client.get("/v1/apps/campus-alert/compile/status")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["running"] is False and body["step"] >= 1 and body["elapsed_s"] == 0
+        assert body["last_validate"]["errors"] == []  # the finalized spec passed the checks
+        client.post("/v1/apps/campus-alert/activate")
+        assert client.get("/v1/apps/campus-alert/compile/status").status_code == 404
+
+
+def test_compile_status_for_a_pending_app_with_no_compile_in_this_process(client):
+    client.post("/v1/apps", json=_spec("draft-app"))
+    r = client.get("/v1/apps/draft-app/compile/status")
+    assert r.status_code == 200
+    assert r.json() == {"running": False, "step": 0, "elapsed_s": 0.0, "last_validate": None}
