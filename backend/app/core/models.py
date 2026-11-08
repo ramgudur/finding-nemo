@@ -108,15 +108,15 @@ class ConnectorConfig(Model):
     poll_s: float = Field(default=300, gt=0)
     config: dict[str, Any] = Field(default_factory=dict)
     preset: str | None = Field(
-        default=None, description="A ready-made config under connectors/presets/, e.g. 'open_meteo'."
+        default=None, description="Name of a ready-made config in the connectors/presets/ catalogue."
     )
 
 
 class Plausibility(Model):
     """Per-input bounds for the spoof checks in `engine/trust.py` (tracks/points only).
 
-    The Compiler proposes these from the input's `meaning`: a bird's plausible speed and
-    straight-line flight are not a person's. Omitted values use `engine/trust.py`'s defaults.
+    The Compiler proposes these from the input's `meaning`: what speed and how straight a track is
+    plausible depends on what the entities are. Omitted values use `engine/trust.py`'s neutral defaults.
     """
 
     max_speed_mps: float | None = Field(default=None, gt=0)
@@ -268,7 +268,7 @@ class Candidate(Model):
 
 
 class Evidence(Model):
-    kind: str = Field(description="e.g. 'osm_feature', 'layer_stats', 'weather', 'time_pattern'.")
+    kind: str = Field(description="Evidence source, e.g. 'osm_feature', 'layer_stats', 'input_values', 'time_pattern'.")
     text: str
     data: dict[str, Any] = Field(default_factory=dict)
 
