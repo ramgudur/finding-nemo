@@ -370,6 +370,36 @@ def test_hotspot_visibility_follows_contributing_layers():
     assert by_layers == {("crowd.density",): "public", ("marker.override",): "authority"}
 
 
+def test_small_private_share_keeps_hotspot_authority():
+    """#88 (rule 8): a private layer too small to be listed as a contributor (< 10%) still makes
+    the hotspot authority-only once it supplies more than 1% of the score mass."""
+    from app.engine.tick import find_hotspots
+
+    crowd = spec().inputs[0].model_dump()
+    private = {**crowd, "id": "private", "operators": [{**crowd["operators"][0], "layer_id": ""}]}
+    outputs = {"layers": [{"id": "crowd.density", "visibility": "public"}]}  # private.density stays authority
+    rt = AppRuntime(spec(inputs=[crowd, private], outputs=outputs))
+    h, w = rt.grid.shape
+    blob = np.zeros((h, w))
+    blob[h // 2 - 2 : h // 2 + 2, w // 2 - 2 : w // 2 + 2] = 1.0
+    ids = list(rt.weighted_ids)
+    assert ids == ["crowd.density", "private.density"]
+
+    def hotspots(private_share: float):
+        normalized = np.stack([blob, blob])
+        weights = np.array([1.0 - private_share, private_share])
+        score = np.clip(np.tensordot(weights, normalized, axes=1), 0, 1)
+        return find_hotspots(rt, score, normalized, weights)
+
+    (h9,) = hotspots(0.09)  # 9% private: not listed, but still decides visibility
+    assert h9.contributing_layers == ["crowd.density"]
+    assert h9.visibility == "authority"
+    (h0,) = hotspots(0.0)  # all public
+    assert h0.visibility == "public"
+    (tiny,) = hotspots(0.005)  # below the 1% cut: smoothing-level noise doesn't block public
+    assert tiny.visibility == "public"
+
+
 def test_hotspot_model_fields():
     rt = AppRuntime(spec())
     src = InMemoryEventSource()
