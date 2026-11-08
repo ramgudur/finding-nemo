@@ -164,3 +164,48 @@ def test_params_are_configurable():
     win = window([[blob(B), blob(A)]] * 3, ["crowd.density", "news.event_points"], t=[0.0, 2.0, 4.0])
     c = ctx(["crowd", "news"], {"crowd": at_cell(A, [100.0])}, params=VerificationParams(horizon_s=120.0))
     assert predictive_check(win, np.array([1.0, 1.0]), c).value == 1.0
+
+
+# -- #211: share-weighted predictive_check (weights matter with two inputs, no authority) -------
+
+
+def _two_crowd_inputs():
+    """A reports on the true spot; half of B's reports are noise. No authority input."""
+    t = np.arange(0, 300, 2.0)
+    stack = [blob(A), 0.5 * blob(A) + 0.5 * blob(B)]
+    win = window([stack] * len(t), ["a.density", "b.density"], t=t)
+    rng = np.random.default_rng(3)
+    b_cells = [A if rng.random() < 0.5 else tuple(rng.integers(0, H, 2)) for _ in range(60)]
+    events = {
+        "a": at_cell(A, np.linspace(5, 290, 60)),
+        "b": CellEvents(np.linspace(6, 291, 60), np.array([c[0] for c in b_cells]), np.array([c[1] for c in b_cells])),
+    }
+    return win, ctx(["a", "b"], events)
+
+
+def test_predictive_check_now_depends_on_weights_with_two_inputs():
+    win, c = _two_crowd_inputs()
+    vals = [predictive_check(win, np.array(w), c).value for w in ([0.5, 1.5], [1.0, 1.0], [1.5, 0.5])]
+    assert vals[0] < vals[1] < vals[2]  # weight toward the corroborated input scores higher
+    r = predictive_check(win, np.array([1.0, 1.0]), c)
+    assert r.value == pytest.approx(np.mean(list(r.detail["per_input"].values())))  # equal weights: plain mean
+    assert r.detail["weight_share"] == {"a": 0.5, "b": 0.5}
+
+
+def test_weighted_predictive_check_batch_matches_single():
+    win, c = _two_crowd_inputs()
+    w = np.array([[0.2, 1.8], [0.5, 1.5], [1.0, 1.0], [1.7, 0.3], [0.0, 0.0]])
+    from app.engine.verification import evaluate_batch
+
+    batch = evaluate_batch(win, w, c, ["predictive_check"])["predictive_check"]
+    for i in range(len(w)):
+        assert batch[i] == pytest.approx(predictive_check(win, w[i], c).value)
+
+
+def test_inputs_without_weighted_layers_count_as_a_typical_input():
+    from app.engine.verification import _input_shares
+
+    share = _input_shares(np.array([1.0, 3.0]), ("a", "b"), ["a", "b", "police"])
+    # police has no weighted layer: it gets the mean input weight (2.0), so shares are 1/6, 3/6, 2/6
+    assert share.tolist() == pytest.approx([1 / 6, 3 / 6, 2 / 6])
+    assert _input_shares(np.zeros(2), ("a", "b"), ["a", "b"]).tolist() == [0.5, 0.5]
