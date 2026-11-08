@@ -1,0 +1,187 @@
+"""Message guard: every end-user instruction passes these checks before it is sent (CLAUDE.md).
+
+Checks (each one is reported, pass or fail, and traced):
+1. ``destination_exists``    the destination is one of the app's current destinations.
+2. ``destination_safe``      its cell scores below min(impassable_score, hotspot_threshold).
+3. ``route_passable``        every step is inside the grid, adjacent to the last, and below
+                             impassable_score on the *current* grid (the start cell excepted).
+4. ``no_coordinates``        the text holds no coordinate-like numbers (so no one's position,
+                             including other users', can leak through it).
+5. ``no_sensitive_labels``   the text names no ``sensitive`` POI label.
+6. ``length``                at most 360 characters.
+
+``safe_instruction`` is the one call the instructions API needs: route -> code-built text ->
+guard. If anything fails, the caller gets ``routing.fallback_text`` with no destination and no
+route. Rephrasing (``routing.rephrase``) is not built yet; when it is, a rephrased text must pass
+the same checks or the code-built text is sent.
+
+The guard only reads the caller's own posted position; it never looks anyone up (rule 8).
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Iterable, Sequence
+from datetime import datetime
+
+import numpy as np
+
+from app.core.models import POI, AppSpec, DestinationPoint, GuardCheck, GuardResult, Instruction, TraceEntry
+from app.engine import routing
+from app.engine.grid import Grid
+
+MAX_CHARS = 360
+# Decimal numbers with 4+ fraction digits, or two decimals separated by a comma: lat/lon-like.
+_COORD_RE = re.compile(r"-?\d{1,3}\.\d{4,}|-?\d{1,3}\.\d+\s*,\s*-?\d{1,3}\.\d+")
+
+
+def _check(name: str, passed: bool, detail: str = "") -> GuardCheck:
+    return GuardCheck(name=name, passed=bool(passed), detail=detail)
+
+
+def check_instruction(
+    *,
+    text: str,
+    destination: DestinationPoint | None,
+    route_points: Sequence[tuple[float, float]],
+    spec: AppSpec,
+    grid: Grid,
+    score: np.ndarray,
+    destinations: Sequence[DestinationPoint],
+) -> GuardResult:
+    """Run every check on an instruction; ``passed`` only if all pass."""
+    checks: list[GuardCheck] = []
+    score = np.nan_to_num(np.asarray(score, dtype=float), nan=1.0)
+    imp = spec.routing.impassable_score
+
+    if destination is None:
+        checks.append(_check("destination_exists", False, "no destination"))
+        checks.append(_check("destination_safe", False, "no destination"))
+    else:
+        known = any(
+            d.label == destination.label and float(routing_dist(grid, d, destination)) <= grid.cell_m
+            for d in destinations
+        )
+        checks.append(_check("destination_exists", known, "" if known else "not a current destination"))
+        r, c, inside = grid.cell_of(destination.lat, destination.lon)
+        limit = routing.destination_threshold(spec)
+        safe = bool(inside) and float(score[int(r), int(c)]) < limit
+        checks.append(
+            _check(
+                "destination_safe",
+                safe,
+                "outside the grid" if not inside else f"score {float(score[int(r), int(c)]):.2f} vs limit {limit:.2f}",
+            )
+        )
+
+    checks.append(_route_check(grid, score, route_points, imp))
+
+    coords = _COORD_RE.search(text or "")
+    checks.append(_check("no_coordinates", coords is None, "" if coords is None else "coordinate-like number in text"))
+
+    sensitive = [
+        lbl.label
+        for lbl in spec.outputs.poi_labels.label_set
+        if lbl.sensitive and lbl.label.strip() and lbl.label.lower() in (text or "").lower()
+    ]
+    # Report only how many matched: the guard's own trace must not repeat a sensitive label.
+    checks.append(
+        _check("no_sensitive_labels", not sensitive, "" if not sensitive else f"{len(sensitive)} sensitive label(s)")
+    )
+    checks.append(_check("length", len(text or "") <= MAX_CHARS, f"{len(text or '')} chars"))
+    return GuardResult(passed=all(c.passed for c in checks), checks=checks)
+
+
+def routing_dist(grid: Grid, a: DestinationPoint, b: DestinationPoint) -> float:
+    x, y = grid.to_xy([a.lat, b.lat], [a.lon, b.lon])
+    return float(np.hypot(x[1] - x[0], y[1] - y[0]))
+
+
+def _route_check(grid: Grid, score: np.ndarray, pts: Sequence[tuple[float, float]], imp: float) -> GuardCheck:
+    if len(pts) < 2:
+        return _check("route_passable", False, "no route")
+    r, c, inside = grid.cell_of([p[0] for p in pts], [p[1] for p in pts])
+    if not bool(np.all(inside)):
+        return _check("route_passable", False, "route leaves the grid")
+    cells = list(zip(r.tolist(), c.tolist(), strict=True))
+    for (r0, c0), (r1, c1) in zip(cells, cells[1:], strict=False):
+        if max(abs(r1 - r0), abs(c1 - c0)) > 1:
+            return _check("route_passable", False, "route skips cells")
+    hot = [cell for cell in cells[1:] if float(score[cell]) >= imp]
+    if hot:
+        return _check("route_passable", False, f"{len(hot)} route cell(s) at or above impassable score {imp:.2f}")
+    return _check("route_passable", True)
+
+
+def safe_instruction(
+    *,
+    spec: AppSpec,
+    grid: Grid,
+    score: np.ndarray,
+    lat: float,
+    lon: float,
+    pois: Iterable[POI],
+    now: datetime,
+) -> Instruction:
+    """Route from the caller's own position, build the text, guard it; fall back on any failure."""
+    destinations = routing.collect_destinations(spec, pois)
+    rs = spec.routing
+    outcome = routing.plan_route(
+        grid,
+        score,
+        (lat, lon),
+        destinations,
+        alpha=rs.alpha,
+        impassable_score=rs.impassable_score,
+        destination_max_score=routing.destination_threshold(spec),
+    )
+    fallback = Instruction(
+        text=rs.fallback_text,
+        destination=None,
+        route=[],
+        distance_m=0.0,
+        computed_at=now,
+        guard=GuardResult(passed=False, checks=[_check("route_found", False, outcome.reason)]),
+    )
+    if outcome.route is None:
+        return fallback
+    route = outcome.route
+    avoid = routing.avoid_direction(grid, np.asarray(score, dtype=float), (lat, lon), spec.outputs.hotspot_threshold)
+    text = routing.instruction_text(route, grid, avoid)
+    guard = check_instruction(
+        text=text,
+        destination=route.destination,
+        route_points=route.points,
+        spec=spec,
+        grid=grid,
+        score=score,
+        destinations=destinations,
+    )
+    if not guard.passed:
+        return fallback.model_copy(update={"guard": guard})
+    return Instruction(
+        text=text,
+        destination=route.destination,
+        route=route.points,
+        distance_m=route.distance_m,
+        computed_at=now,
+        guard=guard,
+    )
+
+
+def trace_entry(app_id: str, instruction: Instruction, now: datetime) -> TraceEntry:
+    """One TraceEntry with every guard check, for the authority trace. No position, no text."""
+    checks = "; ".join(
+        f"{c.name}={'ok' if c.passed else 'FAIL'}{f' ({c.detail})' if c.detail else ''}"
+        for c in instruction.guard.checks
+    )
+    return TraceEntry(
+        t=now,
+        app_id=app_id,
+        agent="message_guard",
+        saw="instruction request",
+        tested=checks,
+        result="passed" if instruction.guard.passed else "failed",
+        action="sent code-built text" if instruction.guard.passed else "sent fallback text",
+        why="every instruction is guarded before it is sent",
+    )
