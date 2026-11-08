@@ -201,6 +201,11 @@ Ingest keys and authority keys are generated per app at activation and stored in
 - **TraceEntry:** `{t, app_id, agent, model, saw, hypothesis, tested, result, action, why, tool_calls[], skipped_reason?}`
 - **Change:** `{id, app_id, kind: weight|trust|poi|connector|spec_confirm, target, before, after, reason, backtest_id?, actor: agent|dev, t}`
 - **Instruction:** `{text, destination{lat, lon, label}, route[[lat, lon]], distance_m, computed_at, guard{passed, checks[]}}`
+- **Hotspot:** `{id, lat, lon, radius_m, score, mean, area_m2, n_cells, persisted_ticks, contributing_layers[], visibility}`. `score` is the peak cell score; `radius_m = sqrt(area_m2 / π)`. The tick produces it; `/hotspots` and the Critic/POI tools read it.
+- **MapResponse** (`GET /map?format=geojson`): `{app_id, t, cell_m, bbox: [min_lon, min_lat, max_lon, max_lat], layers: {<layer_id> | "score": FeatureCollection}}`. One Polygon feature per cell with `properties: {value, row, col}` (a single `value` field). Cells with `value < 0.01` are omitted to keep the payload small. Without the authority key, only `public` layers are included.
+- **HotspotsResponse** (`GET /hotspots`): `{app_id, t, hotspots: Hotspot[]}`, filtered per item by `visibility`.
+
+`Hotspot`, `MapResponse` and `HotspotsResponse` are Pydantic models in `core/models.py`, mirrored in `types.ts`, like every other contract.
 
 **Outputs.** Without the `X-Authority-Key` header, responses contain only `public` items. This applies to REST and WebSocket alike.
 
@@ -376,7 +381,8 @@ Finish each step end to end before starting the next.
 Demo apps are built *through* the platform from `specs/` and driven by `sim/`, which posts through the public API.
 
 - **Campus Alert** (public safety; State Farm "worst day" angle):
-  - **Inputs:** panic button (press → GPS stream; flexible), classroom buttons and police marker (locked authority), local news (Scout RSS; stiff).
+  - **Inputs:** panic button (press → GPS stream; flexible), classroom buttons and police marker (locked authority; both use the `override` operator, rule 6), local news (Scout RSS; stiff).
+  - **Location:** a generic, non-school area (e.g., a business park or fairground). Not a real, recognizable school campus.
   - **Labels:** threat origin, gathering point / exit (`destination`), shelter-in-place group (`sensitive`), suspected spoof cluster (`sensitive`).
   - **Sim timeline:**
     - t0: threat appears; presses start GPS streams
@@ -405,4 +411,7 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-07:** Line endings are LF for everyone via `.gitattributes`.
 - **2026-11-07:** Operator signature is `(events, params, trust, clock, grid)` (adds `grid`, PR #11). Grid and clock interfaces are agreed between Kida's seats: grid exposes `cell_m`, shape `(H, W)` and `to_xy`/`to_latlon` in local meters from the SW corner; `clock.now()` returns float seconds.
 - **2026-11-07:** Contracts in PR #14 approved and merged; the Core contracts section reflects them.
+- **2026-11-07:** Output contracts set: one combined `Hotspot` (Allen's map fields + Kida A's tick stats), `MapResponse` with a single `value` per cell and near-zero cells omitted, `HotspotsResponse`. Navmi adds them to `models.py` in #9; Allen mirrors them in `types.ts` (no separate `outputs.ts`); `tick.py` emits the `Hotspot` model.
+- **2026-11-07:** Campus Alert: classroom buttons use `override`, like the police marker (rule 6: authority overrides always win).
+- **2026-11-07:** Campus Alert runs on a generic, non-school location, not a real recognizable campus.
 - **2026-11-07:** The engine `Grid` takes `bbox` as a tuple in GeoJSON order `(min_lon, min_lat, max_lon, max_lat)` (PR #12). The `Tier` type is defined once, in `core/models.py`; `engine/tiers.py` imports it and does not define its own.
