@@ -1,0 +1,112 @@
+{
+  "app_id": "campus-alert",
+  "intent": "During a campus emergency, find where the danger is from panic-button phones, classroom alert buttons, police markers and local news, and tell people who are able to leave the safest way out.",
+  "status": "draft",
+  "grid": {
+    "cell_m": 5,
+    "bbox": {
+      "min_lat": 32.984,
+      "min_lon": -96.7525,
+      "max_lat": 32.987593,
+      "max_lon": -96.748216
+    }
+  },
+  "inputs": [
+    {
+      "id": "panic",
+      "kind": "push",
+      "shape": "track",
+      "tier": "flexible",
+      "visibility": "authority",
+      "meaning": "When someone presses the panic button, their phone starts streaming its GPS position every couple of seconds. People who can, run away from the danger; people who can't, hide where they are.",
+      "fields": [
+        { "name": "press_id", "type": "string", "required": false, "description": "Identifies one press-and-stream session." }
+      ],
+      "operators": [
+        { "op": "flow_source", "weight": 0.6, "polarity": "source", "window_s": 20 },
+        { "op": "density", "weight": 0.4, "half_life_s": 60, "sigma_m": 15 }
+      ]
+    },
+    {
+      "id": "room_button",
+      "kind": "push",
+      "shape": "fixed_point",
+      "tier": "locked",
+      "visibility": "authority",
+      "meaning": "A teacher pressed the alert button in their classroom: danger is confirmed at or near this room.",
+      "fields": [
+        { "name": "room", "type": "string", "required": true, "description": "Room identifier." }
+      ],
+      "operators": [
+        { "op": "density", "weight": 0.5, "noise_floor": 1.0, "half_life_s": 300, "sigma_m": 20 }
+      ]
+    },
+    {
+      "id": "police_marker",
+      "kind": "push",
+      "shape": "fixed_point",
+      "tier": "locked",
+      "visibility": "authority",
+      "meaning": "Police mark the threat's last known position. The marker stays until police clear it.",
+      "fields": [
+        { "name": "cleared", "type": "boolean", "required": false, "description": "True clears an earlier marker." }
+      ],
+      "operators": [
+        { "op": "override", "weight": 0, "radius_m": 30 }
+      ]
+    },
+    {
+      "id": "local_news",
+      "kind": "pull",
+      "shape": "document",
+      "tier": "stiff",
+      "visibility": "authority",
+      "meaning": "Local news reports about incidents on or near campus.",
+      "connector": {
+        "type": "rss",
+        "url": "http://localhost:8765/campus-news.xml",
+        "poll_s": 30,
+        "config": { "scripted": true }
+      },
+      "operators": [
+        { "op": "event_points", "weight": 0.3, "half_life_s": 600 }
+      ]
+    }
+  ],
+  "verification": [
+    { "method": "authority_confirmation", "priority": 1 },
+    { "method": "predictive_check", "priority": 2 },
+    { "method": "cross_input_agreement", "priority": 3 }
+  ],
+  "outputs": {
+    "layers": [
+      { "id": "score", "visibility": "authority" },
+      { "id": "panic.flow_source", "visibility": "authority" },
+      { "id": "panic.density", "visibility": "authority" },
+      { "id": "room_button.density", "visibility": "authority" },
+      { "id": "local_news.event_points", "visibility": "authority" }
+    ],
+    "poi_labels": {
+      "mode": "on",
+      "min_confidence": 0.6,
+      "label_set": [
+        { "label": "threat origin", "sensitive": false, "destination": false },
+        { "label": "gathering point", "sensitive": false, "destination": true },
+        { "label": "shelter-in-place group", "sensitive": true, "destination": false },
+        { "label": "suspected spoof cluster", "sensitive": true, "destination": false }
+      ]
+    }
+  },
+  "routing": {
+    "enabled": true,
+    "destination_points": [
+      { "lat": 32.984359, "lon": -96.752072, "label": "South-west gathering point" },
+      { "lat": 32.987234, "lon": -96.748645, "label": "North-east gathering point" },
+      { "lat": 32.986964, "lon": -96.752179, "label": "North-west gathering point" }
+    ],
+    "impassable_score": 0.7,
+    "alpha": 6.0,
+    "fallback_text": "If you can't leave safely, lock or barricade the door, silence your phone and stay out of sight.",
+    "rephrase": false
+  }
+}

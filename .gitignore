@@ -15,3 +15,6 @@ data/
 node_modules/
 dist/
 *.tsbuildinfo
+
+# simulator ground-truth runs (read only by api/debug.py)
+sim/ground_truth/*.jsonl
