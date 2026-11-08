@@ -388,3 +388,28 @@ export interface PinRequest {
   pinned?: boolean; // default true
   reason?: string;
 }
+
+// --- Builder: compile + activate (api/apps.py) ---
+
+/** One raw input for the Compiler; it proposes tier, operators and plausibility itself. */
+export interface CompileInput {
+  id: string;
+  kind: InputKind;
+  shape: InputShape;
+  meaning: string; // the dev's words, verbatim
+  fields?: InputField[];
+}
+
+/** Body of POST /v1/apps/{app}/compile. Response: AppSpec at "pending_confirmation". */
+export interface CompileRequest {
+  intent: string;
+  grid: GridSpec;
+  inputs: CompileInput[];
+}
+
+/** POST /v1/apps/{app}/activate. The keys are shown once. */
+export interface ActivateResponse {
+  app_id: string;
+  ingest_key: string;
+  authority_key: string;
+}
