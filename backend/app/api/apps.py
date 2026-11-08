@@ -8,13 +8,16 @@ the app ticking.
 
 from __future__ import annotations
 
+import uuid
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import authority_key_header, get_db, get_engine
 from app.core import clock as clock_mod
 from app.core.access import is_authority
 from app.core.db import Db
-from app.core.models import AppSpec, Model
+from app.core.models import AppSpec, Change, Model
 from app.engine.tick import TickEngine
 
 router = APIRouter(prefix="/v1/apps", tags=["apps"])
@@ -62,8 +65,22 @@ def activate_app(
     if spec.status == "active":
         raise HTTPException(status_code=409, detail="app is already active")
     t = clock_mod.now()
+    before_status = spec.status
     spec.status = "active"
     db.upsert_app(spec, t=t)
     keys = db.create_keys(app, t=t)
     engine.add_app(spec)
+    db.add_change(
+        Change(
+            id=str(uuid.uuid4()),
+            app_id=app,
+            kind="spec_confirm",
+            target=app,
+            before=before_status,
+            after="active",
+            reason="dev confirmed the spec at activation",
+            actor="dev",
+            t=datetime.fromtimestamp(t, tz=UTC),
+        )
+    )
     return ActivateResponse(app_id=app, ingest_key=keys.ingest_key, authority_key=keys.authority_key)

@@ -77,6 +77,17 @@ def test_activate_generates_keys_and_flips_status(client):
     assert got.json()["status"] == "active"
 
 
+def test_activate_writes_a_spec_confirm_change(client, app):
+    client.post("/v1/apps", json=_spec())
+    client.post("/v1/apps/test-app/activate")
+    changes = app.state.db.list_changes("test-app", kind="spec_confirm")
+    assert len(changes) == 1
+    c = changes[0]
+    assert c.actor == "dev"
+    assert c.before == "draft"
+    assert c.after == "active"
+
+
 def test_activate_missing_app_is_404(client):
     assert client.post("/v1/apps/nope/activate").status_code == 404
 
