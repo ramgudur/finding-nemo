@@ -10,11 +10,13 @@ writes the `spec_confirm` Change.
 
 from __future__ import annotations
 
+import math
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import ValidationError
 
 from app.agents.compiler import CompilerCache, run_compiler
@@ -29,17 +31,96 @@ from app.core.db import Db
 from app.core.models import (
     AppSpec,
     Change,
+    CompileFailure,
     CompileRequest,
+    CompileStatus,
     Model,
     SourceSuggestion,
     SpecEditResponse,
     SuggestSourceRequest,
+    TraceEntry,
+    ValidateResult,
 )
 from app.engine.tick import TickEngine
 from app.tools.compiler_tools import _spec_errors, _spec_warnings
 from app.tools.context import ToolContext
 
 router = APIRouter(prefix="/v1/apps", tags=["apps"])
+
+
+@dataclass
+class _CompileRun:
+    started_at: float
+    running: bool = True
+
+
+def _compile_runs(request: Request) -> dict[str, _CompileRun]:
+    """In-process record of the latest compile per app, for `GET /{app}/compile/status`."""
+    runs = getattr(request.app.state, "compile_runs", None)
+    if runs is None:
+        runs = request.app.state.compile_runs = {}
+    return runs
+
+
+def _compile_traces(db: Db, app: str, since: float) -> list[TraceEntry]:
+    """The Compiler's own trace entries since `since` (not the Builder's source suggestions,
+    which share the agent name)."""
+    return [
+        t
+        for t in db.list_trace(app, since=since - 1e-6)
+        if t.agent == "compiler" and t.action != "suggest_source" and not t.why.startswith("suggest_source")
+    ]
+
+
+def _retry_after_s(llm: LlmRouter) -> int:
+    """Seconds until the Compiler's provider bucket refills one request (60 / RPM, rounded up)."""
+    rpm = llm.settings.rpm(llm.settings.agent_model("compiler").provider)
+    return max(1, math.ceil(60.0 / max(1, rpm)))
+
+
+def _plain_error(err: Any) -> str:
+    where = ".".join(str(p) for p in err.get("loc", ())) or "spec"
+    msg = str(err.get("msg", "invalid")).removeprefix("Value error, ")
+    return f"{where}: {msg}"
+
+
+def _last_validate(traces: list[TraceEntry]) -> ValidateResult | None:
+    """Errors and warnings of the last spec the Compiler passed to `validate_spec` or
+    `finalize_app`, re-checked here with the same platform checks. Only platform-written
+    strings come back: shape errors as plain "where: what" lines (no pydantic boilerplate,
+    no input echo), never the trace's text or the tool arguments themselves."""
+    calls = [c for t in traces for c in t.tool_calls]
+    proposed = next(
+        (c.args["spec"] for c in reversed(calls) if c.name in ("validate_spec", "finalize_app") and "spec" in c.args),
+        None,
+    )
+    if not isinstance(proposed, dict):
+        return None
+    try:
+        spec = AppSpec.model_validate(proposed)
+    except ValidationError as e:
+        return ValidateResult(errors=[_plain_error(x) for x in e.errors()])
+    return ValidateResult(errors=_spec_errors(spec), warnings=_spec_warnings(spec))
+
+
+def _compile_failure(traces: list[TraceEntry]) -> CompileFailure:
+    """Plain-language reason for a compile that never finalized, plus the errors and warnings of
+    the last spec the Compiler proposed."""
+    last = traces[-1] if traces else None
+    if last is None:
+        reason = "The Compiler did not finalize a spec."
+    elif last.action == "gave up":
+        reason = f"The Compiler used all its steps without a valid spec ({last.why})."
+    elif last.action == "error":
+        reason = f"The model call failed ({last.why})."
+    else:
+        reason = "The Compiler stopped without finalizing a valid spec."
+    checked = _last_validate(traces) or ValidateResult()
+    errors = list(checked.errors)
+    if not errors:  # e.g. a create_input or finalize_app guard that isn't a spec-shape error
+        last_calls = next((t.tool_calls for t in reversed(traces) if t.tool_calls), [])
+        errors = [f"{c.name}: {c.result_summary}" for c in last_calls if not c.ok]
+    return CompileFailure(reason=reason, errors=errors, warnings=checked.warnings)
 
 
 class ActivateResponse(Model):
@@ -189,6 +270,7 @@ def edit_spec(app: str, body: dict[str, Any] = Body(...), db: Db = Depends(get_d
 async def compile_app(
     app: str,
     body: CompileRequest,
+    request: Request,
     db: Db = Depends(get_db),
     engine: TickEngine = Depends(get_engine),
     llm: LlmRouter = Depends(get_llm),
@@ -207,25 +289,56 @@ async def compile_app(
                 raise HTTPException(status_code=422, detail=f"{inp.id}: connector URL refused: {e}") from None
 
     start_t = clock_mod.now()
+    run = _CompileRun(started_at=start_t)
+    _compile_runs(request)[app] = run
     ctx = ToolContext(app_id=app, db=db, engine=engine, actor="agent", agent="compiler")
-    spec = await run_compiler(
-        ctx,
-        app_id=app,
-        intent=body.intent,
-        grid=body.grid.model_dump(mode="json"),
-        inputs=[i.model_dump(mode="json") for i in body.inputs],
-        destination_points=[d.model_dump(mode="json") for d in body.destination_points],
-        llm=llm,
-        cache=cache,
-    )
+    try:
+        spec = await run_compiler(
+            ctx,
+            app_id=app,
+            intent=body.intent,
+            grid=body.grid.model_dump(mode="json"),
+            inputs=[i.model_dump(mode="json") for i in body.inputs],
+            destination_points=[d.model_dump(mode="json") for d in body.destination_points],
+            llm=llm,
+            cache=cache,
+        )
+    finally:
+        run.running = False
     if spec is not None:
         return spec
 
-    traces = [t for t in db.list_trace(app, since=start_t - 1e-6) if t.agent == "compiler"]
+    traces = _compile_traces(db, app, start_t)
     last = traces[-1] if traces else None
     if last is not None and last.skipped_reason:
-        raise HTTPException(status_code=503, detail=last.skipped_reason)
-    raise HTTPException(status_code=422, detail=last.why if last is not None else "compile did not finalize")
+        retry_s = _retry_after_s(llm)
+        raise HTTPException(
+            status_code=503,
+            detail=f"{last.skipped_reason}: try again in about {retry_s} s",
+            headers={"Retry-After": str(retry_s)},
+        )
+    raise HTTPException(status_code=422, detail=_compile_failure(traces).model_dump())
+
+
+@router.get("/{app}/compile/status", response_model=CompileStatus)
+def compile_status(app: str, request: Request, db: Db = Depends(get_db)) -> CompileStatus:
+    """Public-safe compile progress for the Builder (a pending app has no authority key yet).
+    Only for apps that are not active: 404 once active, or when nothing is known about the app.
+    A step count, elapsed time and the last validation's errors/warnings only; never trace text
+    or tool arguments (rule 8)."""
+    spec = db.get_app(app)
+    run = _compile_runs(request).get(app)
+    if (spec is not None and spec.status == "active") or (spec is None and run is None):
+        raise HTTPException(status_code=404, detail="no compile for this app")
+    if run is None:
+        return CompileStatus(running=False)
+    traces = _compile_traces(db, app, run.started_at)
+    return CompileStatus(
+        running=run.running,
+        step=len(traces),
+        elapsed_s=round(max(0.0, clock_mod.now() - run.started_at), 1) if run.running else 0.0,
+        last_validate=_last_validate(traces),
+    )
 
 
 @router.post("/{app}/sources/suggest", response_model=SourceSuggestion)
