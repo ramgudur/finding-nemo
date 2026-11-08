@@ -251,7 +251,11 @@ class Db:
             self._conn.commit()
             return cur.lastrowid
 
-    def list_events(self, app_id: str, input_id: str | None = None, since: float | None = None) -> list[Event]:
+    def list_events(
+        self, app_id: str, input_id: str | None = None, since: float | None = None, limit: int | None = None
+    ) -> list[Event]:
+        """Events in ascending `ts` order. With `limit`, only the most recent `limit` (selected in SQL,
+        still returned ascending)."""
         clauses, params = ["app_id = ?"], [app_id]
         if input_id is not None:
             clauses.append("input_id = ?")
@@ -259,7 +263,15 @@ class Db:
         if since is not None:
             clauses.append("ts > ?")
             params.append(since)
-        rows = self._query(f"SELECT event_json FROM events WHERE {' AND '.join(clauses)} ORDER BY ts", params)
+        where = " AND ".join(clauses)
+        if limit is not None:
+            rows = self._query(
+                f"SELECT event_json FROM events WHERE {where} ORDER BY ts DESC, row_id DESC LIMIT ?",
+                [*params, max(0, int(limit))],
+            )
+            rows = list(reversed(rows))
+        else:
+            rows = self._query(f"SELECT event_json FROM events WHERE {where} ORDER BY ts", params)
         return [Event.model_validate_json(r["event_json"]) for r in rows]
 
     # -- connectors ---------------------------------------------------------------
@@ -281,9 +293,7 @@ class Db:
         return ConnectorConfig.model_validate_json(row["config_json"]) if row else None
 
     def list_connectors(self, app_id: str) -> list[tuple[str, ConnectorConfig]]:
-        rows = self._query(
-            "SELECT input_id, config_json FROM connectors WHERE app_id = ? ORDER BY input_id", (app_id,)
-        )
+        rows = self._query("SELECT input_id, config_json FROM connectors WHERE app_id = ? ORDER BY input_id", (app_id,))
         return [(r["input_id"], ConnectorConfig.model_validate_json(r["config_json"])) for r in rows]
 
     def record_connector_poll(self, app_id: str, input_id: str, polled_at: float, status: str) -> None:
