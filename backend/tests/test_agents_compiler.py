@@ -1,4 +1,6 @@
 import asyncio
+import json as _json
+from pathlib import Path as _Path
 
 from fake_llm import FakeAsyncOpenAI
 
@@ -9,10 +11,14 @@ from app.core.db import Db
 from app.core.models import AppSpec
 from app.tools.context import ToolContext
 
-BBOX = {"min_lat": 0.0, "min_lon": 0.0, "max_lat": 0.01, "max_lon": 0.01}
-GRID = {"cell_m": 10, "bbox": BBOX}
-INTENT = "find where people gather"
-INPUTS = [{"id": "pings", "kind": "push", "shape": "point", "meaning": "a ping means someone is here"}]
+# The dev request that matches the recorded `compiler_campus_alert` fixture, whose finalize_app
+# call proposes specs/campus-alert.json: finalize_app pins the dev's inputs, intent and grid (#164),
+# so the request has to declare the same inputs the recording proposes.
+_FIXTURE_SPEC = _json.loads((_Path(__file__).parents[2] / "specs" / "campus-alert.json").read_text(encoding="utf-8"))
+GRID = _FIXTURE_SPEC["grid"]
+BBOX = GRID["bbox"]
+INTENT = _FIXTURE_SPEC["intent"]
+INPUTS = [{k: i[k] for k in ("id", "kind", "shape", "meaning", "fields") if k in i} for i in _FIXTURE_SPEC["inputs"]]
 
 
 def _router(script) -> LlmRouter:
@@ -185,3 +191,35 @@ def test_routing_with_dev_points_but_no_destination_label_passes_finalize():
     ok = call_tool(ctx, "finalize_app", {"spec": raw})  # the model sent none; the dev's are written in
     assert ok["ok"], ok
     assert [d.model_dump() for d in ctx.db.get_app("campus-alert").routing.destination_points] == DEV_POINTS
+
+
+def test_recorded_live_neutral_compile_meets_the_164_bar():
+    """A real Nemotron run (recorded live on build.nvidia.com) of a neutral example app, replayed:
+    it finalizes in 3 model calls (catalogue in the task, no list_operators round trip), names the
+    places the intent asks about, and proposes every verification method its inputs can feed."""
+    fixture = _json.loads(
+        (_Path(__file__).parent / "fixtures" / "llm" / "compiler_neutral_fleet_live.json").read_text(encoding="utf-8")
+    )
+    req = fixture["input"]
+    fake = FakeAsyncOpenAI(fixture)
+    llm = LlmRouter(Settings(_env_file=None), clients={"nvidia": fake, "openrouter": fake})
+    ctx = _ctx(req["app_id"])
+    spec = asyncio.run(
+        run_compiler(
+            ctx,
+            app_id=req["app_id"],
+            intent=req["intent"],
+            grid=req["grid"],
+            inputs=req["inputs"],
+            llm=llm,
+            cache=CompilerCache(),
+        )
+    )
+    assert spec is not None and spec.status == "pending_confirmation"
+    assert len(fake.calls) == 3
+    assert spec.outputs.poi_labels.mode != "off" and spec.outputs.poi_labels.label_set
+    assert len(spec.verification) >= 2
+    assert [i.meaning for i in spec.inputs] == [i["meaning"] for i in req["inputs"]]  # pinned verbatim
+    from app.tools.compiler_tools import _spec_warnings
+
+    assert not any("leaves out" in w for w in _spec_warnings(spec))

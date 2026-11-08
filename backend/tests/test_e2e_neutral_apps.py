@@ -412,13 +412,8 @@ def test_a_pois_endpoint_filters_by_visibility(app_a, poi_a):
 # --- Compiler-side check -----------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="GAP (Compiler side): tools/compiler_tools.py finalize_app accepts a proposed spec whose inputs "
-    "differ from the dev's CompileRequest (meaning reworded, an input invented); `meaning` is meant to be "
-    "the dev's words verbatim",
-)
 def test_compile_keeps_the_devs_inputs_verbatim():
+    """Was a strict xfail (GAP found by this sweep); fixed in #164: finalize_app pins the dev's inputs."""
     clock, prev = _module_clock()
     try:
         spec = spec_a()
