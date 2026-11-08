@@ -174,17 +174,21 @@ Ingest keys and authority keys are generated per app at activation and stored in
 `core/models.py` is authoritative. When it changes, update `frontend/src/api/types.ts`, `specs/*.json` and this section in the same commit.
 
 **AppSpec:**
-- `app_id`, `intent`, `status` (`draft` | `pending_confirmation` | `active`), `grid{cell_m, bbox}`
+- `app_id`, `intent`, `status` (`draft` | `pending_confirmation` | `active`)
+- `grid`: `{cell_m, bbox: {min_lat, min_lon, max_lat, max_lon}}`. Named fields in the spec; `bbox.as_geojson()` gives the `(min_lon, min_lat, max_lon, max_lat)` tuple the engine `Grid` takes.
 - `inputs[]`, each with:
   - `id`, `kind` (`push` | `pull`), `shape` (`point` | `track` | `fixed_point` | `field` | `document`)
   - `tier`
-  - `visibility` (default `authority` for raw data)
-  - `meaning` (the dev's words, verbatim), `fields`, `connector?`
-  - `operators[]`: `{op, weight, noise_floor?, ...params}`
-- `verification[]`: `{method, priority}`
-- `outputs.layers[]`: `{id, visibility}`
+  - `visibility` (default `authority`)
+  - `meaning` (the dev's words, verbatim)
+  - `fields[]`: `{name, type: number|integer|string|boolean, required, description}`
+  - `connector?`: `{type: rss|json_api|open_meteo, url?, poll_s, config{}}`. Push inputs may not have one.
+  - `operators[]`: `{op, weight, noise_floor?, layer_id?, ...params}`. `layer_id` defaults to `<input_id>.<op>`; `OperatorConfig.params()` returns what `registry.run` takes.
+- `verification[]`: `{method, priority}`. Priority 1 is highest; methods and priorities are unique.
+- `outputs.layers[]`: `{id, visibility}`. `id` is a layer id or `score`. Visibility defaults to `authority` everywhere.
+- All datetimes are timezone-aware and normalized to UTC (`UtcDatetime`).
 - `outputs.poi_labels`: `{mode: auto|on|off, label_set: [{label, sensitive, destination}], min_confidence}`. A `sensitive` label is authority-only. A `destination` label is a routing target and must not also be `sensitive`.
-- `routing`: `{enabled, destination_points[], impassable_score, alpha, fallback_text, rephrase: false}`
+- `routing`: `{enabled, destination_points[{lat, lon, label}], impassable_score, alpha, fallback_text (≤ 360 chars), rephrase: false}`
 
 **Event (push):** `POST /v1/apps/{app}/inputs/{input}/events`
 - Header `X-Ingest-Key`; body `{user_id?, lat, lon, ts, ...input fields}`.
@@ -400,4 +404,5 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-07:** The lead's `flowsource.py` lives at `reference/flowsource.py` as a reference only (its `simulate()` holds demo values, so it stays out of `backend/`). Kida seat b ports it into `engine/operators/flow_source.py`.
 - **2026-11-07:** Line endings are LF for everyone via `.gitattributes`.
 - **2026-11-07:** Operator signature is `(events, params, trust, clock, grid)` (adds `grid`, PR #11). Grid and clock interfaces are agreed between Kida's seats: grid exposes `cell_m`, shape `(H, W)` and `to_xy`/`to_latlon` in local meters from the SW corner; `clock.now()` returns float seconds.
+- **2026-11-07:** Contracts in PR #14 approved and merged; the Core contracts section reflects them.
 - **2026-11-07:** The engine `Grid` takes `bbox` as a tuple in GeoJSON order `(min_lon, min_lat, max_lon, max_lat)` (PR #12). The `Tier` type is defined once, in `core/models.py`; `engine/tiers.py` imports it and does not define its own.
