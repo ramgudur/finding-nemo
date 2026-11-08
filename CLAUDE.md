@@ -209,6 +209,9 @@ Ingest keys and authority keys are generated per app at activation and stored in
 
 **Outputs.** Without the `X-Authority-Key` header, responses contain only `public` items. This applies to REST and WebSocket alike. Browsers can't set WebSocket headers, so the WS client sends `{type: "auth", key}` as its first frame; until a valid key arrives the stream is public-only. Never echo or log the key.
 
+- **WS frames:** server replies `{type: "auth_ok", authority: bool}` to an auth frame (`false` for a bad key; the socket stays public-only). Each tick sends `{type: "tick", t, map: MapResponse, hotspots: HotspotsResponse}`, filtered like REST.
+- **REST keys:** no `X-Authority-Key` → public data. A wrong key → `401`.
+
 | Endpoint | Visibility |
 |---|---|
 | `GET /v1/apps/{app}/map?format=geojson` | public layers; all layers with the key |
@@ -251,7 +254,7 @@ Ingest keys and authority keys are generated per app at activation and stored in
 
 **Backtests** (`engine/backtest.py`):
 - **Window:** the last min(10 min, available history), split **70/30 by time** into train and holdout. Reject with "insufficient holdout data" if the holdout has fewer than `MIN_HOLDOUT_EVENTS` (default 20).
-- **Acceptance:** the highest-priority method with data must improve on the **holdout**, and no higher-priority method may get worse by more than ε. Store both train and holdout scores.
+- **Acceptance:** the highest-priority method with data (the deciding method) must improve on the **holdout**, and no other method with data may get worse on the holdout by more than ε. A candidate that makes a higher-priority method lose its data is rejected. Store both train and holdout scores.
 - **Single** (`run_backtest`): used for trust changes. Re-runs the operators.
 - **Batch** (`run_backtest_batch(search_spec)`), for weight changes:
   1. Input example: `{"layers": {"crowd_density": [0.6, 1.1], "flow": [0.9, 1.4]}, "samples": 256}`. Max samples is 2048.
@@ -416,3 +419,6 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-07:** Campus Alert runs on a generic, non-school location, not a real recognizable campus.
 - **2026-11-07:** The engine `Grid` takes `bbox` as a tuple in GeoJSON order `(min_lon, min_lat, max_lon, max_lat)` (PR #12). The `Tier` type is defined once, in `core/models.py`; `engine/tiers.py` imports it and does not define its own.
 - **2026-11-07:** WebSocket auth is a first-frame `{type: "auth", key}` message (option a); public-only until a valid key arrives.
+- **2026-11-07:** Backtest ε applies to every non-deciding method with data (lower priority); a candidate that loses a higher-priority method's data is rejected (PR #31).
+- **2026-11-07:** WS frames `auth_ok` / `tick` approved as proposed by Allen; REST with a wrong authority key returns 401, no key returns public data.
+- **2026-11-07:** Kida seat b files and takes `trust.py` spoof features (step 3) next, then the batch backtest (step 5).
