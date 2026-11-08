@@ -216,7 +216,7 @@ Ingest keys and authority keys are generated per app at activation and stored in
 
 ## Scoring engine
 
-**Operators** (`engine/operators/`) are pure functions `(events, params, trust, clock) → layer grid` plus optional `extras` (point estimates, kind). Each declares a default `noise_floor` in its params model in `registry.py`.
+**Operators** (`engine/operators/`) are pure functions `(events, params, trust, clock, grid) → layer grid` plus optional `extras` (point estimates, kind). Each declares a default `noise_floor` in its params model in `registry.py`.
 
 | Operator | For | Computes |
 |---|---|---|
@@ -399,3 +399,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-07:** Contracts (`core/models.py`, `types.ts`, `specs/`) change only with lead approval. Allen writes the first draft in the scaffold.
 - **2026-11-07:** The lead's `flowsource.py` lives at `reference/flowsource.py` as a reference only (its `simulate()` holds demo values, so it stays out of `backend/`). Kida seat b ports it into `engine/operators/flow_source.py`.
 - **2026-11-07:** Line endings are LF for everyone via `.gitattributes`.
+- **2026-11-07:** Operator signature is `(events, params, trust, clock, grid)` (adds `grid`, PR #11). Grid and clock interfaces are agreed between Kida's seats: grid exposes `cell_m`, shape `(H, W)` and `to_xy`/`to_latlon` in local meters from the SW corner; `clock.now()` returns float seconds.
