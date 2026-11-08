@@ -1,0 +1,15 @@
+{
+  "scenario": "source_suggest_pull",
+  "description": "Add a source: a public feed the platform must poll. The feed URL is in the dev's words and is kept; the second option's URL is not, so code drops it.",
+  "steps": [
+    {
+      "expect": {
+        "reasoning": false
+      },
+      "response": {
+        "content": "{\"kind\": \"pull\", \"shape\": \"document\", \"options\": [{\"type\": \"rss\", \"why\": \"It is a feed of documents at the URL you gave.\", \"config\": {\"url\": \"https://feeds.example.org/area.xml\"}}, {\"type\": \"json_api\", \"why\": \"A custom JSON endpoint, if the publisher offers one.\", \"config\": {\"url\": \"https://invented.example.net/api\"}}]}",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

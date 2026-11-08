@@ -73,9 +73,14 @@ def _task_prompt(
 ) -> str:
     given: dict[str, Any] = {"app_id": app_id, "intent": intent, "grid": grid, "inputs": inputs}
     note = ""
+    if any(i.get("connector") for i in inputs):
+        note += (
+            "\nInputs that come with a connector already have the dev's chosen source. It is copied "
+            "into the spec as given (you can't change or drop it), so don't create or request one for them."
+        )
     if destinations:
         given["destination_points"] = destinations
-        note = (
+        note += (
             "\nThe dev picked the destination_points above on the map. They are copied into "
             "routing.destination_points as given (you can't add, move or drop them), so they "
             "count as destinations when you decide on routing."
@@ -103,10 +108,12 @@ async def run_compiler(
     never reached a valid `finalize_app` call.
 
     `destination_points` are the dev's own words, like `meaning`: `finalize_app` writes them
-    into `routing.destination_points` verbatim, whatever the model proposed."""
+    into `routing.destination_points` verbatim, whatever the model proposed. So is each pull
+    input's `connector` when the dev gave one: `finalize_app` copies it onto that input."""
     cache = COMPILER_CACHE if cache is None else cache
     destinations = list(destination_points or [])
     ctx.extra["dev_destination_points"] = destinations
+    ctx.extra["dev_connectors"] = {i["id"]: i["connector"] for i in inputs if i.get("connector")}
     cached = cache.get(intent, inputs, destinations)
     if cached is not None:
         # Through finalize_app (not a direct db.upsert_app), so a cache hit gets the same

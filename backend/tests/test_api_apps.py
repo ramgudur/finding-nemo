@@ -186,3 +186,87 @@ def test_compile_copies_the_devs_destination_points():
         r = client.post("/v1/apps/campus-alert/compile", json={**_compile_request(), "destination_points": points})
     assert r.status_code == 200, r.text
     assert r.json()["routing"]["destination_points"] == points
+
+
+# -- #152: a pull input's connector, chosen by the dev, rides along with compile ---------
+
+FEED = {"type": "rss", "url": "https://feeds.example.org/area.xml", "poll_s": 300, "config": {}, "preset": None}
+
+
+def _pull_compile_request() -> dict:
+    req = _compile_request()
+    req["inputs"].append(
+        {
+            "id": "feed",
+            "kind": "pull",
+            "shape": "document",
+            "meaning": "public reports about the area",
+            "connector": FEED,
+        }
+    )
+    return req
+
+
+def _finalize_script() -> dict:
+    """The model proposes the feed input with a different URL; finalize_app must keep the dev's."""
+    req = _compile_request()
+    spec = {
+        "app_id": "some-app",
+        "intent": req["intent"],
+        "grid": req["grid"],
+        "inputs": [
+            {**req["inputs"][0], "tier": "flexible", "operators": [{"op": "density", "weight": 1.0}]},
+            {
+                "id": "feed",
+                "kind": "pull",
+                "shape": "document",
+                "tier": "stiff",
+                "meaning": "public reports about the area",
+                "connector": {"type": "rss", "url": "https://elsewhere.example.net/feed"},
+                "operators": [{"op": "event_points", "weight": 0.3}],
+            },
+        ],
+    }
+    return {
+        "scenario": "s",
+        "description": "d",
+        "steps": [
+            {"response": {"tool_calls": [{"name": "finalize_app", "arguments": {"spec": spec}}]}},
+            {"response": {"content": "Proposed."}},
+        ],
+    }
+
+
+def test_compile_copies_the_devs_connector_verbatim(monkeypatch):
+    from app.connectors import url_guard
+
+    monkeypatch.setattr(url_guard, "check_url", lambda url, **kw: url)
+    app = _app_with_llm(_finalize_script())
+    with TestClient(app) as client:
+        r = client.post("/v1/apps/some-app/compile", json=_pull_compile_request())
+    assert r.status_code == 200, r.text
+    feed = next(i for i in r.json()["inputs"] if i["id"] == "feed")
+    assert feed["connector"] == FEED
+    assert feed["meaning"] == "public reports about the area"
+
+
+def test_compile_rejects_an_unsafe_connector_url_before_any_model_call(monkeypatch):
+    from app.connectors import url_guard
+
+    def refuse(url, **kw):
+        raise url_guard.UnsafeUrl("that host is not allowed")
+
+    monkeypatch.setattr(url_guard, "check_url", refuse)
+    app = _app_with_llm({"scenario": "s", "description": "d", "steps": []})
+    with TestClient(app) as client:
+        r = client.post("/v1/apps/some-app/compile", json=_pull_compile_request())
+    assert r.status_code == 422 and "connector URL refused" in r.text
+
+
+def test_compile_rejects_a_connector_on_a_push_input():
+    req = _compile_request()
+    req["inputs"][0]["connector"] = FEED
+    app = _app_with_llm({"scenario": "s", "description": "d", "steps": []})
+    with TestClient(app) as client:
+        r = client.post("/v1/apps/some-app/compile", json=req)
+    assert r.status_code == 422

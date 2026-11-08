@@ -16,11 +16,14 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.agents.compiler import CompilerCache, run_compiler
 from app.agents.llm import LlmRouter
+from app.agents.source_suggester import suggest_source
 from app.api.deps import authority_key_header, get_compiler_cache, get_db, get_engine, get_llm
+from app.connectors import engine as connector_engine
+from app.connectors import url_guard
 from app.core import clock as clock_mod
 from app.core.access import is_authority
 from app.core.db import Db
-from app.core.models import AppSpec, Change, CompileRequest, Model
+from app.core.models import AppSpec, Change, CompileRequest, Model, SourceSuggestion, SuggestSourceRequest
 from app.engine.tick import TickEngine
 from app.tools.context import ToolContext
 
@@ -103,6 +106,14 @@ async def compile_app(
     if existing is not None and existing.status == "active":
         raise HTTPException(status_code=409, detail="app is already active")
 
+    for inp in body.inputs:  # refuse an unsafe source before spending model budget on it
+        url = connector_engine.connector_url(inp.connector) if inp.connector is not None else None
+        if url is not None:
+            try:
+                url_guard.check_url(url)
+            except url_guard.UnsafeUrl as e:
+                raise HTTPException(status_code=422, detail=f"{inp.id}: connector URL refused: {e}") from None
+
     start_t = clock_mod.now()
     ctx = ToolContext(app_id=app, db=db, engine=engine, actor="agent", agent="compiler")
     spec = await run_compiler(
@@ -123,3 +134,18 @@ async def compile_app(
     if last is not None and last.skipped_reason:
         raise HTTPException(status_code=503, detail=last.skipped_reason)
     raise HTTPException(status_code=422, detail=last.why if last is not None else "compile did not finalize")
+
+
+@router.post("/{app}/sources/suggest", response_model=SourceSuggestion)
+async def suggest_app_source(
+    app: str,
+    body: SuggestSourceRequest,
+    db: Db = Depends(get_db),
+    engine: TickEngine = Depends(get_engine),
+    llm: LlmRouter = Depends(get_llm),
+) -> SourceSuggestion:
+    """Builder "Add a source": infer kind, shape and ranked options from the dev's description.
+    Always 200: when the model can't answer (rate budget, provider error, invalid twice) it returns
+    every option unranked. A suggestion only; it writes no app state (only trace entries)."""
+    ctx = ToolContext(app_id=app, db=db, engine=engine, actor="agent", agent="compiler")
+    return await suggest_source(ctx, body.intent, body.description, llm)
