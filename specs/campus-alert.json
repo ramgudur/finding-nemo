@@ -64,6 +64,10 @@
       "tier": "stiff",
       "visibility": "authority",
       "meaning": "Local news reports about incidents on or near the site.",
+      "fields": [
+        { "name": "doc_id", "type": "string", "required": false, "description": "Stable id of the article, so a re-polled article counts once." },
+        { "name": "confidence", "type": "number", "required": false, "description": "How sure the extraction is that the article locates an incident, 0 to 1." }
+      ],
       "connector": {
         "type": "rss",
         "url": "http://localhost:8765/campus-news.xml",
