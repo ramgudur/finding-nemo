@@ -120,3 +120,58 @@ def test_physics_fit_beats_the_reference_on_noise_and_fake_flight():
     _, op_err, covered = bench.evaluate(seeds, n=80)
     assert np.median(op_err) < 15
     assert 0.55 <= covered <= 0.98  # 2 x uncertainty_m covers most true sources (~75% measured)
+
+
+CONSENSUS = FULL_WINDOW.model_copy(update={"estimator": "consensus"})
+
+
+def test_default_estimator_is_wls():
+    assert FlowSourceParams().estimator == "wls"
+
+
+@pytest.mark.parametrize(("kw", "max_median_err"), [({}, 15.0), ({"n_people": 40}, 30.0)])
+def test_consensus_estimator_is_close(kw, max_median_err):
+    errs = []
+    for seed in range(10):
+        r = _run(flee_scenario(GRID, origin=ORIGIN, seed=seed, **kw), CONSENSUS)
+        assert r.extras["kind"] == "source" and r.extras["uncertainty_m"] > 0
+        errs.append(GRID.dist_m(r.extras["point"], ORIGIN))
+    assert np.median(errs) < max_median_err
+
+
+def test_consensus_resists_noisy_coordinated_fakes():
+    """25% fake tracks fleeing a decoy with realistic noise: the consensus start picks the real source."""
+    rng = np.random.default_rng(7)
+    decoy = np.array([120.0, 400.0])
+    errs_c, errs_w = [], []
+    for seed in range(6):
+        real = flee_scenario(GRID, origin=ORIGIN, n_people=120, seed=seed)
+        rows = []
+        for k in range(30):
+            ang = rng.uniform(0, 2 * np.pi)
+            d = np.array([np.cos(ang), np.sin(ang)])
+            s0, v = decoy + rng.uniform(5, 40) * d, rng.uniform(2, 4)
+            rows += [(f"fake{k}", float(t), *(s0 + d * v * t + rng.normal(0, 8, 2))) for t in range(0, 61, 5)]
+        fakes = events_from_xy(GRID, rows)
+        both = type(real)(
+            *(
+                np.r_[a, b]
+                for a, b in zip(
+                    (real.user_id, real.t, real.lat, real.lon),
+                    (fakes.user_id, fakes.t, fakes.lat, fakes.lon),
+                    strict=True,
+                )
+            )
+        )
+        errs_c.append(GRID.dist_m(_run(both, CONSENSUS).extras["point"], ORIGIN))
+        errs_w.append(GRID.dist_m(_run(both).extras["point"], ORIGIN))
+    assert np.median(errs_c) < 25.0
+    assert np.median(errs_c) < np.median(errs_w)
+
+
+def test_consensus_parallel_and_empty():
+    rows = [(f"u{i}", float(t), 100.0 + 5 * t, 50.0 + 30 * i) for i in range(10) for t in range(0, 21, 5)]
+    params = FlowSourceParams(estimator="consensus")
+    assert flow_source(events_from_xy(GRID, rows), params, None, FixedClock(20.0), GRID).extras["point"] is None
+    empty = flow_source(events_from_xy(GRID, []), params, None, FixedClock(0.0), GRID)
+    assert empty.extras["point"] is None and not empty.layer.any()
