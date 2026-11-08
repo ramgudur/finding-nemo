@@ -12,12 +12,14 @@ interface Props {
   readyText: string;
   action?: ReactNode;
   next?: { label: string; onClick: () => void };
+  /** Announce status changes (off when another live region already narrates them). */
+  live?: boolean;
 }
 
-export function StepFooter({ back, summary, problems, readyText, action, next }: Props) {
+export function StepFooter({ back, summary, problems, readyText, action, next, live = true }: Props) {
   const blocked = problems.length > 0;
   return (
-    <div className="fixed inset-x-0 bottom-0 z-20 px-3 pb-3 sm:px-6 sm:pb-5">
+    <div className="fixed inset-x-0 bottom-0 z-20 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-5">
       <div className="mx-auto flex max-w-3xl items-center gap-3 rounded-[24px] border border-white/70 bg-cream/90 px-3 py-2.5 shadow-[0_18px_50px_-24px_rgba(53,89,107,0.7)] backdrop-blur-md sm:px-4">
         {back ? (
           <Link
@@ -35,7 +37,7 @@ export function StepFooter({ back, summary, problems, readyText, action, next }:
           <p
             className={`truncate text-xs ${blocked ? "text-ink" : "text-mutedTeal"} ${summary ? "" : "text-sm"}`}
             title={blocked ? problems[0] : readyText}
-            aria-live="polite"
+            aria-live={live ? "polite" : "off"}
           >
             {blocked ? problems[0] : readyText}
           </p>

@@ -41,7 +41,7 @@ export function LayerRow({ layer, info, weight, maxWeight, status, selected, onT
         type="button"
         onClick={onToggle}
         aria-pressed={selected}
-        className={`group relative w-full overflow-hidden rounded-2xl border px-3.5 py-3 text-left shadow-[0_1px_2px_rgba(53,89,107,0.06)] transition-[box-shadow,transform] duration-200 hover:-translate-y-px hover:shadow-[0_6px_18px_-8px_rgba(53,89,107,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mutedTeal/60 ${TIER_SURFACE[tier]}`}
+        className={`group relative w-full overflow-hidden rounded-2xl border px-3.5 py-3 text-left shadow-[0_1px_2px_rgba(53,89,107,0.06)] transition-[box-shadow,transform] duration-200 hover:-translate-y-px hover:shadow-[0_6px_18px_-8px_rgba(53,89,107,0.35)] ${TIER_SURFACE[tier]}`}
       >
         {selected && (
           <motion.span

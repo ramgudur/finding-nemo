@@ -115,7 +115,14 @@ export function ReviewStep() {
         .then((st) => on && setStatus(st))
         .catch(() => undefined); // 404 before the run registers: keep the local timer
     }, 1500);
-    progressRef.current?.focus({ preventScroll: false });
+    // The panel renders below the summary, often under the fixed bottom bar: bring it to the middle of the
+    // viewport (instantly under reduced motion), then move focus there without a second jump.
+    const panel = progressRef.current;
+    if (panel) {
+      const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      panel.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+      panel.focus({ preventScroll: true });
+    }
     return () => {
       on = false;
       clearInterval(tick);
@@ -245,7 +252,7 @@ export function ReviewStep() {
           tabIndex={-1}
           role="status"
           aria-live="polite"
-          className="flex flex-col gap-3 rounded-3xl border border-white/70 bg-washedSky/70 px-5 py-5 sm:px-6"
+          className="flex scroll-mb-32 scroll-mt-28 flex-col gap-3 rounded-3xl border border-white/70 bg-washedSky/70 px-5 py-5 sm:px-6"
         >
           <div className="flex items-center gap-3">
             <LoaderCircle size={20} className="shrink-0 animate-spin text-primary motion-reduce:animate-none" aria-hidden />
@@ -279,7 +286,9 @@ export function ReviewStep() {
 
       <StepFooter
         back={{ to: "/new/sources", label: "Sources" }}
-        problems={compiling ? ["Compiling…"] : blocked ? [problems[0] ?? "The model is busy; try again shortly."] : []}
+        // While compiling, the bar mirrors the narrated step (the panel above is the live region).
+        live={!compiling}
+        problems={compiling ? [story.line] : blocked ? [problems[0] ?? "The model is busy; try again shortly."] : []}
         readyText="Ready to compile."
       />
     </>

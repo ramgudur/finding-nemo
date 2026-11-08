@@ -125,7 +125,7 @@ export function useSpecDraft(spec: AppSpec, appId: string, onSaved: (spec: AppSp
 // ---------- shared bits ----------
 
 const field =
-  "rounded-lg border border-paleWater bg-white/70 px-2 py-1 text-[13px] text-slate focus:outline-none focus:ring-2 focus:ring-mutedTeal/40";
+  "rounded-lg border border-paleWater bg-white/70 px-2 py-1 text-[13px] text-slate";
 const mono = `${field} font-mono`;
 const smallBtn =
   "inline-flex items-center gap-1 rounded-full bg-white/60 px-2.5 py-1 text-[12px] font-semibold text-ink ring-1 ring-paleWater transition-[background-color,box-shadow] duration-150 hover:bg-white hover:shadow-sm disabled:opacity-50";
