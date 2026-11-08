@@ -339,8 +339,17 @@ def walk_minutes(distance_m: float) -> int:
     return max(1, int(round(distance_m / WALK_MPS / 60.0)))
 
 
+def walk_text(minutes: int) -> str:
+    """Readable walking time: minutes under 90, else hours rounded to the half hour ("5½ h")."""
+    if minutes < 90:
+        return f"{minutes} min"
+    halves = int(round(minutes / 30.0))
+    whole, half = divmod(halves, 2)
+    return f"{whole}{'½' if half else ''} h"
+
+
 def _travel(distance_m: float) -> str:
-    text = f" (about {walk_minutes(distance_m)} min on foot"
+    text = f" (about {walk_text(walk_minutes(distance_m))} on foot"
     if distance_m > DRIVE_SUGGEST_M:
         text += "; consider driving"
     return text + ")"
