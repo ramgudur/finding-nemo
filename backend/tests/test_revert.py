@@ -365,3 +365,33 @@ def test_route_guard_break_is_422(api):
     c.post("/v1/apps/rev-api/weights/crowd_b.density/pin", json={"pinned": True}, headers=auth)
     r = c.post(f"/v1/apps/rev-api/changes/{api['changes'][0].id}/revert", headers=auth)
     assert r.status_code == 422 and "pinned" in r.json()["detail"]
+
+
+def test_stale_pin_revert_409_shows_compact_json_not_a_python_repr(api):
+    c, auth, db = api["c"], api["auth"], api["db"]
+    pin = "/v1/apps/rev-api/weights/crowd_b.density/pin"
+    assert c.post(pin, json={"pinned": True}, headers=auth).status_code == 200
+    pinned = next(ch for ch in db.list_changes("rev-api", kind="weight") if (ch.after or {}).get("pinned") is True)
+    assert c.post(pin, json={"pinned": False}, headers=auth).status_code == 200
+    r = c.post(f"/v1/apps/rev-api/changes/{pinned.id}/revert", headers=auth)
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert '(now {"pinned":false}, that change left {"pinned":true,"weight":' in detail
+    assert "False" not in detail and "True" not in detail and "'" not in detail.split("changed since")[1]
+
+
+def test_stale_weight_revert_shows_numbers_as_json(env):
+    _, _, _, ctx = env
+    change = Change(
+        id="c-x",
+        app_id="rev-app",
+        kind="trust",
+        target="u1",
+        before={"trust": 0.5},
+        after={"trust": 0.4},
+        reason="r",
+        actor="agent",
+        t=datetime.fromtimestamp(T0, UTC),
+    )
+    msg = str(revert_tools._stale(change, {"trust": 0.9, "a": None}))
+    assert '(now {"a":null,"trust":0.9}, that change left {"trust":0.4})' in msg

@@ -286,3 +286,12 @@ def test_only_the_mapped_fields_are_stored_not_the_raw_body(client, keys, app):
     dumped = event.model_dump_json()
     assert "internal_note" not in dumped and "should never be stored" not in dumped
     assert event.user_id == "u1" and event.model_extra == {"confidence": 0.8}
+
+
+def test_item_outside_the_grid_bbox_is_rejected_without_failing_the_others(client, keys):
+    far = _report(location={"lat": 40.0, "lon": 0.006})
+    r = _post(client, keys["ingest_key"], _payload(_report(), far, _report()))
+    assert r.status_code == 202
+    body = r.json()
+    assert body["received"] == 3 and body["accepted"] == 2
+    assert body["rejected"] == [{"index": 1, "reason": "position outside the app's area"}]

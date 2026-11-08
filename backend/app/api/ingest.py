@@ -15,7 +15,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from app.api.deps import get_db, ingest_key_header
 from app.core import clock as clock_mod
 from app.core.db import Db
-from app.core.models import Event, FieldType, InputField
+from app.core.models import AppSpec, Event, FieldType, InputField
 
 router = APIRouter(prefix="/v1/apps", tags=["ingest"])
 
@@ -48,6 +48,20 @@ def _check_fields(fields: list[InputField], extra: dict[str, Any]) -> str | None
     return None
 
 
+OUTSIDE_AREA = "position outside the app's area"
+
+
+def _check_position(spec: AppSpec, event: Event) -> str | None:
+    """A reason the event's position falls outside the app's grid bbox, or None if it is inside.
+
+    The engine would drop such a point anyway (it maps to no cell), so it is rejected at the
+    door instead of being stored and silently ignored. Edges count as inside."""
+    b = spec.grid.bbox
+    if b.min_lat <= event.lat <= b.max_lat and b.min_lon <= event.lon <= b.max_lon:
+        return None
+    return OUTSIDE_AREA
+
+
 @router.post("/{app}/inputs/{input}/events", status_code=202)
 def post_event(
     app: str,
@@ -70,7 +84,7 @@ def post_event(
     except Exception as e:  # noqa: BLE001 - surfaced as a 422 with the validator's reason
         raise HTTPException(status_code=422, detail=str(e)) from e
 
-    reason = _check_fields(inp.fields, event.model_extra or {})
+    reason = _check_position(spec, event) or _check_fields(inp.fields, event.model_extra or {})
     if reason is not None:
         raise HTTPException(status_code=422, detail=reason)
 

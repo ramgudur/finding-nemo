@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.deps import get_db, ingest_key_header
-from app.api.ingest import _check_fields
+from app.api.ingest import _check_fields, _check_position
 from app.core import clock as clock_mod
 from app.core.db import Db
 from app.core.models import Event, TsFormat, WebhookMapping, WebhookReceipt, WebhookRejection
@@ -129,7 +129,7 @@ async def post_webhook(
         try:
             mapped = _map_item(item, inp.webhook, now)
             event = Event.model_validate(mapped)
-            reason = _check_fields(inp.fields, event.model_extra or {})
+            reason = _check_position(spec, event) or _check_fields(inp.fields, event.model_extra or {})
             if reason is not None:
                 raise ValueError(reason)
         except Exception as e:  # noqa: BLE001 - one bad item must not fail the whole call
