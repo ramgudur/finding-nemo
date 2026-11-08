@@ -205,6 +205,33 @@ class CompileRequest(Model):
     )
 
 
+class ValidateResult(Model):
+    """Errors and warnings from the platform's spec checks, as plain strings."""
+
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class CompileStatus(Model):
+    """`GET /v1/apps/{app}/compile/status`: public-safe progress of a compile (apps not active only).
+    Never trace text or tool arguments (rule 8)."""
+
+    running: bool
+    step: int = Field(default=0, description="Compiler trace entries (model steps) since this compile started.")
+    elapsed_s: float = Field(default=0.0, description="Seconds since this compile started; 0 when not running.")
+    last_validate: ValidateResult | None = Field(
+        default=None, description="Errors/warnings of the last spec passed to validate_spec or finalize_app."
+    )
+
+
+class CompileFailure(Model):
+    """`detail` of the 422 from `POST /v1/apps/{app}/compile` when the Compiler never finalized."""
+
+    reason: str
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 SourceOptionType = Literal["post_api", "webhook", "rss", "json_api"]  # no HTML scraper (rule 10)
 
 
@@ -438,6 +465,9 @@ class Change(Model):
     backtest_id: str | None = None
     actor: Actor
     t: UtcDatetime
+    reverts: str | None = Field(
+        default=None, description="Id of the Change this one reverts (POST /changes/{id}/revert); None otherwise."
+    )
 
 
 # --- End-user instructions -------------------------------------------------------

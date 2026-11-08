@@ -1,4 +1,5 @@
-"""Authority-only console reads (trace, changes, weights, verification) and the dev's weight pin.
+"""Authority-only console reads (trace, changes, weights, verification), the dev's weight pin and
+the dev's revert of a Change.
 
 Every route needs the app's `X-Authority-Key`: rule 8 keeps the trace, the Change log and weights in the
 authority view. A missing or wrong key is 401. Writes go through the tool layer (`pin_weight` with
@@ -16,7 +17,7 @@ from app.api.deps import authority_key_header, get_db, get_engine
 from app.core.db import Db
 from app.core.models import Change, ChangeKind, Tier, TraceEntry, UtcDatetime, VerificationMethod
 from app.engine.tick import TickEngine
-from app.tools import guards, read_tools, registry
+from app.tools import guards, read_tools, registry, revert_tools
 from app.tools.context import ToolContext
 
 router = APIRouter(prefix="/v1/apps", tags=["console"])
@@ -177,3 +178,30 @@ def pin_weight(
     if not out["ok"]:
         raise HTTPException(status_code=400, detail=out["error"])
     return _weights(ctx)
+
+
+@router.post("/{app}/changes/{change_id}/revert", response_model=Change)
+def revert_change(
+    app: str,
+    change_id: str,
+    db: Db = Depends(get_db),
+    engine: TickEngine = Depends(get_engine),
+    authority_key: str | None = Depends(authority_key_header),
+) -> Change:
+    """Dev action: put a Change's `before` back through the same tools and guards (`actor="dev"`).
+
+    Returns the new Change (`reverts` = the reverted id). 404 unknown change; 409 if the target no
+    longer holds that Change's `after` (or the app isn't running); 422 for spec_confirm / spec_edit
+    and when a guard rejects the revert (see `tools/revert_tools.py` for what a dev revert skips)."""
+    _authority(db, app, authority_key)
+    ctx = ToolContext(app_id=app, db=db, engine=engine, actor="dev")
+    try:
+        return revert_tools.revert_change(ctx, change_id)
+    except revert_tools.RevertNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e)) from None
+    except revert_tools.RevertStale as e:
+        raise HTTPException(status_code=409, detail=str(e)) from None
+    except guards.GuardError as e:
+        raise HTTPException(status_code=422, detail="rejected: " + "; ".join(e.reasons)) from None
+    except LookupError as e:  # the app's runtime isn't loaded (not active)
+        raise HTTPException(status_code=409, detail=str(e)) from None

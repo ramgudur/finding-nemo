@@ -582,7 +582,7 @@ def test_b_event_clusters_candidate_on_the_documents(app_b):
 def test_b_field_layer_is_nonzero_and_follows_the_stations(app_b):
     res = app_b.latest()
     f = _layer(res, "stations.field")
-    assert (f > 0).all()
+    assert f.max() > 0 and (f >= 0).all()  # contrast baseline (#194): the lowest cell is 0
     (rw, cw), (re, ce) = (
         (int(v[0]) for v in GRID.xy_to_cell(np.array([x]), np.array([y]))[:2])
         for x, y in ((100.0, 500.0), (900.0, 500.0))
