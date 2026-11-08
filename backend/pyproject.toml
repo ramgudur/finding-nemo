@@ -11,6 +11,10 @@ extend-exclude = ["tests/fixtures"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's Depends()/Query()/Header()/Body()/Path() are meant to live in argument defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header", "fastapi.Body", "fastapi.Path"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", ".."]  # ".." lets e2e tests import sim/ (the client side)
