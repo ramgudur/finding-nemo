@@ -87,6 +87,16 @@ TOOLS: dict[str, Tool] = {
             frozenset({"critic"}),
         ),
         Tool(
+            "run_backtest_batch",
+            "Search many weight configs at once: give a [lo, hi] range per layer_id and a sample count. "
+            "Configs outside tier bounds are dropped before scoring, ranking uses train data only, and the "
+            "top few are checked on held-out data. Prefer this for weight changes; apply the best passing "
+            "config with apply_changes(backtest_id).",
+            st.RunBacktestBatchArgs,
+            st.run_backtest_batch,
+            frozenset({"critic"}),
+        ),
+        Tool(
             "apply_changes",
             "Apply exactly what a passing backtest tested. Rejected if the holdout failed, the backtest "
             "is stale or already used, or weights changed since.",
