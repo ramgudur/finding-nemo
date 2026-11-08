@@ -16,9 +16,18 @@ import type {
   InputField,
   InputKind,
   InputShape,
+  InputSpec,
+  OperatorConfig,
+  Outputs,
+  Plausibility,
+  PoiLabel,
+  PoiLabelConfig,
+  PoiLabelMode,
   SourceOption,
   SourceOptionType,
   SourceSuggestion,
+  Tier,
+  Visibility,
 } from "../api/types";
 
 const KINDS: InputKind[] = ["push", "pull"];
@@ -308,8 +317,63 @@ function SourcePicker({
   );
 }
 
-function Review({ spec }: { spec: AppSpec }) {
+/** The platform's registered operators and the input shapes each accepts (engine/operators/registry.py). */
+const OPERATOR_SHAPES: Record<string, InputShape[]> = {
+  flow_source: ["track"],
+  density: ["point", "track"],
+  dwell: ["track"],
+  field: ["field"],
+  event_points: ["document"],
+  override: ["fixed_point"],
+};
+const TIERS: Tier[] = ["locked", "stiff", "flexible"];
+const VISIBILITIES: Visibility[] = ["authority", "public"];
+const LABEL_MODES: PoiLabelMode[] = ["auto", "on", "off"];
+
+const layerIdOf = (inputId: string, o: OperatorConfig) => o.layer_id || `${inputId}.${o.op}`;
+const numOrNull = (v: string) => (v.trim() === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+
+/** Plausibility with empty values dropped; null when nothing is set (the platform's neutral defaults). */
+function cleanPlausibility(p: Plausibility): Plausibility | null {
+  const out: Plausibility = {};
+  if (p.max_speed_mps != null) out.max_speed_mps = p.max_speed_mps;
+  if (p.jitter_m != null) out.jitter_m = p.jitter_m;
+  if (p.flag_constant_speed) out.flag_constant_speed = true;
+  if (p.flag_straight_line) out.flag_straight_line = true;
+  return Object.keys(out).length ? out : null;
+}
+
+/** Review the proposed spec and edit it; every edit goes through onChange (saved with PUT by the parent). */
+function Review({ spec, onChange }: { spec: AppSpec; onChange: (s: AppSpec) => void }) {
   const w = warnings(spec);
+  const inputs = spec.inputs ?? [];
+  const outputs = spec.outputs ?? {};
+  const outLayers = outputs.layers ?? [];
+  const labels = outputs.poi_labels ?? {};
+  const labelSet = labels.label_set ?? [];
+  const routing = spec.routing ?? {};
+
+  const setInput = (k: number, patch: Partial<InputSpec>) =>
+    onChange({ ...spec, inputs: inputs.map((x, j) => (j === k ? { ...x, ...patch } : x)) });
+  const setOutputs = (patch: Partial<Outputs>) => onChange({ ...spec, outputs: { ...outputs, ...patch } });
+  const setLabels = (patch: Partial<PoiLabelConfig>) => setOutputs({ poi_labels: { ...labels, ...patch } });
+  const setLabel = (k: number, patch: Partial<PoiLabel>) =>
+    setLabels({ label_set: labelSet.map((x, j) => (j === k ? { ...x, ...patch } : x)) });
+
+  /** Replace one input's operators, keeping outputs.layers pointing only at layers that still exist. */
+  const setOperators = (k: number, ops: OperatorConfig[], renamed?: [string, string]) => {
+    const i = inputs[k];
+    if (!i) return;
+    const nextInputs = inputs.map((x, j) => (j === k ? { ...x, operators: ops } : x));
+    const known = new Set(["score", ...nextInputs.flatMap((x) => (x.operators ?? []).map((o) => layerIdOf(x.id, o)))]);
+    const nextLayers = outLayers
+      .map((l) => (renamed && l.id === renamed[0] ? { ...l, id: renamed[1] } : l))
+      .filter((l) => known.has(l.id));
+    onChange({ ...spec, inputs: nextInputs, outputs: { ...outputs, layers: nextLayers } });
+  };
+
+  const opChoices = (shape: InputShape) => Object.keys(OPERATOR_SHAPES).filter((n) => OPERATOR_SHAPES[n]?.includes(shape));
+
   return (
     <div style={{ display: "grid", gap: 10 }}>
       {w.length > 0 && (
@@ -322,44 +386,151 @@ function Review({ spec }: { spec: AppSpec }) {
           </ul>
         </div>
       )}
-      {(spec.inputs ?? []).map((i) => (
-        <div key={i.id} style={box}>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
-            <strong>{i.id}</strong>
-            <span style={muted}>
-              {i.kind} · {i.shape}
-            </span>
-            <span>
-              tier <strong>{i.tier}</strong>
-            </span>
-            <span>
-              visibility <strong>{i.visibility ?? "authority"}</strong>
-            </span>
-          </div>
-          <div style={{ ...muted, fontStyle: "italic", margin: "4px 0" }}>“{i.meaning}”</div>
-          <div>
-            operators:{" "}
-            {(i.operators ?? []).map((o) => `${o.op} (weight ${o.weight})`).join(", ") || <span style={muted}>none</span>}
-          </div>
-          <div>
-            plausibility:{" "}
-            {i.plausibility ? (
-              Object.entries(i.plausibility)
-                .filter(([, v]) => v !== null && v !== undefined)
-                .map(([k, v]) => `${k}=${String(v)}`)
-                .join(", ")
-            ) : (
-              <span style={muted}>defaults</span>
+      {inputs.map((i, k) => {
+        const ops = i.operators ?? [];
+        const choices = opChoices(i.shape);
+        const unused = choices.filter((n) => !ops.some((o) => o.op === n));
+        const p = i.plausibility ?? {};
+        const setP = (patch: Partial<Plausibility>) => setInput(k, { plausibility: cleanPlausibility({ ...p, ...patch }) });
+        return (
+          <div key={i.id} style={{ ...box, display: "grid", gap: 6 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
+              <strong>{i.id}</strong>
+              <span style={muted}>
+                {i.kind} · {i.shape}
+              </span>
+              <label>
+                tier{" "}
+                <select aria-label={`${i.id} tier`} value={i.tier} onChange={(e) => setInput(k, { tier: e.target.value as Tier })}>
+                  {TIERS.map((x) => (
+                    <option key={x}>{x}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                visibility{" "}
+                <select
+                  aria-label={`${i.id} visibility`}
+                  value={i.visibility ?? "authority"}
+                  onChange={(e) => setInput(k, { visibility: e.target.value as Visibility })}
+                >
+                  {VISIBILITIES.map((x) => (
+                    <option key={x}>{x}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div style={{ ...muted, fontStyle: "italic" }}>“{i.meaning}”</div>
+            <div style={{ display: "grid", gap: 4 }}>
+              <span>operators</span>
+              {ops.length === 0 && <span style={muted}>none</span>}
+              {ops.map((o, n) => (
+                <div key={layerIdOf(i.id, o)} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <select
+                    aria-label={`${i.id} operator`}
+                    value={o.op}
+                    onChange={(e) => {
+                      const op = e.target.value;
+                      const layer_id = `${i.id}.${op}`;
+                      // a different operator takes its own default params; keep weight and noise floor
+                      const next: OperatorConfig = { op, weight: o.weight, noise_floor: o.noise_floor ?? null, layer_id };
+                      setOperators(k, ops.map((x, j) => (j === n ? next : x)), [layerIdOf(i.id, o), layer_id]);
+                    }}
+                  >
+                    {[o.op, ...choices.filter((c) => c !== o.op && !ops.some((x) => x.op === c))].map((c) => (
+                      <option key={c}>{c}</option>
+                    ))}
+                  </select>
+                  <label>
+                    weight{" "}
+                    <input
+                      aria-label={`${i.id} ${o.op} weight`}
+                      type="number"
+                      step="0.05"
+                      min={0}
+                      value={o.weight}
+                      onChange={(e) =>
+                        setOperators(k, ops.map((x, j) => (j === n ? { ...x, weight: Number(e.target.value) } : x)))
+                      }
+                      style={{ width: 80 }}
+                    />
+                  </label>
+                  <button type="button" onClick={() => setOperators(k, ops.filter((_, j) => j !== n))}>
+                    Remove
+                  </button>
+                </div>
+              ))}
+              {unused.length > 0 && (
+                <select
+                  aria-label={`${i.id} add operator`}
+                  value=""
+                  onChange={(e) => {
+                    const op = e.target.value;
+                    if (op) setOperators(k, [...ops, { op, weight: 0.5, layer_id: `${i.id}.${op}` }]);
+                  }}
+                  style={{ justifySelf: "start" }}
+                >
+                  <option value="">add an operator…</option>
+                  {unused.map((c) => (
+                    <option key={c}>{c}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {(i.shape === "point" || i.shape === "track") && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <span>plausibility</span>
+                <label>
+                  max speed (m/s){" "}
+                  <input
+                    aria-label={`${i.id} max speed`}
+                    type="number"
+                    min={0}
+                    value={p.max_speed_mps ?? ""}
+                    placeholder="none"
+                    onChange={(e) => setP({ max_speed_mps: numOrNull(e.target.value) })}
+                    style={{ width: 80 }}
+                  />
+                </label>
+                <label>
+                  jitter (m){" "}
+                  <input
+                    aria-label={`${i.id} jitter`}
+                    type="number"
+                    min={0}
+                    value={p.jitter_m ?? ""}
+                    placeholder="none"
+                    onChange={(e) => setP({ jitter_m: numOrNull(e.target.value) })}
+                    style={{ width: 80 }}
+                  />
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={!!p.flag_constant_speed}
+                    onChange={(e) => setP({ flag_constant_speed: e.target.checked })}
+                  />{" "}
+                  flag constant speed
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={!!p.flag_straight_line}
+                    onChange={(e) => setP({ flag_straight_line: e.target.checked })}
+                  />{" "}
+                  flag straight lines
+                </label>
+              </div>
+            )}
+            {i.connector && (
+              <div>
+                connector: {i.connector.type}
+                {i.connector.preset ? ` (${i.connector.preset})` : ""} {i.connector.url ?? ""}
+              </div>
             )}
           </div>
-          {i.connector && (
-            <div>
-              connector: {i.connector.type}
-              {i.connector.preset ? ` (${i.connector.preset})` : ""} {i.connector.url ?? ""}
-            </div>
-          )}
-        </div>
-      ))}
+        );
+      })}
       <div style={box}>
         <strong>Verification</strong>{" "}
         {(spec.verification ?? [])
@@ -368,21 +539,84 @@ function Review({ spec }: { spec: AppSpec }) {
           .map((v) => `${v.priority}. ${v.method}`)
           .join("  ")}
       </div>
-      <div style={box}>
-        <strong>Output layers</strong>{" "}
-        {(spec.outputs?.layers ?? []).map((l) => `${l.id}: ${l.visibility ?? "authority"}`).join(", ")}
-        <div>
-          <strong>Labels</strong> ({spec.outputs?.poi_labels?.mode ?? "auto"}):{" "}
-          {(spec.outputs?.poi_labels?.label_set ?? [])
-            .map((l) => `${l.label}${l.sensitive ? " (sensitive)" : ""}${l.destination ? " (destination)" : ""}`)
-            .join(", ") || <span style={muted}>none</span>}
+      <div style={{ ...box, display: "grid", gap: 8 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <strong>Output layers</strong>
+          {outLayers.length === 0 && <span style={muted}>none</span>}
+          {outLayers.map((l, n) => (
+            <label key={l.id}>
+              {l.id}{" "}
+              <select
+                aria-label={`${l.id} output visibility`}
+                value={l.visibility ?? "authority"}
+                onChange={(e) =>
+                  setOutputs({
+                    layers: outLayers.map((x, j) => (j === n ? { ...x, visibility: e.target.value as Visibility } : x)),
+                  })
+                }
+              >
+                {VISIBILITIES.map((x) => (
+                  <option key={x}>{x}</option>
+                ))}
+              </select>
+            </label>
+          ))}
         </div>
-        <div>
-          <strong>Routing</strong>{" "}
-          {spec.routing?.enabled
-            ? `on, ${spec.routing.destination_points?.length ?? 0} fixed destinations`
-            : "off"}
+        <div style={{ display: "grid", gap: 4 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <strong>Labels</strong>
+            <select
+              aria-label="label mode"
+              value={labels.mode ?? "auto"}
+              onChange={(e) => setLabels({ mode: e.target.value as PoiLabelMode })}
+            >
+              {LABEL_MODES.map((x) => (
+                <option key={x}>{x}</option>
+              ))}
+            </select>
+          </div>
+          {labelSet.length === 0 && <span style={muted}>none</span>}
+          {labelSet.map((l, n) => (
+            <div key={n} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input aria-label="label" value={l.label} onChange={(e) => setLabel(n, { label: e.target.value })} />
+              <label>
+                <input
+                  type="checkbox"
+                  checked={!!l.sensitive}
+                  onChange={(e) => setLabel(n, { sensitive: e.target.checked, ...(e.target.checked ? { destination: false } : {}) })}
+                />{" "}
+                sensitive (authority only)
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={!!l.destination}
+                  onChange={(e) => setLabel(n, { destination: e.target.checked, ...(e.target.checked ? { sensitive: false } : {}) })}
+                />{" "}
+                destination (public routing target)
+              </label>
+              <button type="button" onClick={() => setLabels({ label_set: labelSet.filter((_, j) => j !== n) })}>
+                Remove
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            style={{ justifySelf: "start" }}
+            onClick={() => setLabels({ label_set: [...labelSet, { label: "", sensitive: false, destination: false }] })}
+          >
+            Add a label
+          </button>
         </div>
+        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={!!routing.enabled}
+            onChange={(e) => onChange({ ...spec, routing: { ...routing, enabled: e.target.checked } })}
+          />
+          <strong>Routing</strong>
+          <span style={muted}>{`${routing.destination_points?.length ?? 0} fixed destinations`}</span>
+        </label>
       </div>
       <p style={{ margin: 0, color: "#8a5a00" }}>
         After you confirm, tiers, locked weights and verification methods can't be changed by any agent.
@@ -402,7 +636,12 @@ export function Builder() {
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState("");
-  const [spec, setSpec] = useState<AppSpec | null>(null);
+  const [spec, setSpec] = useState<AppSpec | null>(null); // as last compiled or saved on the server
+  const [draft, setDraft] = useState<AppSpec | null>(null); // the dev's edits on the review screen
+  const [saving, setSaving] = useState(false);
+  const [saveWarnings, setSaveWarnings] = useState<string[] | null>(null);
+  const [saveErrors, setSaveErrors] = useState<string[]>([]);
+  const dirty = !!spec && !!draft && JSON.stringify(spec) !== JSON.stringify(draft);
   const [keys, setKeys] = useState<ActivateResponse | null>(null);
 
   useEffect(() => {
@@ -477,6 +716,7 @@ export function Builder() {
     setBusy(true);
     setError("");
     setSpec(null);
+    setDraft(null);
     try {
       const body = {
         intent: intent.trim(),
@@ -493,7 +733,11 @@ export function Builder() {
         ),
         destination_points: points.map((p) => ({ ...p, label: p.label.trim() })),
       };
-      setSpec(await api.compile(appId, body));
+      const compiled = await api.compile(appId, body);
+      setSpec(compiled);
+      setDraft(compiled);
+      setSaveWarnings(null);
+      setSaveErrors([]);
     } catch (e) {
       const why =
         e instanceof ApiError && e.status === 503
@@ -506,6 +750,25 @@ export function Builder() {
       setError(why);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const save = async () => {
+    if (!draft) return;
+    setSaving(true);
+    setSaveErrors([]);
+    try {
+      const r = await api.updateSpec(appId, draft);
+      setSpec(r.spec);
+      setDraft(r.spec);
+      setSaveWarnings(r.warnings);
+    } catch (e) {
+      setSaveWarnings(null);
+      if (e instanceof ApiError && e.details.length > 0) setSaveErrors(e.details);
+      else if (e instanceof ApiError && e.status === 409) setSaveErrors(["This app is no longer pending confirmation."]);
+      else setSaveErrors([String(e instanceof ApiError ? e.message : e)]);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -671,12 +934,48 @@ export function Builder() {
       {spec && (
         <section style={{ display: "grid", gap: 10 }}>
           <h2 style={{ margin: 0, fontSize: 18 }}>Review the proposed spec</h2>
-          <Review spec={spec} />
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" disabled={busy} onClick={() => void confirm()}>
+          <Review spec={draft ?? spec} onChange={setDraft} />
+          {saveErrors.length > 0 && (
+            <div style={{ ...box, borderColor: "#b00020", background: "#fdecee" }}>
+              <strong>Not saved: fix these first</strong>
+              <ul style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                {saveErrors.map((x) => (
+                  <li key={x}>{x}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {saveWarnings && !dirty && (
+            <div style={{ ...box, borderColor: saveWarnings.length ? "#c77700" : "#1a7f37" }}>
+              {saveWarnings.length === 0 ? (
+                "Saved. No warnings."
+              ) : (
+                <>
+                  <strong>Saved, with warnings</strong>
+                  <ul style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                    {saveWarnings.map((x) => (
+                      <li key={x}>{x}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button type="button" disabled={busy || saving || !dirty} onClick={() => void save()}>
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+            <button type="button" disabled={busy || saving || !dirty} onClick={() => setDraft(spec)}>
+              Discard changes
+            </button>
+            <button type="button" disabled={busy || saving || dirty} onClick={() => void confirm()}>
               Confirm and activate
             </button>
-            <span style={muted}>Change the form and compile again to get a different proposal.</span>
+            <span style={muted}>
+              {dirty
+                ? "Save your changes before confirming."
+                : "Edit above and save, or change the form and compile again to get a different proposal."}
+            </span>
           </div>
         </section>
       )}

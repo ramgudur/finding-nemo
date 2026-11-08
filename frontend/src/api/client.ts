@@ -12,6 +12,7 @@ import type {
   MapResponse,
   PinRequest,
   SourceSuggestion,
+  SpecEditResponse,
   SuggestSourceRequest,
   TraceEntry,
   VerificationView,
@@ -22,25 +23,43 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** Every message when the server sent a list as `detail` (e.g. a 422 with all spec errors). */
+    readonly details: string[] = [],
   ) {
     super(message);
   }
 }
 
-async function request<T>(method: "GET" | "POST", path: string, authorityKey?: string, body?: unknown): Promise<T> {
+/** A `detail` list item: our own messages are strings; FastAPI validation errors are {loc, msg}. */
+function detailText(d: unknown): string {
+  if (typeof d === "string") return d;
+  if (d && typeof d === "object" && "msg" in d) {
+    const { loc, msg } = d as { loc?: unknown; msg: unknown };
+    const where = Array.isArray(loc) ? loc.filter((x) => x !== "body").join(".") : "";
+    return where ? `${where}: ${String(msg)}` : String(msg);
+  }
+  return JSON.stringify(d);
+}
+
+async function request<T>(method: "GET" | "POST" | "PUT", path: string, authorityKey?: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (authorityKey) headers["X-Authority-Key"] = authorityKey;
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const r = await fetch(`/v1${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   if (!r.ok) {
     let detail = "";
+    let details: string[] = [];
     try {
       const body = (await r.json()) as { detail?: unknown };
       if (typeof body.detail === "string") detail = body.detail;
+      else if (Array.isArray(body.detail)) {
+        details = body.detail.map(detailText);
+        detail = details.join("; ");
+      }
     } catch {
       // not JSON
     }
-    throw new ApiError(r.status, detail || `${r.status} ${r.statusText} for ${path}`);
+    throw new ApiError(r.status, detail || `${r.status} ${r.statusText} for ${path}`, details);
   }
   return (await r.json()) as T;
 }
@@ -53,6 +72,8 @@ export const api = {
   hotspots: (appId: string, key?: string) => get<HotspotsResponse>(`${app(appId)}/hotspots`, key),
   // builder (the console has no login; the authority key is issued at activation)
   compile: (appId: string, body: CompileRequest) => request<AppSpec>("POST", `${app(appId)}/compile`, undefined, body),
+  // edit a pending spec before confirming it; 422 carries every error in ApiError.details
+  updateSpec: (appId: string, spec: AppSpec) => request<SpecEditResponse>("PUT", `${app(appId)}/spec`, undefined, spec),
   activate: (appId: string) => request<ActivateResponse>("POST", `${app(appId)}/activate`),
   suggestSource: (appId: string, body: SuggestSourceRequest) =>
     request<SourceSuggestion>("POST", `${app(appId)}/sources/suggest`, undefined, body),

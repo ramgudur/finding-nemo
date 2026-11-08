@@ -13,7 +13,7 @@ export type ConnectorType = "rss" | "json_api";
 export type PoiLabelMode = "auto" | "on" | "off";
 export type PoiStatus = "active" | "retired";
 export type AgentName = "compiler" | "scout" | "critic" | "poi_labeler" | "message_guard";
-export type ChangeKind = "weight" | "trust" | "poi" | "connector" | "spec_confirm";
+export type ChangeKind = "weight" | "trust" | "poi" | "connector" | "spec_confirm" | "spec_edit";
 export type Actor = "agent" | "dev";
 export type Device = "cpu" | "gpu";
 export type IsoDateTime = string;
@@ -435,6 +435,13 @@ export interface CompileRequest {
   inputs: CompileInput[];
   /** Fixed destinations picked on the map; copied verbatim into routing.destination_points. */
   destination_points?: DestinationPoint[];
+}
+
+/** Response of PUT /v1/apps/{app}/spec (body: the full AppSpec; only while pending_confirmation).
+ * Validation errors are a 422 whose `detail` is the full list of messages. */
+export interface SpecEditResponse {
+  spec: AppSpec;
+  warnings: string[];
 }
 
 /** POST /v1/apps/{app}/activate. The keys are shown once. */
