@@ -13,9 +13,15 @@ export default {
         mutedTeal: "#638F91",
         softStone: "#D7D1C0",
         slate: "#35596B",
-        ink: "#526F7C",
-        inkSoft: "#8199A0",
+        // Text tokens darkened for WCAG AA on the mist / sky / cream surfaces (>= 4.5:1 for small text).
+        ink: "#45606C",
+        inkSoft: "#4F6A74",
         coral: "#D9937E",
+        // Accessible error text (coral itself is decoration only: ~2.3:1 on cream).
+        danger: "#8E4F3C",
+        // Primary fill: cream text on it is ~4.9:1.
+        primary: "#3B6895",
+        primaryHover: "#335C85",
         cream: "#F0EBDD",
       },
       fontFamily: {

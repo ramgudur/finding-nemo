@@ -1,6 +1,17 @@
-// Shared, pure helpers for the Sources page (ported from Builder.tsx so client and server agree).
+// Shared, pure helpers for the /new builder steps (ported from Builder.tsx so client and server agree).
 import { MAX_GRID_CELLS } from "../../api/types";
-import type { BBox, CompileInput, ConnectorConfig, DestinationPoint, InputKind, SourceOption, SourceOptionType } from "../../api/types";
+import type {
+  BBox,
+  CompileInput,
+  ConnectorConfig,
+  DestinationPoint,
+  FieldType,
+  InputField,
+  InputKind,
+  InputShape,
+  SourceOption,
+  SourceOptionType,
+} from "../../api/types";
 
 /** Same pattern as core/models.py SLUG (app ids and input ids). */
 export const SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -98,7 +109,58 @@ export function slugFromDescription(text: string, taken: string[]): string {
   return id;
 }
 
+/** An app id from a display name ("Harbour Watch 2" -> "harbour-watch-2"). */
+export function slugFromName(name: string): string {
+  const base = name
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^[-_]+/, "")
+    .slice(0, 64)
+    .replace(/[-_]+$/, "");
+  return base;
+}
+
+/** Plain-language description of each input shape (the enum stays behind "Advanced"). */
+export const SHAPE_INFO: Record<InputShape, { label: string; hint: string }> = {
+  point: { label: "Single reports", hint: "each item is one report at one place and time" },
+  track: { label: "Moving tracks", hint: "items from the same entity form a path over time" },
+  fixed_point: { label: "Fixed points", hint: "each item marks a fixed place, such as an authority marker" },
+  field: { label: "Measurements over the area", hint: "gridded or station values, optionally a vector field" },
+  document: { label: "Documents", hint: "each item is a text, such as an article, placed on the map" },
+};
+export const SHAPES: InputShape[] = ["point", "track", "fixed_point", "field", "document"];
+
+const FIELD_TYPES: FieldType[] = ["number", "integer", "string", "boolean"];
+/** Every event already carries these; a source can't redeclare them. */
+const RESERVED_FIELDS = ["user_id", "lat", "lon", "ts"];
+const FIELD_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+/** "level:number, note:string?" -> fields, plus every problem in the dev's words ("?" = optional). */
+export function parseFields(text: string): { fields: InputField[]; problems: string[] } {
+  const fields: InputField[] = [];
+  const problems: string[] = [];
+  for (const part of text.split(",").map((x) => x.trim()).filter(Boolean)) {
+    const [rawName = "", rawType = "string", ...rest] = part.split(":").map((x) => x.trim());
+    const optional = rawType.endsWith("?") || rawName.endsWith("?");
+    const name = rawName.replace(/\?$/, "");
+    const type = (rawType.replace(/\?$/, "") || "string") as FieldType;
+    if (rest.length) problems.push(`"${part}" has more than one colon.`);
+    else if (!FIELD_NAME.test(name)) problems.push(`"${name || part}" isn't a valid field name (letters, digits, _).`);
+    else if (RESERVED_FIELDS.includes(name)) problems.push(`"${name}" is already part of every event.`);
+    else if (!FIELD_TYPES.includes(type)) problems.push(`"${rawType}" isn't a type; use number, integer, string or boolean.`);
+    else if (fields.some((f) => f.name === name)) problems.push(`"${name}" is listed twice.`);
+    else fields.push({ name, type, required: !optional });
+  }
+  return { fields, problems };
+}
+
+export function fieldsToText(fields: InputField[] | undefined): string {
+  return (fields ?? []).map((f) => `${f.name}:${f.type}${f.required === false ? "?" : ""}`).join(", ");
+}
+
 export interface SourcesDraft {
+  name: string;
   appId: string;
   intent: string;
   bbox: BBox | null;
@@ -107,28 +169,66 @@ export interface SourcesDraft {
   sources: CompileInput[];
 }
 
-/** Every reason Continue is disabled, in the order the dev should fix them. Empty = valid. */
-export function draftProblems(d: SourcesDraft): string[] {
+export type StepId = "about" | "area" | "sources" | "review";
+export const STEPS: { id: StepId; label: string }[] = [
+  { id: "about", label: "About" },
+  { id: "area", label: "Area" },
+  { id: "sources", label: "Sources" },
+  { id: "review", label: "Review & compile" },
+];
+
+export function aboutProblems(d: SourcesDraft, activeIds: string[] = []): string[] {
+  return [
+    !d.name.trim() && "Give the app a name.",
+    !SLUG.test(d.appId) && "The app id must start with a letter or digit, then lowercase letters, digits, - or _.",
+    SLUG.test(d.appId) && activeIds.includes(d.appId) && "An app with this id is already live. Pick another id.",
+    !d.intent.trim() && "Describe what the app is for.",
+  ].filter(Boolean) as string[];
+}
+
+export function areaProblems(d: SourcesDraft): string[] {
   const dims = d.bbox && d.cellM > 0 ? gridCells(d.bbox, d.cellM) : null;
-  const ids = d.sources.map((s) => s.id);
   const b = d.bbox;
   return [
-    !SLUG.test(d.appId) && "Name the app: lowercase letters, digits, - or _.",
-    !d.intent.trim() && "Describe the app's intent.",
-    !b && "Pick the area on the map.",
-    !(d.cellM > 0) && "Cell size must be positive.",
+    !b && "Frame the area on the map, then choose \u201cUse this view\u201d.",
+    !(d.cellM > 0) && "Cell size must be a positive number of metres.",
     dims &&
       dims[0] * dims[1] > MAX_GRID_CELLS &&
-      `The grid would be ${dims[0]} x ${dims[1]} cells; the limit is ${MAX_GRID_CELLS.toLocaleString()}.`,
+      `The grid would be ${(dims[0] * dims[1]).toLocaleString()} cells; the limit is ${MAX_GRID_CELLS.toLocaleString()}. Use a smaller area or bigger cells.`,
     d.destinationPoints.some((p) => !p.label.trim()) && "Every destination needs a label.",
     b &&
       d.destinationPoints.some((p) => p.lat < b.min_lat || p.lat > b.max_lat || p.lon < b.min_lon || p.lon > b.max_lon) &&
       "Every destination must be inside the area.",
-    d.sources.length === 0 && "Add at least one source.",
-    d.sources.some((s) => !SLUG.test(s.id)) && "Every source id must be lowercase letters, digits, - or _.",
-    new Set(ids).size !== ids.length && "Source ids must be unique.",
-    d.sources.some((s) => s.kind === "push" && s.connector) && "A push source can't have a connector.",
-    d.sources.some((s) => s.connector?.type === "json_api" && !s.connector.preset && !s.connector.url) &&
-      "A custom JSON API source needs its URL.",
   ].filter(Boolean) as string[];
 }
+
+export function sourcesProblems(d: SourcesDraft): string[] {
+  const ids = d.sources.map((s) => s.id);
+  return [
+    d.sources.length === 0 && "Add at least one data source.",
+    d.sources.some((s) => !SLUG.test(s.id)) && "Every source id must be lowercase letters, digits, - or _.",
+    new Set(ids).size !== ids.length && "Two sources share an id; rename one.",
+    d.sources.some((s) => s.kind === "push" && s.connector) && "A source your app sends can't also be polled.",
+    d.sources.some((s) => s.connector?.type === "json_api" && !s.connector.preset && !s.connector.url) &&
+      "A custom JSON source needs its URL.",
+  ].filter(Boolean) as string[];
+}
+
+export function stepProblems(step: StepId, d: SourcesDraft, activeIds: string[] = []): string[] {
+  if (step === "about") return aboutProblems(d, activeIds);
+  if (step === "area") return areaProblems(d);
+  if (step === "sources") return sourcesProblems(d);
+  return [...aboutProblems(d, activeIds), ...areaProblems(d), ...sourcesProblems(d)];
+}
+
+/** The first step that still needs work ("review" when everything is valid). */
+export function firstIncompleteStep(d: SourcesDraft, activeIds: string[] = []): StepId {
+  if (aboutProblems(d, activeIds).length) return "about";
+  if (areaProblems(d).length) return "area";
+  if (sourcesProblems(d).length) return "sources";
+  return "review";
+}
+
+/** True when the draft has nothing the dev typed yet. */
+export const draftIsEmpty = (d: SourcesDraft) =>
+  !d.name.trim() && !d.appId && !d.intent.trim() && !d.bbox && d.sources.length === 0 && d.destinationPoints.length === 0;

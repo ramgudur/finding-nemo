@@ -42,6 +42,8 @@ export function forgetKey(appId: string): void {
 
 export interface ProjectRecord {
   appId: string;
+  /** Human display name from the builder; older records have none (show the app id). */
+  name?: string;
   intent: string;
   status: "proposed" | "active";
   updatedAt: string; // ISO
@@ -68,9 +70,19 @@ function writeProjects(records: ProjectRecord[]): void {
   }
 }
 
+/** Upsert by app id. Fields the caller leaves out (e.g. `name` on activation) keep their stored value. */
 export function recordProject(record: ProjectRecord): void {
-  const rest = readProjects().filter((p) => p.appId !== record.appId);
-  writeProjects([record, ...rest]);
+  const all = readProjects();
+  const prev = all.find((p) => p.appId === record.appId);
+  const merged: ProjectRecord = { ...prev, ...record, name: record.name ?? prev?.name };
+  writeProjects([merged, ...all.filter((p) => p.appId !== record.appId)]);
+}
+
+/** App ids this browser knows are live (activation is permanent, so a compile would 409). */
+export function activeProjectIds(): string[] {
+  return readProjects()
+    .filter((p) => p.status === "active")
+    .map((p) => p.appId);
 }
 
 export function listProjects(): ProjectRecord[] {

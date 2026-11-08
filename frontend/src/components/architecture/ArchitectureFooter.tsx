@@ -26,7 +26,7 @@ export default function ArchitectureFooter({ spec, active }: { spec: AppSpec; ac
     <footer className="relative flex flex-col-reverse items-stretch gap-3 rounded-3xl border border-softAqua/50 bg-cream/55 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
       <button
         type="button"
-        onClick={() => navigate("/sources")}
+        onClick={() => navigate("/new")}
         className="flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm text-slate transition hover:-translate-y-px hover:bg-washedSky/80"
       >
         <ArrowLeft size={15} /> Go Back to Editing

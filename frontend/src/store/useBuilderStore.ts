@@ -1,18 +1,25 @@
-// Shared in-memory draft state across Sources <-> Architecture navigation. Not persisted automatically
-// (persistence is the explicit "Save Project" action in api/authorityKey.ts's recordProject) so that
-// navigating Home -> Sources resumes an in-progress draft rather than silently writing to storage.
+// Shared builder state across the /new steps and the app pages. The DRAFT (what the dev typed: name, app id,
+// intent, area, destinations, sources) persists to sessionStorage so a refresh keeps it; the compiled spec,
+// activation response and other run state stay in memory only (activation keys must never be persisted here).
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import type { ActivateResponse, AppSpec, BBox, CompileInput, DestinationPoint } from "../api/types";
 
 export type AppStatus = "idle" | "compiling" | "proposed" | "activating" | "active";
 
 interface BuilderState {
+  /** Human display name ("Harbour watch"); the app id is derived from it unless edited. */
+  name: string;
   appId: string;
+  /** True once the dev edited the app id by hand, so renaming stops re-deriving it. */
+  appIdCustom: boolean;
   intent: string;
   bbox: BBox | null;
   cellM: number;
   destinationPoints: DestinationPoint[];
   sources: CompileInput[];
+  /** ISO time of the last successful compile of this draft (null while it's still being built). */
+  compiledAt: string | null;
 
   compiledSpec: AppSpec | null;
   compiling: boolean;
@@ -23,7 +30,9 @@ interface BuilderState {
 
   selectedLayerId: string | null;
 
+  setName: (name: string) => void;
   setAppId: (id: string) => void;
+  setAppIdCustom: (custom: boolean) => void;
   setIntent: (text: string) => void;
   setBbox: (b: BBox) => void;
   setCellM: (m: number) => void;
@@ -33,25 +42,31 @@ interface BuilderState {
   addSource: (input: CompileInput) => void;
   removeSource: (id: string) => void;
   setCompiledSpec: (spec: AppSpec | null) => void;
+  setCompiledAt: (t: string | null) => void;
   setCompiling: (busy: boolean) => void;
   setCompileError: (msg: string) => void;
   setActivation: (a: ActivateResponse | null) => void;
   setAppStatus: (s: AppStatus) => void;
   setSelectedLayerId: (id: string | null) => void;
+  /** Back to an empty draft (and no compiled spec / activation): "Start new". */
   resetDraft: () => void;
 
-  // Sources page additions: edit a committed source in place (e.g. its id from the chip).
   updateSource: (index: number, patch: Partial<CompileInput>) => void;
   removeSourceAt: (index: number) => void;
+  /** Put a source back at its old position (undo of a removal). */
+  insertSourceAt: (index: number, input: CompileInput) => void;
 }
 
 const initialDraft = {
+  name: "",
   appId: "",
+  appIdCustom: false,
   intent: "",
   bbox: null as BBox | null,
   cellM: 25,
   destinationPoints: [] as DestinationPoint[],
   sources: [] as CompileInput[],
+  compiledAt: null as string | null,
   compiledSpec: null as AppSpec | null,
   compiling: false,
   compileError: "",
@@ -60,28 +75,70 @@ const initialDraft = {
   selectedLayerId: null as string | null,
 };
 
-export const useBuilderStore = create<BuilderState>((set) => ({
-  ...initialDraft,
+/** sessionStorage can throw (private mode, blocked storage): fall back to a no-op store. */
+const safeSession = createJSONStorage(() => {
+  try {
+    const s = window.sessionStorage;
+    s.getItem("__probe");
+    return s;
+  } catch {
+    return { getItem: () => null, setItem: () => undefined, removeItem: () => undefined };
+  }
+});
 
-  setAppId: (id) => set({ appId: id }),
-  setIntent: (text) => set({ intent: text }),
-  setBbox: (b) => set({ bbox: b }),
-  setCellM: (m) => set({ cellM: m }),
-  addDestinationPoint: (p) => set((s) => ({ destinationPoints: [...s.destinationPoints, p] })),
-  updateDestinationPoint: (index, patch) =>
-    set((s) => ({ destinationPoints: s.destinationPoints.map((p, i) => (i === index ? { ...p, ...patch } : p)) })),
-  removeDestinationPoint: (index) => set((s) => ({ destinationPoints: s.destinationPoints.filter((_, i) => i !== index) })),
-  addSource: (input) => set((s) => ({ sources: [...s.sources.filter((x) => x.id !== input.id), input] })),
-  removeSource: (id) => set((s) => ({ sources: s.sources.filter((x) => x.id !== id) })),
-  setCompiledSpec: (spec) => set({ compiledSpec: spec }),
-  setCompiling: (busy) => set({ compiling: busy }),
-  setCompileError: (msg) => set({ compileError: msg }),
-  setActivation: (a) => set({ activation: a }),
-  setAppStatus: (status) => set({ appStatus: status }),
-  setSelectedLayerId: (id) => set({ selectedLayerId: id }),
-  resetDraft: () => set({ ...initialDraft }),
+export const useBuilderStore = create<BuilderState>()(
+  persist(
+    (set) => ({
+      ...initialDraft,
 
-  updateSource: (index, patch) =>
-    set((s) => ({ sources: s.sources.map((x, i) => (i === index ? { ...x, ...patch } : x)) })),
-  removeSourceAt: (index) => set((s) => ({ sources: s.sources.filter((_, i) => i !== index) })),
-}));
+      setName: (name) => set({ name }),
+      setAppId: (id) => set({ appId: id }),
+      setAppIdCustom: (custom) => set({ appIdCustom: custom }),
+      setIntent: (text) => set({ intent: text }),
+      setBbox: (b) => set({ bbox: b }),
+      setCellM: (m) => set({ cellM: m }),
+      addDestinationPoint: (p) => set((s) => ({ destinationPoints: [...s.destinationPoints, p] })),
+      updateDestinationPoint: (index, patch) =>
+        set((s) => ({ destinationPoints: s.destinationPoints.map((p, i) => (i === index ? { ...p, ...patch } : p)) })),
+      removeDestinationPoint: (index) =>
+        set((s) => ({ destinationPoints: s.destinationPoints.filter((_, i) => i !== index) })),
+      addSource: (input) => set((s) => ({ sources: [...s.sources.filter((x) => x.id !== input.id), input] })),
+      removeSource: (id) => set((s) => ({ sources: s.sources.filter((x) => x.id !== id) })),
+      setCompiledSpec: (spec) => set({ compiledSpec: spec }),
+      setCompiledAt: (t) => set({ compiledAt: t }),
+      setCompiling: (busy) => set({ compiling: busy }),
+      setCompileError: (msg) => set({ compileError: msg }),
+      setActivation: (a) => set({ activation: a }),
+      setAppStatus: (status) => set({ appStatus: status }),
+      setSelectedLayerId: (id) => set({ selectedLayerId: id }),
+      resetDraft: () => set({ ...initialDraft }),
+
+      updateSource: (index, patch) =>
+        set((s) => ({ sources: s.sources.map((x, i) => (i === index ? { ...x, ...patch } : x)) })),
+      removeSourceAt: (index) => set((s) => ({ sources: s.sources.filter((_, i) => i !== index) })),
+      insertSourceAt: (index, input) =>
+        set((s) => {
+          const next = s.sources.filter((x) => x.id !== input.id);
+          next.splice(Math.min(Math.max(index, 0), next.length), 0, input);
+          return { sources: next };
+        }),
+    }),
+    {
+      name: "builder-draft",
+      version: 1,
+      storage: safeSession,
+      // Draft fields only. Never the compiled spec, the activation (it carries keys) or run state.
+      partialize: (s) => ({
+        name: s.name,
+        appId: s.appId,
+        appIdCustom: s.appIdCustom,
+        intent: s.intent,
+        bbox: s.bbox,
+        cellM: s.cellM,
+        destinationPoints: s.destinationPoints,
+        sources: s.sources,
+        compiledAt: s.compiledAt,
+      }),
+    },
+  ),
+);

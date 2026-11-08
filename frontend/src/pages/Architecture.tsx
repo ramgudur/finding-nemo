@@ -268,7 +268,7 @@ function EmptyState() {
         <h1 className="text-lg font-semibold text-slate">Nothing compiled yet</h1>
         <p className="text-sm text-ink">Describe your app and its sources first; the proposed architecture shows up here for you to review.</p>
         <div className="mt-2 flex flex-wrap justify-center gap-2">
-          <Link to="/sources" className="rounded-full bg-[#4F80B0] px-4 py-2 text-sm font-semibold text-cream shadow-sm transition hover:-translate-y-px">
+          <Link to="/new" className="rounded-full bg-[#4F80B0] px-4 py-2 text-sm font-semibold text-cream shadow-sm transition hover:-translate-y-px">
             Start with sources
           </Link>
           <Link to="/projects" className="rounded-full bg-cream/90 px-4 py-2 text-sm text-slate transition hover:-translate-y-px">

@@ -5,7 +5,7 @@ import { parseConfig, presetOf, urlRequired } from "./sourceUtils";
 import type { ConnectorDraft } from "./sourceUtils";
 
 const field =
-  "w-full rounded-xl border bg-white/55 px-3 py-2 font-mono text-[13px] text-slate outline-none transition focus:bg-white/85";
+  "w-full rounded-xl border bg-white/55 px-3 py-2 font-mono text-[13px] text-slate transition focus:bg-white/85";
 
 export function ConnectorConfigFields({
   option,
@@ -33,7 +33,7 @@ export function ConnectorConfigFields({
             onChange={(e) => onChange({ ...draft, url: e.target.value })}
             placeholder="https://…"
             spellCheck={false}
-            className={`${field} ${urlMissing ? "border-coral/50" : "border-white/70"}`}
+            className={`${field} ${urlMissing ? "border-danger/50" : "border-white/70"}`}
           />
           {option.type === "rss" && !draft.url.trim() && (
             <span className="text-[11px] text-inkSoft">No feed yet? Leave it empty and the Compiler can ask the Scout to find one.</span>
@@ -50,9 +50,9 @@ export function ConnectorConfigFields({
             value={draft.configText}
             onChange={(e) => onChange({ ...draft, configText: e.target.value })}
             spellCheck={false}
-            className={`${field} resize-y ${configBad ? "border-coral/60" : "border-white/70"}`}
+            className={`${field} resize-y ${configBad ? "border-danger/60" : "border-white/70"}`}
           />
-          <span className={`text-[11px] ${configBad ? "text-coral" : "text-inkSoft"}`}>
+          <span className={`text-[11px] ${configBad ? "text-danger" : "text-inkSoft"}`}>
             {configBad ? "Must be a JSON object." : "Latitude and longitude default to the area's centre."}
           </span>
         </label>

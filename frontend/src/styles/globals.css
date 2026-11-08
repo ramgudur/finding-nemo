@@ -5,6 +5,16 @@
 @layer base {
   body {
     @apply bg-mist text-slate font-sans antialiased;
+    caret-color: #35596b;
+  }
+  /* One keyboard focus ring for every control: 2px slate with an offset, readable on cream and sky. */
+  :focus-visible {
+    outline: 2px solid #35596b;
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: rgba(141, 185, 183, 0.55);
+    color: #2f4f5f;
   }
 }
 
@@ -110,11 +120,11 @@
 .pill-btn:not(:disabled):hover { transform: translateY(-1px); }
 .pill-btn:disabled { cursor: not-allowed; opacity: 0.5; }
 .pill-primary {
-  background: #4f80b0;
+  background: #3b6895;
   color: #f0ebdd;
   box-shadow: 0 6px 18px -10px rgba(47, 88, 114, 0.9);
 }
-.pill-primary:not(:disabled):hover { background: #46739f; }
+.pill-primary:not(:disabled):hover { background: #335c85; }
 .pill-quiet { background: rgba(240, 235, 221, 0.7); color: #35596b; }
 .pill-quiet:hover { background: rgba(240, 235, 221, 0.95); }
 .pill-active { background: #638f91; color: #f0ebdd; }
@@ -134,3 +144,11 @@
 }
 
 .chip-scroll { scrollbar-width: thin; scrollbar-color: rgba(129, 153, 160, 0.4) transparent; }
+
+/* Builder steps: one quiet entrance per step (~220 ms, exponential ease-out). Opacity only: a transform or
+   filter here would make the step's fixed bottom bar position against this box while it animates. */
+@keyframes step-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.step-in { animation: step-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both; }

@@ -9,12 +9,13 @@ export function KindBadge({ kind, small }: { kind: "push" | "pull"; small?: bool
   const Icon = kind === "push" ? ArrowDownToLine : RefreshCw;
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1 rounded-full font-mono uppercase tracking-wider ${
-        small ? "px-1.5 py-px text-[9.5px]" : "px-2 py-0.5 text-[10.5px]"
-      } ${kind === "push" ? "bg-[#4F80B0]/15 text-[#3F6E9C]" : "bg-mutedTeal/15 text-mutedTeal"}`}
+      title={kind === "push" ? "Your app sends this to the platform" : "The platform fetches this on a schedule"}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full font-semibold ${
+        small ? "px-1.5 py-px text-[11px]" : "px-2 py-0.5 text-xs"
+      } ${kind === "push" ? "bg-primary/15 text-primary" : "bg-mutedTeal/20 text-[#3C6668]"}`}
     >
-      <Icon size={small ? 9 : 11} strokeWidth={2.4} />
-      {kind}
+      <Icon size={small ? 10 : 11} strokeWidth={2.4} aria-hidden />
+      {kind === "push" ? "sent by your app" : "fetched"}
     </span>
   );
 }
@@ -37,7 +38,7 @@ export function SourceSuggestionCard({ option, selected, index, onPick }: Props)
       aria-pressed={selected}
       initial={reduce ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, delay: reduce ? 0 : index * 0.05, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.22, delay: reduce ? 0 : index * 0.04, ease: [0.22, 1, 0.36, 1] }}
       whileHover={reduce ? undefined : { y: -2 }}
       className={`suggestion-card flex w-full flex-col gap-1.5 rounded-2xl border px-4 py-3 text-left transition-[background-color,border-color,box-shadow] duration-200 ${
         selected
@@ -52,7 +53,7 @@ export function SourceSuggestionCard({ option, selected, index, onPick }: Props)
         </span>
       </span>
       <span className="text-[13px] leading-snug text-ink">{option.why}</span>
-      {preset && <span className="font-mono text-[11px] text-inkSoft">preset · {preset}</span>}
+      {preset && <span className="text-[11px] text-ink">ready-made setup: <span className="font-mono">{preset}</span></span>}
     </motion.button>
   );
 }
@@ -67,9 +68,9 @@ export function SmsCardDisabled() {
       <span className="flex items-center gap-2">
         <MessageSquare size={14} className="text-inkSoft" />
         <span className="text-[15px] font-semibold text-ink">SMS / phone</span>
-        <span className="ml-auto font-mono text-[10.5px] uppercase tracking-wider text-inkSoft">later</span>
+        <span className="ml-auto text-[11px] font-semibold text-ink">coming later</span>
       </span>
-      <span className="text-[13px] leading-snug text-inkSoft">Not available yet.</span>
+      <span className="text-[13px] leading-snug text-ink">Receiving by text message isn't available yet.</span>
     </div>
   );
 }
