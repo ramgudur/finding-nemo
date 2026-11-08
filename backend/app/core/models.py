@@ -29,7 +29,7 @@ ConnectorType = Literal["rss", "json_api"]  # html is stubbed: rejected here
 PoiLabelMode = Literal["auto", "on", "off"]
 PoiStatus = Literal["active", "retired"]
 AgentName = Literal["compiler", "scout", "critic", "poi_labeler", "message_guard"]
-ChangeKind = Literal["weight", "trust", "poi", "connector", "spec_confirm"]
+ChangeKind = Literal["weight", "trust", "poi", "connector", "spec_confirm", "spec_edit"]
 Actor = Literal["agent", "dev"]
 Device = Literal["cpu", "gpu"]
 
@@ -322,6 +322,14 @@ class AppSpec(Model):
         if len(labels) != len(set(labels)):
             raise ValueError("POI labels must be unique")
         return self
+
+
+class SpecEditResponse(Model):
+    """Response of `PUT /v1/apps/{app}/spec`: the saved spec (still `pending_confirmation`) and
+    the `validate_spec` warnings it carries. Errors are a `422` with the full list instead."""
+
+    spec: AppSpec
+    warnings: list[str] = Field(default_factory=list)
 
 
 # --- Ingest ----------------------------------------------------------------------

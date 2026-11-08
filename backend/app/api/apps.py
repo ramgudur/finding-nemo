@@ -2,7 +2,8 @@
 
 A spec reaches `pending_confirmation` either hand-written (`POST /{app}`, e.g. the
 campus-alert spec file) or via the Compiler (`POST /{app}/compile`, `agents.compiler`).
-Either way, only `POST /{app}/activate` is dev confirmation: it generates the
+While it is pending, the dev may edit it (`PUT /{app}/spec`, which writes a `spec_edit` Change
+and keeps the status). Either way, only `POST /{app}/activate` is dev confirmation: it generates the
 ingest/authority keys (shown once), starts the app ticking, and is the only place that
 writes the `spec_confirm` Change.
 """
@@ -11,8 +12,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
+from pydantic import ValidationError
 
 from app.agents.compiler import CompilerCache, run_compiler
 from app.agents.llm import LlmRouter
@@ -23,8 +26,17 @@ from app.connectors import url_guard
 from app.core import clock as clock_mod
 from app.core.access import is_authority
 from app.core.db import Db
-from app.core.models import AppSpec, Change, CompileRequest, Model, SourceSuggestion, SuggestSourceRequest
+from app.core.models import (
+    AppSpec,
+    Change,
+    CompileRequest,
+    Model,
+    SourceSuggestion,
+    SpecEditResponse,
+    SuggestSourceRequest,
+)
 from app.engine.tick import TickEngine
+from app.tools.compiler_tools import _spec_errors, _spec_warnings
 from app.tools.context import ToolContext
 
 router = APIRouter(prefix="/v1/apps", tags=["apps"])
@@ -91,6 +103,86 @@ def activate_app(
         )
     )
     return ActivateResponse(app_id=app, ingest_key=keys.ingest_key, authority_key=keys.authority_key)
+
+
+def _spec_diff(before: AppSpec, after: AppSpec) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Only what changed, keyed by a readable path: top-level fields whole, inputs per field
+    (`inputs[<id>].<field>`); an added or removed input appears whole on one side."""
+    b, a = before.model_dump(mode="json"), after.model_dump(mode="json")
+    old: dict[str, Any] = {}
+    new: dict[str, Any] = {}
+    for key in a:
+        if key in ("inputs", "status") or b.get(key) == a[key]:
+            continue
+        old[key], new[key] = b.get(key), a[key]
+    b_in = {i["id"]: i for i in b["inputs"]}
+    a_in = {i["id"]: i for i in a["inputs"]}
+    for iid in [*b_in, *(i for i in a_in if i not in b_in)]:
+        bi, ai = b_in.get(iid), a_in.get(iid)
+        if bi is None or ai is None:
+            old[f"inputs[{iid}]"], new[f"inputs[{iid}]"] = bi, ai
+            continue
+        for field in ai:
+            if bi.get(field) != ai[field]:
+                old[f"inputs[{iid}].{field}"], new[f"inputs[{iid}].{field}"] = bi.get(field), ai[field]
+    if not new and b["inputs"] != a["inputs"]:  # only the order of inputs changed
+        old["inputs"], new["inputs"] = list(b_in), list(a_in)
+    return old, new
+
+
+@router.put("/{app}/spec", response_model=SpecEditResponse)
+def edit_spec(app: str, body: dict[str, Any] = Body(...), db: Db = Depends(get_db)) -> SpecEditResponse:
+    """The dev edits a pending spec before confirming it. Body: the full `AppSpec`; the body
+    wins for every field (connectors and destinations included). Status stays
+    `pending_confirmation`: `/activate` is still the only confirmation (rule 4)."""
+    current = db.get_app(app)
+    if current is None:
+        raise HTTPException(status_code=404, detail="app not found")
+    if current.status != "pending_confirmation":
+        raise HTTPException(
+            status_code=409, detail=f"only a pending_confirmation spec can be edited (status is {current.status!r})"
+        )
+    if body.get("app_id") != app:
+        raise HTTPException(status_code=422, detail=["app_id in the body must match the path"])
+    try:
+        spec = AppSpec.model_validate(body)
+    except ValidationError as e:
+        errors = [f"{'.'.join(str(p) for p in err['loc']) or 'spec'}: {err['msg']}" for err in e.errors()]
+        raise HTTPException(status_code=422, detail=errors) from None
+    if spec.status != "active":  # an "active" body is reported by _spec_errors below
+        spec.status = "pending_confirmation"
+    errors = _spec_errors(spec)
+    old_urls = {
+        connector_engine.connector_url(i.connector) for i in current.inputs if i.connector is not None
+    }  # already checked when they entered the spec; re-check only new or changed URLs
+    for inp in spec.inputs:
+        url = connector_engine.connector_url(inp.connector) if inp.connector is not None else None
+        if url is not None and url not in old_urls:
+            try:
+                url_guard.check_url(url)
+            except url_guard.UnsafeUrl as e:
+                errors.append(f"input {inp.id!r}: connector URL refused: {e}")
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+
+    before, after = _spec_diff(current, spec)
+    if before or after:
+        t = clock_mod.now()
+        db.upsert_app(spec, t=t)
+        db.add_change(
+            Change(
+                id=str(uuid.uuid4()),
+                app_id=app,
+                kind="spec_edit",
+                target=app,
+                before=before,
+                after=after,
+                reason=f"dev edited the pending spec: {', '.join(after)}",
+                actor="dev",
+                t=datetime.fromtimestamp(t, tz=UTC),
+            )
+        )
+    return SpecEditResponse(spec=spec, warnings=_spec_warnings(spec))
 
 
 @router.post("/{app}/compile", response_model=AppSpec)
