@@ -34,7 +34,7 @@ import numpy as np
 
 from app.core import clock as clock_mod
 from app.core.clock import Clock
-from app.core.models import AppSpec
+from app.core.models import AppSpec, Hotspot, Visibility
 from app.engine.combine import combine
 from app.engine.grid import Grid
 from app.engine.layer_cache import LayerCache
@@ -96,21 +96,6 @@ TrustProvider = Callable[[str], Mapping[str, float]]
 
 
 # -- tick outputs -----------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Hotspot:
-    """Connected area with score >= threshold. Internal until a Hotspot contract lands in models.py."""
-
-    id: str
-    lat: float
-    lon: float
-    peak: float
-    mean: float
-    area_m2: float
-    n_cells: int
-    persisted_ticks: int
-    contributing_layers: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -201,6 +186,13 @@ class AppRuntime:
         return f"h{self._next_hotspot}"
 
 
+def hotspot_visibility(spec: AppSpec, contributing: Sequence[str]) -> Visibility:
+    """Public only if some layers contribute and every one of them is a public output layer;
+    otherwise authority (the safe default: override-only or unknown provenance stays private)."""
+    public = {o.id for o in spec.outputs.layers if o.visibility == "public"}
+    return "public" if contributing and all(c in public for c in contributing) else "authority"
+
+
 def _connected_components(mask: np.ndarray) -> list[np.ndarray]:
     """8-connected components of a boolean [H, W] mask, as arrays of flat indices."""
     h, w = mask.shape
@@ -231,9 +223,15 @@ def find_hotspots(
     normalized: np.ndarray,
     weights: np.ndarray,
     *,
+    override_layers: Mapping[str, np.ndarray] | None = None,
     threshold: float | None = None,
     max_hotspots: int = HOTSPOT_MAX,
 ) -> list[Hotspot]:
+    """Connected areas with score >= the spec's threshold.
+
+    ``contributing_layers``: weighted layers supplying >= 10% of the hotspot's score mass (so a
+    smoothing tail never counts), plus every override layer active in it. Visibility follows
+    from these, so an override-driven hotspot stays authority-only (rule 8)."""
     grid = rt.grid
     if threshold is None:
         threshold = rt.spec.outputs.hotspot_threshold
@@ -255,12 +253,14 @@ def find_hotspots(
         x, y = float((cx * vals).sum() / wsum), float((cy * vals).sum() / wsum)
         lat, lon = (float(v) for v in grid.to_latlon(x, y))
         contributing: tuple[str, ...] = ()
-        if contrib_all is not None:
+        mass = float(vals.sum())
+        if contrib_all is not None and mass > 0:
             share = contrib_all[:, cells].sum(axis=1)
-            total = float(share.sum())
-            if total > 0:
-                order = np.argsort(-share)
-                contributing = tuple(rt.weighted_ids[i] for i in order if share[i] / total >= 0.1)
+            order = np.argsort(-share)
+            contributing = tuple(rt.weighted_ids[i] for i in order if share[i] / mass >= 0.1)
+        for lid, layer in (override_layers or {}).items():
+            if float(layer.ravel()[cells].max()) > 0:
+                contributing += (lid,)
         # keep the id of the nearest unused hotspot from last tick
         hid, persisted = None, 0
         best = HOTSPOT_MATCH_CELLS * grid.cell_m
@@ -274,17 +274,20 @@ def find_hotspots(
         if hid is None:
             hid = rt.new_hotspot_id()
         used.add(hid)
+        area = len(cells) * grid.cell_m**2
         out.append(
             Hotspot(
                 id=hid,
                 lat=lat,
                 lon=lon,
-                peak=float(vals.max()),
+                radius_m=math.sqrt(area / math.pi),
+                score=float(vals.max()),
                 mean=float(vals.mean()),
-                area_m2=len(cells) * grid.cell_m**2,
+                area_m2=area,
                 n_cells=len(cells),
                 persisted_ticks=persisted,
-                contributing_layers=contributing,
+                contributing_layers=list(contributing),
+                visibility=hotspot_visibility(rt.spec, contributing),
             )
         )
     return out
@@ -331,6 +334,7 @@ def tick_app(
     raw: dict[str, np.ndarray] = {}
     extras: dict[str, dict[str, Any]] = {}
     override = np.zeros(grid.shape)
+    override_layers: dict[str, np.ndarray] = {}
     events_by_input: dict[str, Events] = {}
 
     for li in rt.layers:
@@ -362,7 +366,9 @@ def tick_app(
                 errors.append(f"{li.layer_id}: {type(e).__name__}: {e}")
                 layer = np.zeros(grid.shape)
         if li.is_override:
-            override = np.maximum(override, np.clip(np.nan_to_num(layer), 0.0, 1.0))
+            ov_layer = np.clip(np.nan_to_num(layer), 0.0, 1.0)
+            override_layers[li.layer_id] = ov_layer
+            override = np.maximum(override, ov_layer)
         else:
             raw[li.layer_id] = layer
 
@@ -380,7 +386,7 @@ def tick_app(
     if last is None or now > float(last.t[0]):  # a paused clock doesn't duplicate ticks
         rt.cache.push(now, normalized, ov)
 
-    hotspots = find_hotspots(rt, score, normalized, w)  # threshold from spec.outputs.hotspot_threshold
+    hotspots = find_hotspots(rt, score, normalized, w, override_layers=override_layers)
     result = TickResult(
         app_id=rt.spec.app_id,
         t=now,

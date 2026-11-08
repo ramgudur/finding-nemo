@@ -5,14 +5,13 @@ header gets public data (rule 8); a *wrong* key is rejected with 401, not silent
 downgraded to public. `build_map_response`/`build_hotspots_response` do the actual
 filtering so `api/ws.py` streams exactly the same shapes over the WebSocket.
 
-A hotspot is public only when every layer that contributed to it is a public layer
-(rule 3: no app-specific assumption here, e.g. always-authority); with no identified
-contributor it defaults to authority, the safe choice when unsure.
+Hotspot visibility is decided in `engine/tick.py` (public only when every contributing layer,
+including any active override layer, is a public output layer; else authority). Here it's
+only filtered.
 """
 
 from __future__ import annotations
 
-import math
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.deps import authority_key_header, get_db, get_engine
 from app.core.access import require_authority_if_present, visible
 from app.core.db import Db
-from app.core.models import AppSpec, CellCollection, Hotspot, HotspotsResponse, MapResponse, Visibility
+from app.core.models import AppSpec, CellCollection, HotspotsResponse, MapResponse
 from app.engine.grid import Grid
 from app.engine.tick import TickEngine, TickResult
 
@@ -29,12 +28,6 @@ router = APIRouter(prefix="/v1/apps", tags=["outputs"])
 # grid.to_geojson() keeps cells with value > min_value; this matches "value < 0.01 omitted"
 # (values are rounded to 4 decimals, so this margin never changes which cells are kept).
 _CELL_MIN_VALUE = 0.0099995
-
-
-def _hotspot_visibility(contributing_layers: tuple[str, ...], public_ids: set[str]) -> Visibility:
-    if contributing_layers and all(lid in public_ids for lid in contributing_layers):
-        return "public"
-    return "authority"
 
 
 def build_map_response(app_id: str, spec: AppSpec, grid: Grid, result: TickResult, authority: bool) -> MapResponse:
@@ -55,24 +48,9 @@ def build_map_response(app_id: str, spec: AppSpec, grid: Grid, result: TickResul
 
 
 def build_hotspots_response(app_id: str, spec: AppSpec, result: TickResult, authority: bool) -> HotspotsResponse:
-    public_ids = {ol.id for ol in spec.outputs.layers if ol.visibility == "public"}
-    hotspots = [
-        Hotspot(
-            id=h.id,
-            lat=h.lat,
-            lon=h.lon,
-            radius_m=math.sqrt(h.area_m2 / math.pi),
-            score=h.peak,
-            mean=h.mean,
-            area_m2=h.area_m2,
-            n_cells=h.n_cells,
-            persisted_ticks=h.persisted_ticks,
-            contributing_layers=list(h.contributing_layers),
-            visibility=_hotspot_visibility(h.contributing_layers, public_ids),
-        )
-        for h in result.hotspots
-    ]
-    hotspots = [h for h in hotspots if visible(h.visibility, authority)]
+    """tick.py emits models.Hotspot with its visibility already set (from contributing layers);
+    this only filters, so REST and the WebSocket serve exactly the same items."""
+    hotspots = [h for h in result.hotspots if visible(h.visibility, authority)]
     return HotspotsResponse(app_id=app_id, t=datetime.fromtimestamp(result.t, tz=UTC), hotspots=hotspots)
 
 

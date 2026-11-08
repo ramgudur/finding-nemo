@@ -62,7 +62,7 @@ def test_density_cluster_becomes_hotspot_near_truth():
     h = res.hotspots[0]
     x, y = rt.grid.to_xy(h.lat, h.lon)
     assert np.hypot(float(x) - 200, float(y) - 300) < 15
-    assert h.contributing_layers == ("crowd.density",)
+    assert h.contributing_layers == ["crowd.density"]
 
 
 def test_tick_ignores_future_and_stale_events():
@@ -128,7 +128,7 @@ def test_override_wins_after_weighted_sum_and_clears():
     r, c, _ = rt.grid.cell_of(lat, lon)
     assert res.score[int(r), int(c)] == 1.0
     assert res.override.max() == 1.0
-    assert len(res.hotspots) == 1 and res.hotspots[0].contributing_layers == ()
+    assert len(res.hotspots) == 1 and res.hotspots[0].contributing_layers == ["marker.override"]
     assert rt.cache.latest().overrides.max() == 1.0
     # the declared 'cleared' field reaches the operator through the event source
     src.add("test-app", "marker", [{"t": T0 + 1, "lat": float(lat), "lon": float(lon), "cleared": True}])
@@ -279,7 +279,7 @@ def test_hotspot_matching_scales_with_cell_size():
         t = T0 + 2 * k
         src.add("test-app", "crowd", cluster(rt.grid, 2000 + 100 * k, 2000, 40, t, seed=k, spread=20))
         res = tick_app(rt, src, now=t, clock=SimClock(t))
-        ids.append(max(res.hotspots, key=lambda h: h.peak).id)
+        ids.append(max(res.hotspots, key=lambda h: h.score).id)
     assert ids == ["h1", "h1", "h1"]
 
 
@@ -331,3 +331,50 @@ def test_each_operator_gets_only_its_own_history(monkeypatch):
     res = tick_app(rt, src, now=now, clock=SimClock(now))
     assert res.override.max() == 1.0  # the override still sees the 3-hour-old point
     assert seen["oldest"] >= now - LOOKBACK_S  # density does not
+
+
+def test_hotspot_visibility_follows_contributing_layers():
+    """Public only if every contributing layer is a public output; otherwise authority."""
+    from app.core.models import Hotspot
+
+    def run(outputs, with_marker=False):
+        crowd = spec().inputs[0].model_dump()
+        inputs = [crowd]
+        if with_marker:
+            inputs.append(
+                {
+                    "id": "marker",
+                    "kind": "push",
+                    "shape": "fixed_point",
+                    "tier": "locked",
+                    "meaning": "an authority point",
+                    "operators": [{"op": "override", "weight": 0, "radius_m": 30}],
+                }
+            )
+        rt = AppRuntime(spec(inputs=inputs, outputs={"layers": outputs}))
+        src = InMemoryEventSource()
+        src.add("test-app", "crowd", cluster(rt.grid, 200, 300, 30, T0))
+        if with_marker:
+            lat, lon = rt.grid.to_latlon(400.0, 100.0)
+            src.add("test-app", "marker", [{"t": T0 - 1, "lat": float(lat), "lon": float(lon)}])
+        return tick_app(rt, src, now=T0, clock=SimClock(T0)).hotspots
+
+    public = [{"id": "crowd.density", "visibility": "public"}]
+    hs = run(public)
+    assert all(isinstance(h, Hotspot) for h in hs)
+    assert [h.visibility for h in hs] == ["public"]
+    assert [h.visibility for h in run([])] == ["authority"]  # layer not exposed publicly
+    assert [h.visibility for h in run([{"id": "crowd.density", "visibility": "authority"}])] == ["authority"]
+    # an override hotspot lists its override layer (and not crowd's smoothing tail): stays authority
+    by_layers = {tuple(h.contributing_layers): h.visibility for h in run(public, with_marker=True)}
+    assert by_layers == {("crowd.density",): "public", ("marker.override",): "authority"}
+
+
+def test_hotspot_model_fields():
+    rt = AppRuntime(spec())
+    src = InMemoryEventSource()
+    src.add("test-app", "crowd", cluster(rt.grid, 200, 300, 30, T0))
+    h = tick_app(rt, src, now=T0, clock=SimClock(T0)).hotspots[0]
+    assert h.radius_m == pytest.approx(np.sqrt(h.area_m2 / np.pi))
+    assert h.area_m2 == h.n_cells * rt.grid.cell_m**2
+    assert 0.5 <= h.score <= 1.0 and h.mean <= h.score
