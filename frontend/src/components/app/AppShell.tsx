@@ -37,7 +37,7 @@ export function Breadcrumb({ appId, page, appHref }: { appId: string; page?: str
     <nav aria-label="Breadcrumb" className="text-[13px] text-ink">
       <ol className="flex flex-wrap items-center gap-1">
         <li>
-          <Link to="/projects" className="rounded underline-offset-2 transition-colors hover:text-slate hover:underline">
+          <Link to="/projects" className="hit relative rounded underline-offset-2 transition-colors hover:text-slate hover:underline">
             Projects
           </Link>
         </li>
@@ -46,7 +46,7 @@ export function Breadcrumb({ appId, page, appHref }: { appId: string; page?: str
         </li>
         <li className="font-mono">
           {page && appHref ? (
-            <Link to={appHref} className="rounded underline-offset-2 transition-colors hover:text-slate hover:underline">
+            <Link to={appHref} className="hit relative rounded underline-offset-2 transition-colors hover:text-slate hover:underline">
               {appId}
             </Link>
           ) : (
@@ -100,7 +100,7 @@ export function CopyButton({ value, label = "Copy", className = "" }: { value: s
     <button
       type="button"
       onClick={() => void copy()}
-      className={`inline-flex shrink-0 items-center gap-1 rounded-lg bg-white/75 px-2.5 py-1 text-[12px] font-semibold text-slate ring-1 ring-paleWater transition-[background-color,box-shadow] duration-150 hover:bg-white hover:shadow-sm ${className}`}
+      className={`tap inline-flex shrink-0 items-center justify-center gap-1 rounded-lg bg-white/75 px-2.5 py-1 text-[12px] font-semibold text-slate ring-1 ring-paleWater transition-[background-color,box-shadow] duration-150 hover:bg-white hover:shadow-sm ${className}`}
     >
       {copied ? <Check aria-hidden className="h-3.5 w-3.5 text-mutedTeal" /> : <Copy aria-hidden className="h-3.5 w-3.5" />}
       <span aria-live="polite">{copied ? "Copied" : label}</span>
@@ -115,10 +115,10 @@ export function Centered({ children }: { children: ReactNode }) {
 }
 
 export const primaryBtn =
-  "inline-flex items-center justify-center gap-1.5 rounded-full bg-[#4F80B0] px-5 py-2 text-sm font-semibold text-cream shadow-[0_4px_14px_rgba(79,128,176,0.28)] ring-1 ring-white/40 transition-[transform,box-shadow,opacity] duration-150 hover:-translate-y-px hover:shadow-[0_8px_20px_rgba(79,128,176,0.32)] active:translate-y-0 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none";
+  "tap inline-flex items-center justify-center gap-1.5 rounded-full bg-[#4F80B0] px-5 py-2 text-sm font-semibold text-cream shadow-[0_4px_14px_rgba(79,128,176,0.28)] ring-1 ring-white/40 transition-[transform,box-shadow,opacity] duration-150 hover:-translate-y-px hover:shadow-[0_8px_20px_rgba(79,128,176,0.32)] active:translate-y-0 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none";
 
 export const secondaryBtn =
-  "inline-flex items-center justify-center gap-1.5 rounded-full bg-white/80 px-4 py-2 text-sm font-semibold text-slate ring-1 ring-seaGlass transition-[transform,box-shadow,opacity] duration-150 hover:-translate-y-px hover:shadow-sm disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none";
+  "tap inline-flex items-center justify-center gap-1.5 rounded-full bg-white/80 px-4 py-2 text-sm font-semibold text-slate ring-1 ring-seaGlass transition-[transform,box-shadow,opacity] duration-150 hover:-translate-y-px hover:shadow-sm disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none";
 
 export const ghostBtn =
-  "inline-flex items-center justify-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold text-ink transition-colors duration-150 hover:bg-white/50 hover:text-slate disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent";
+  "tap inline-flex items-center justify-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold text-ink transition-colors duration-150 hover:bg-white/50 hover:text-slate disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent";

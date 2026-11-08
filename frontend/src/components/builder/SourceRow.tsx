@@ -93,13 +93,13 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
               }
             }}
             spellCheck={false}
-            className="w-48 rounded-lg border border-white/80 bg-white/70 px-2 py-0.5 font-mono text-[13px] text-slate"
+            className="phone-16 w-48 rounded-lg border border-white/80 bg-white/70 px-2 py-0.5 font-mono text-[13px] text-slate max-sm:min-h-11"
           />
         ) : (
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="group flex min-w-0 items-center gap-1 rounded-md px-1 font-mono text-[13px] font-semibold text-slate transition-colors duration-150 hover:bg-white/60"
+            className="hit group relative flex min-w-0 items-center gap-1 rounded-md px-1 font-mono text-[13px] font-semibold text-slate transition-colors duration-150 hover:bg-white/60"
           >
             <span className="truncate">{source.id}</span>
             <Pencil size={11} className="shrink-0 text-ink" aria-hidden />
@@ -110,9 +110,10 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
         <button
           type="button"
           onClick={onRemove}
-          className="ml-auto flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold text-ink transition-colors duration-150 hover:bg-white/60 hover:text-slate"
+          className="tap ml-auto flex items-center justify-center gap-1 rounded-full px-2 py-1 text-xs font-semibold text-ink transition-colors duration-150 hover:bg-white/60 hover:text-slate max-sm:-my-2 max-sm:-mr-2 max-sm:px-0"
         >
-          <X size={13} aria-hidden /> Remove<span className="sr-only"> {source.id}</span>
+          <X size={13} aria-hidden /> <span className="max-sm:sr-only">Remove</span>
+          <span className="sr-only"> {source.id}</span>
         </button>
       </div>
       {idBad && (
@@ -157,7 +158,7 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
 
       {source.kind === "push" && (
         <div className="flex flex-col gap-2">
-          <label htmlFor={webhookId} className="flex w-fit cursor-pointer items-center gap-2 text-xs font-semibold text-slate">
+          <label htmlFor={webhookId} className="flex w-fit cursor-pointer items-center gap-2 text-xs font-semibold text-slate max-sm:min-h-11">
             <input
               id={webhookId}
               type="checkbox"

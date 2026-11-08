@@ -192,7 +192,7 @@ export default function AppConsole() {
                 setRemembered(false);
                 setRejected(false);
               }}
-              className="rounded font-semibold text-slate underline underline-offset-2 hover:text-mutedTeal"
+              className="hit relative rounded font-semibold text-slate underline underline-offset-2 hover:text-mutedTeal"
             >
               Forget key
             </button>
@@ -215,7 +215,7 @@ export default function AppConsole() {
         <HeatmapPanel spec={spec} live={live} selectedLayerId={selectedLayerId} />
 
         <section aria-label="Console" className="flex min-w-0 flex-col gap-3 rounded-3xl bg-cream/55 p-4 shadow-[0_8px_30px_-14px_rgba(53,89,107,0.3)]">
-          <div role="tablist" aria-label="Console" onKeyDown={onTabKey} className="flex flex-wrap gap-1 rounded-full bg-white/50 p-1">
+          <div role="tablist" aria-label="Console" onKeyDown={onTabKey} className="-mx-1 flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden rounded-full bg-white/50 p-1 sm:mx-0 sm:flex-wrap sm:overflow-visible">
             {TABS.map(({ id, label, Icon, authority: needsKey }) => {
               const on = tab === id;
               const lockedTab = needsKey && !authority;
@@ -228,8 +228,12 @@ export default function AppConsole() {
                   aria-selected={on}
                   aria-controls="console-panel"
                   tabIndex={on ? 0 : -1}
-                  onClick={() => setTab(id)}
-                  className={`relative flex flex-1 items-center justify-center gap-1 rounded-full px-2.5 py-1.5 text-[12.5px] font-semibold transition-colors duration-150 ${
+                  onClick={(e) => {
+                    setTab(id);
+                    // on phones the tab strip scrolls sideways: bring the chosen tab fully into view
+                    e.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" });
+                  }}
+                  className={`tap relative flex shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-full px-3 py-1.5 text-[12.5px] sm:flex-1 sm:shrink sm:px-2.5 font-semibold transition-colors duration-150 ${
                     on ? "text-slate" : "text-ink hover:text-slate"
                   }`}
                 >
@@ -371,16 +375,16 @@ function UnlockForm({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         aria-describedby={rejected ? "unlock-rejected" : undefined}
-        className="min-w-[220px] flex-1 rounded-lg border border-paleWater bg-white/80 px-2.5 py-1.5 font-mono text-[13px] text-slate placeholder:text-ink/70"
+        className="phone-16 min-w-0 flex-1 basis-[220px] rounded-lg border border-paleWater bg-white/80 px-2.5 py-1.5 font-mono text-[13px] max-sm:min-h-11 text-slate placeholder:text-ink/70"
       />
       <button
         type="submit"
         disabled={!value.trim()}
-        className="rounded-full bg-[#4F80B0] px-4 py-1.5 text-[13px] font-semibold text-cream shadow-sm transition-[transform,opacity] duration-150 hover:-translate-y-px disabled:translate-y-0 disabled:opacity-45"
+        className="tap rounded-full bg-[#4F80B0] px-4 py-1.5 text-[13px] font-semibold text-cream shadow-sm transition-[transform,opacity] duration-150 hover:-translate-y-px disabled:translate-y-0 disabled:opacity-45"
       >
         Unlock
       </button>
-      <label className="flex items-center gap-1.5 text-[13px] text-ink">
+      <label className="flex items-center gap-1.5 text-[13px] text-ink max-sm:min-h-11">
         <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="accent-mutedTeal" />
         Remember on this device
       </label>

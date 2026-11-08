@@ -24,7 +24,7 @@ function Section({ title, edit, children }: { title: string; edit: string; child
         <h2 className="text-[15px] font-semibold text-slate">{title}</h2>
         <Link
           to={edit}
-          className="ml-auto rounded-md px-1 text-sm font-semibold text-primary underline underline-offset-[3px] hover:text-primaryHover"
+          className="hit relative ml-auto rounded-md px-1 text-sm font-semibold text-primary underline underline-offset-[3px] hover:text-primaryHover"
         >
           Edit<span className="sr-only"> {title.toLowerCase()}</span>
         </Link>

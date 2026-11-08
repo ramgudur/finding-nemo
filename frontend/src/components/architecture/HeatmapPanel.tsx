@@ -78,9 +78,9 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className }:
 
       <div className="relative">
         {bbox ? (
-          <Map bbox={bbox} layers={map?.layers ?? {}} visible={shown ? [shown] : []} hotspots={hotspots?.hotspots ?? []} pois={pois ?? []} destinationLabels={destinationLabels} cellM={cellM ?? undefined} height={480} />
+          <Map bbox={bbox} layers={map?.layers ?? {}} visible={shown ? [shown] : []} hotspots={hotspots?.hotspots ?? []} pois={pois ?? []} destinationLabels={destinationLabels} cellM={cellM ?? undefined} height="clamp(300px, 52vh, 480px)" />
         ) : (
-          <div aria-hidden className="h-[480px] rounded-2xl bg-mist/70 motion-safe:animate-pulse" />
+          <div aria-hidden className="h-[clamp(300px,52vh,480px)] rounded-2xl bg-mist/70 motion-safe:animate-pulse" />
         )}
         {bbox && (
           <>
