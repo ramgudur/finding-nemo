@@ -192,7 +192,7 @@ def reference_trigger(db: Db, spec: AppSpec, state: _AppTriggerState, now: float
     its newest event is recent, so a restart doesn't re-trigger on old data."""
     fresh: list[str] = []
     for inp in spec.inputs:
-        if inp.tier not in REFERENCE_TIERS:
+        if inp.tier not in REFERENCE_TIERS or inp.shape == "field":  # a field locates nothing
             continue
         total, _, last_ts = db.event_counts(spec.app_id, inp.id, since=now)
         prev = state.reference_seen.get(inp.id)
