@@ -96,7 +96,7 @@ def run_backtest(ctx: ToolContext, args: RunBacktestArgs) -> dict[str, Any]:
     else:
         for user_id, after in args.trust.items():
             before, last_inc = guards.current_trust(ctx, user_id)
-            guards.check_trust(before, after, last_inc, now)
+            guards.check_trust(before, after, last_inc, now, reason)
             trust_changes[user_id] = (before, after)
         cand_trust = {**trust, **{u: a for u, (_, a) in trust_changes.items()}}
 
@@ -155,7 +155,7 @@ def apply_changes(ctx: ToolContext, args: ApplyChangesArgs) -> dict[str, Any]:
     else:
         for user_id, (_, after) in cand.trust_changes.items():  # all-or-nothing: check before writing
             before, last_inc = guards.current_trust(ctx, user_id)
-            guards.check_trust(before, after, last_inc, ctx.now())
+            guards.check_trust(before, after, last_inc, ctx.now(), reason)
         changes = [
             guards.apply_trust(ctx, u, a, reason=reason, backtest_id=cand.backtest_id)
             for u, (_, a) in sorted(cand.trust_changes.items())
