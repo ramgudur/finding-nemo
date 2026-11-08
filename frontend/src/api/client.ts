@@ -11,10 +11,15 @@ import type {
   HotspotsResponse,
   Instruction,
   InstructionRequest,
+  LabelProposal,
+  LabelProposalAccept,
+  LabelProposalAcceptResponse,
   MapResponse,
   OperatorInfo,
   PinRequest,
   POI,
+  ScoutJobAccepted,
+  ScoutRequest,
   SourceSuggestion,
   SpecEditResponse,
   SuggestSourceRequest,
@@ -117,6 +122,15 @@ export const api = {
   // dev revert of one Change through the same tools and guards; 409 stale, 422 not revertible / guard rejected
   revertChange: (appId: string, key: string, changeId: string) =>
     request<Change>("POST", `${app(appId)}/changes/${encodeURIComponent(changeId)}/revert`, key),
+  // authority only (api/labels.py): POI Labeler proposals; 404 unknown, 409 not open / app not active, 422 guard
+  labelProposals: (appId: string, key: string) => get<LabelProposal[]>(`${app(appId)}/label-proposals`, key),
+  acceptLabelProposal: (appId: string, key: string, id: string, body?: LabelProposalAccept) =>
+    request<LabelProposalAcceptResponse>("POST", `${app(appId)}/label-proposals/${encodeURIComponent(id)}/accept`, key, body),
+  dismissLabelProposal: (appId: string, key: string, id: string) =>
+    request<LabelProposal>("POST", `${app(appId)}/label-proposals/${encodeURIComponent(id)}/dismiss`, key),
+  // authority only (api/scout.py): 202 queued; 404 input, 409 not active, 422 push input / bad body
+  requestScout: (appId: string, key: string, body: ScoutRequest) =>
+    request<ScoutJobAccepted>("POST", `${app(appId)}/scout`, key, body),
   // DEMO_MODE only: these 404 otherwise
   debugClock: () => get<ClockState>("/debug/clock"),
   controlClock: (appId: string, key: string, body: ClockControl) =>
