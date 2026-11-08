@@ -33,11 +33,11 @@ from pydantic import ValidationError
 
 from app.api.ingest import _check_fields
 from app.connectors import fields as conn_fields
-from app.connectors import json_api, rss, url_guard
+from app.connectors import json_api, json_list, rss, url_guard
 from app.core import clock as clock_mod
 from app.core.config import get_settings
 from app.core.db import Db
-from app.core.models import AppSpec, ConnectorConfig, Event, InputSpec, TraceEntry
+from app.core.models import AppSpec, BBox, ConnectorConfig, Event, InputField, InputSpec, TraceEntry
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +60,7 @@ class PollResult:
     ok: bool
     events_written: int = 0
     error: str | None = None
+    dropped_outside: int = 0  # json_list items outside the app's area (dropped, not written)
 
 
 def _rss_event(item: dict[str, Any], source_id: str, lat: float, lon: float, confidence: float) -> dict[str, Any]:
@@ -154,10 +155,21 @@ def _json_api_events(
     return [event]
 
 
+JSON_TYPES = ("json_api", "json_list")  # connector types whose response is read as JSON
+
+
+def _list_url(conn: ConnectorConfig) -> str | None:
+    """A `json_list` URL: the connector's own, else `config.url` (the contract allows either)."""
+    if conn.type != "json_list":
+        return None
+    url = conn.config.get("url")
+    return url if isinstance(url, str) and url else None
+
+
 def connector_url(conn: ConnectorConfig) -> str | None:
     """The URL this connector fetches (the preset's, else its own), without rendering the query."""
     preset_url = json_api.resolve_preset(conn.preset, conn.config).get("url") if conn.type == "json_api" else None
-    return preset_url or conn.url
+    return preset_url or conn.url or _list_url(conn)
 
 
 def _request(conn: ConnectorConfig) -> str:
@@ -166,11 +178,13 @@ def _request(conn: ConnectorConfig) -> str:
     dict. The connector type decides how to read the response, not what's in it (rule 10:
     config, never code, drives the request itself)."""
     spec = json_api.resolve_preset(conn.preset, conn.config) if conn.type == "json_api" else {}
-    url = spec.get("url") or conn.url
+    url = spec.get("url") or conn.url or _list_url(conn)
     if url is None:
         raise ValueError("connector has no url (and no preset with one)")
     if conn.type == "json_api" and conn.preset is None:
         json_api.check_custom_config(conn.config)  # data-only read config: refuse a bad one before fetching
+    if conn.type == "json_list":
+        json_list.check_config(conn.config)  # the same: an item mapping, data only (rule 10)
     params = json_api.render_query(spec.get("query", {}), conn.config) if conn.type == "json_api" else {}
     return str(httpx.URL(url).copy_merge_params(params)) if params else url
 
@@ -191,7 +205,7 @@ async def fetch_raw(client: httpx.AsyncClient, conn: ConnectorConfig) -> Any:
         hops += 1
         resp = await client.get(url, headers=headers, timeout=FETCH_TIMEOUT_S)
     resp.raise_for_status()
-    return resp.json() if conn.type == "json_api" else resp.text
+    return resp.json() if conn.type in JSON_TYPES else resp.text
 
 
 def fetch_raw_sync(client: httpx.Client, conn: ConnectorConfig) -> Any:
@@ -207,15 +221,71 @@ def fetch_raw_sync(client: httpx.Client, conn: ConnectorConfig) -> Any:
         hops += 1
         resp = client.get(url, headers=headers, timeout=FETCH_TIMEOUT_S)
     resp.raise_for_status()
-    return resp.json() if conn.type == "json_api" else resp.text
+    return resp.json() if conn.type in JSON_TYPES else resp.text
 
 
-def events_from_raw(conn: ConnectorConfig, raw: Any, now: float) -> list[dict[str, Any]]:
+def events_from_raw(
+    conn: ConnectorConfig,
+    raw: Any,
+    now: float,
+    bbox: BBox | None = None,
+    declared: list[InputField] | None = None,
+) -> list[dict[str, Any]]:
+    """Event bodies from one fetched response. `bbox` and `declared` are read by `json_list` only
+    (items outside the area dropped, values coerced to their declared types; `json_list.parse`)."""
     if conn.type == "rss":
         return _rss_events(raw, conn.config, now)
     if conn.type == "json_api":
         return _json_api_events(raw, conn.preset, conn.config, now)
+    if conn.type == "json_list":
+        return json_list.parse(raw, conn.config, now, bbox=bbox, declared=declared).events
     raise ValueError(f"connector type {conn.type!r} has no fetcher")
+
+
+def _event_key(raw: dict[str, Any]) -> tuple[Any, ...] | None:
+    try:
+        e = Event.model_validate(raw)
+    except Exception:  # noqa: BLE001 - an invalid item is reported by write_events, not here
+        return None
+    return (e.user_id, round(e.ts.timestamp(), 3), round(e.lat, 7), round(e.lon, 7))
+
+
+def _new_list_events(db: Db, app_id: str, input_id: str, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A `json_list` with its own timestamps lists the same items poll after poll: keep only items
+    whose (user_id, ts, lat, lon) isn't stored for this input yet, nor repeated in this batch."""
+    keyed = [(_event_key(e), e) for e in events]
+    stamps = [k[1] for k, _ in keyed if k is not None]
+    if not stamps:
+        return events
+    seen = {
+        (e.user_id, round(e.ts.timestamp(), 3), round(e.lat, 7), round(e.lon, 7))
+        for e in db.list_events(app_id, input_id, since=min(stamps) - 1.0)
+    }
+    out = []
+    for key, e in keyed:
+        if key is not None:
+            if key in seen:
+                continue
+            seen.add(key)
+        out.append(e)
+    return out
+
+
+def _list_poll(
+    db: Db, app_id: str, inp: InputSpec, raw: Any, now: float, spec: AppSpec | None
+) -> tuple[list[dict[str, Any]], json_list.ListParse]:
+    """One `json_list` poll's new event bodies: items mapped, those outside the area dropped (and
+    counted), values coerced to their declared types, already-stored items skipped."""
+    assert inp.connector is not None  # noqa: S101 - only called for pull inputs with a connector
+    declared = conn_fields.with_implied(inp.fields, inp.connector)
+    bbox = spec.grid.bbox if spec is not None else None
+    parsed = json_list.parse(raw, inp.connector.config, now, bbox=bbox, declared=declared)
+    if not parsed.events and parsed.unmapped:
+        raise ValueError(f"no item could be mapped ({parsed.unmapped} of {parsed.items}): {parsed.first_error}")
+    events = parsed.events
+    if inp.connector.config.get("ts"):
+        events = _new_list_events(db, app_id, inp.id, events)
+    return events, parsed
 
 
 def write_events(db: Db, app_id: str, inp: InputSpec, raw_events: list[dict[str, Any]], now: float) -> PollResult:
@@ -257,14 +327,24 @@ def write_events(db: Db, app_id: str, inp: InputSpec, raw_events: list[dict[str,
     return PollResult(app_id, inp.id, ok=True, events_written=written)
 
 
-def check_connector_sync(client: httpx.Client, conn: ConnectorConfig, now: float) -> list[dict[str, Any]]:
+def check_connector_sync(
+    client: httpx.Client, conn: ConnectorConfig, now: float, bbox: BBox | None = None
+) -> list[dict[str, Any]]:
     """Fetch once and parse, without writing anything -- what `test_connector` needs to
-    honestly say it saw at least one item."""
+    honestly say it saw at least one item. With `bbox`, a `json_list` counts only items inside the
+    area, and says why when none are."""
     raw = fetch_raw_sync(client, conn)
     if conn.type == "rss":
         # Count every parsed item, located or not: the live poller places items without a point via
         # the locator (extract + geocode), so a normal news feed with no coordinates is a working source.
         return rss.parse_items(raw, now, include_unlocated=True)
+    if conn.type == "json_list":
+        parsed = json_list.parse(raw, conn.config, now, bbox=bbox)
+        if not parsed.events and parsed.outside:
+            raise ValueError(f"all {parsed.outside} mapped item(s) are outside the app's area")
+        if not parsed.events and parsed.unmapped:
+            raise ValueError(f"no item could be mapped ({parsed.unmapped} of {parsed.items}): {parsed.first_error}")
+        return parsed.events
     return events_from_raw(conn, raw, now)
 
 
@@ -279,15 +359,23 @@ async def poll_once(
     attempted: set[str] | None = None,
 ) -> PollResult:
     assert inp.connector is not None  # noqa: S101 - callers only pass pull inputs with a connector
+    outside = 0
     try:
         raw = await fetch_raw(client, inp.connector)
         if locate is not None and spec is not None and inp.connector.type == "rss":
             raw_events = await _located_rss_events(db, spec, inp, raw, now, locate, attempted)
+        elif inp.connector.type == "json_list":
+            raw_events, parsed = _list_poll(db, app_id, inp, raw, now, spec if spec is not None else db.get_app(app_id))
+            outside = parsed.outside
         else:
             raw_events = events_from_raw(inp.connector, raw, now)
     except Exception as e:  # noqa: BLE001 - a bad feed must not crash the poll loop
         return PollResult(app_id, inp.id, ok=False, error=describe_error(e))
-    return write_events(db, app_id, inp, raw_events, now)
+    result = write_events(db, app_id, inp, raw_events, now)
+    result.dropped_outside = outside
+    if outside:
+        log.info("connector %s/%s: %d item(s) outside the area dropped", app_id, inp.id, outside)
+    return result
 
 
 def describe_error(e: BaseException) -> str:
@@ -367,7 +455,34 @@ class ConnectorEngine:
         self.check_interval_s = check_interval_s
         self._last_polled_at: dict[tuple[str, str], float] = {}
         self._task: asyncio.Task[None] | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._stop = asyncio.Event()
+        self._wake = asyncio.Event()  # set to run a check now instead of after check_interval_s
+
+    def _make_due(self, app_id: str) -> None:
+        for key in [k for k in self._last_polled_at if k[0] == app_id]:
+            self._last_polled_at.pop(key, None)
+
+    def _backfill(self, app_id: str) -> None:
+        self._make_due(app_id)
+        self._wake.set()
+
+    def poll_app_now(self, app_id: str) -> bool:
+        """Backfill (#267): make every pull connector of `app_id` due and wake the poll loop, so its
+        first poll runs right away instead of after the loop's next wait. Never blocks and never
+        raises: safe from a sync request handler on another thread. The poll itself is a normal
+        one (same URL guard, same `record_poll` status and trace). Returns whether a running loop
+        was woken (False when the engine isn't started: the app is then due at its next
+        `check_once`)."""
+        loop = self._loop
+        if loop is not None and self._task is not None and not self._task.done() and not loop.is_closed():
+            try:
+                loop.call_soon_threadsafe(self._backfill, app_id)
+                return True
+            except RuntimeError:  # the loop closed in between
+                pass
+        self._make_due(app_id)
+        return False
 
     async def check_once(self, now: float | None = None) -> list[PollResult]:
         """Poll every due connector, concurrently (at most `max_concurrent_polls` at once), so one
@@ -421,19 +536,24 @@ class ConnectorEngine:
     async def run(self) -> None:
         self._stop.clear()
         while not self._stop.is_set():
+            self._wake.clear()
             await self.check_once()
+            if self._stop.is_set():
+                break
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.check_interval_s)
+                await asyncio.wait_for(self._wake.wait(), timeout=self.check_interval_s)
             except TimeoutError:
                 pass
 
     def start(self) -> asyncio.Task[None]:
         if self._task is None or self._task.done():
-            self._task = asyncio.get_running_loop().create_task(self.run())
+            self._loop = asyncio.get_running_loop()
+            self._task = self._loop.create_task(self.run())
         return self._task
 
     async def stop(self) -> None:
         self._stop.set()
+        self._wake.set()
         if self._task is not None:
             await self._task
             self._task = None

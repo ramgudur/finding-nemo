@@ -285,6 +285,18 @@ class Db:
             rows = self._query(f"SELECT event_json FROM events WHERE {where} ORDER BY ts", params)
         return [Event.model_validate_json(r["event_json"]) for r in rows]
 
+    def event_counts(self, app_id: str, input_id: str, since: float) -> tuple[int, int, float | None]:
+        """`(total, with ts > since, max ts or None)` for one input: one aggregate over the
+        `(app_id, input_id, ts)` index, never loading event bodies."""
+        row = self._query_one(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(ts > ?), 0) AS recent, MAX(ts) AS last "
+            "FROM events WHERE app_id = ? AND input_id = ?",
+            (since, app_id, input_id),
+        )
+        if row is None:
+            return 0, 0, None
+        return int(row["n"]), int(row["recent"]), row["last"]
+
     # -- connectors ---------------------------------------------------------------
 
     def prune_events(self, app_id: str, input_id: str, before_ts: float) -> int:
