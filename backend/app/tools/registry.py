@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from app.tools import compiler_tools as ct
 from app.tools import read_tools as rd
 from app.tools import scoring_tools as st
 from app.tools.context import ToolContext
@@ -118,6 +119,57 @@ TOOLS: dict[str, Tool] = {
             st.PinWeightArgs,
             st.pin_weight,
             frozenset({"dev"}),
+        ),
+        Tool(
+            "list_operators",
+            "Catalog of available operators: name, one-line description, accepted input shapes, params schema.",
+            ct.NoArgs,
+            ct.list_operators,
+            frozenset({"compiler"}),
+        ),
+        Tool(
+            "validate_spec",
+            "Check a proposed AppSpec: Pydantic errors, unknown operators, operator/shape mismatches, and a "
+            "warning when a flexible point/track input has no plausibility.",
+            ct.ValidateSpecArgs,
+            ct.validate_spec,
+            frozenset({"compiler"}),
+        ),
+        Tool(
+            "create_input",
+            "Add one input to the app's draft spec.",
+            ct.CreateInputArgs,
+            ct.create_input,
+            frozenset({"compiler"}),
+        ),
+        Tool(
+            "create_connector",
+            "Attach a pull connector config to an existing pull input. Config only, never code.",
+            ct.CreateConnectorArgs,
+            ct.create_connector,
+            frozenset({"compiler", "scout"}),
+        ),
+        Tool(
+            "test_connector",
+            "Validate a connector's config shape. Live-fetch testing lands with the connector engine.",
+            ct.TestConnectorArgs,
+            ct.test_connector,
+            frozenset({"compiler", "scout"}),
+        ),
+        Tool(
+            "request_scout",
+            "Ask Scout to find and configure a pull connector for an input. Scout runs on request only.",
+            ct.RequestScoutArgs,
+            ct.request_scout,
+            frozenset({"compiler"}),
+        ),
+        Tool(
+            "finalize_app",
+            "Validate the complete proposed AppSpec and set it to pending_confirmation for the dev to "
+            "review. Never activates it.",
+            ct.FinalizeAppArgs,
+            ct.finalize_app,
+            frozenset({"compiler"}),
         ),
     )
 }

@@ -97,7 +97,13 @@ def test_schemas_per_agent():
     assert {"run_backtest", "apply_changes", "set_user_trust"} <= critic
     assert "pin_weight" not in critic
     assert all(t["function"]["parameters"]["type"] == "object" for t in registry.tool_schemas("critic"))
-    assert {t["function"]["name"] for t in registry.tool_schemas("scout")} == {"annotate"}
+    # scout also gets create_connector/test_connector (#73); web_search/probe_feed/etc.
+    # land with Scout's own read tools.
+    assert {t["function"]["name"] for t in registry.tool_schemas("scout")} == {
+        "annotate",
+        "create_connector",
+        "test_connector",
+    }
 
 
 def test_weight_change_flow_holds_flexible_sum_and_writes_changes(env, scripted):
