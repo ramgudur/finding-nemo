@@ -43,7 +43,7 @@ def test_chat_passes_model_and_reasoning_switch():
     router = LlmRouter(_settings(), clients={"nvidia": fake})
 
     asyncio.run(router.chat("critic", [{"role": "user", "content": "hi"}], enable_thinking=True, low_effort=False))
-    assert fake.calls[0]["model"] == "nvidia/nemotron-3-super-120b-a12b"
+    assert fake.calls[0]["model"] == "nvidia/nemotron-3.5-super-vl-120b-a12b"
     assert fake.calls[0]["extra_body"] == {"chat_template_kwargs": {"enable_thinking": True, "low_effort": False}}
 
 
@@ -85,4 +85,4 @@ def test_log_startup_models_never_logs_the_api_key(caplog):
         router.log_startup_models(["critic", "poi"])
     text = caplog.text
     assert "super-secret-key" not in text
-    assert "nvidia/nemotron-3-super-120b-a12b" in text
+    assert "nvidia/nemotron-3.5-super-vl-120b-a12b" in text

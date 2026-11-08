@@ -11,8 +11,8 @@ def test_defaults_parse_without_env_file():
 
 
 def test_agent_model_splits_provider_and_id():
-    s = Settings(_env_file=None, compiler_model="nvidia::nvidia/nemotron-3-super-120b-a12b")
-    assert s.agent_model("compiler") == AgentModel("nvidia", "nvidia/nemotron-3-super-120b-a12b")
+    s = Settings(_env_file=None, compiler_model="nvidia::nvidia/nemotron-3.5-super-vl-120b-a12b")
+    assert s.agent_model("compiler") == AgentModel("nvidia", "nvidia/nemotron-3.5-super-vl-120b-a12b")
 
 
 def test_agent_model_rejects_missing_separator():

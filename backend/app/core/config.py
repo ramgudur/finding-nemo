@@ -40,13 +40,13 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
-    compiler_model: str = "nvidia::nvidia/nemotron-3-super-120b-a12b"
-    critic_model: str = "nvidia::nvidia/nemotron-3-super-120b-a12b"
-    scout_model: str = "nvidia::nvidia/nemotron-3-super-120b-a12b"
-    extract_model: str = "openrouter::nvidia/nemotron-3.5-lightning:free"
-    poi_model: str = "openrouter::nvidia/nemotron-3.5-lightning:free"
-    repair_model: str = "openrouter::nvidia/nemotron-3.5-lightning:free"
-    safety_model: str = "openrouter::nvidia/nemotron-3.5-content-safety:free"
+    compiler_model: str = "nvidia::nvidia/nemotron-3.5-super-vl-120b-a12b"
+    critic_model: str = "nvidia::nvidia/nemotron-3.5-super-vl-120b-a12b"
+    scout_model: str = "nvidia::nvidia/nemotron-3.5-super-vl-120b-a12b"
+    extract_model: str = "nvidia::nvidia/nemotron-3.5-lightning-30b-a3b"
+    poi_model: str = "nvidia::nvidia/nemotron-3.5-lightning-30b-a3b"
+    repair_model: str = "nvidia::nvidia/nemotron-3.5-lightning-30b-a3b"
+    safety_model: str = "nvidia::nvidia/llama-3.1-nemotron-safety-guard-8b-v3"
 
     nvidia_rpm: int = 35
     openrouter_rpm: int = 18
