@@ -93,7 +93,7 @@ def test_hotspot_id_persists_and_cache_fills():
 
 def test_bad_or_missing_operators_dont_kill_the_tick(monkeypatch):
     crowd = spec().inputs[0].model_dump()
-    crowd["operators"].append({"op": "event_points", "weight": 0.5})
+    crowd["operators"].append({"op": "telepathy", "weight": 0.5})
     rt = AppRuntime(spec(inputs=[crowd]))
     src = InMemoryEventSource()
     src.add("test-app", "crowd", cluster(rt.grid, 200, 300, 30, T0))
@@ -104,7 +104,7 @@ def test_bad_or_missing_operators_dont_kill_the_tick(monkeypatch):
     info = registry.OPERATORS["density"]
     monkeypatch.setitem(registry.OPERATORS, "density", info.__class__(**{**info.__dict__, "fn": boom}))
     res = tick_app(rt, src, now=T0, clock=SimClock(T0))
-    assert any("event_points" in e and "not registered" in e for e in res.errors)
+    assert any("telepathy" in e and "not registered" in e for e in res.errors)
     assert any("crowd.density" in e and "bad data" in e for e in res.errors)
     assert res.score.max() == 0.0
     assert not np.isnan(res.score).any()
