@@ -392,25 +392,17 @@ Finish each step end to end before starting the next.
 
 ## Demo apps (context only; never hardcode them into the platform)
 
-Demo apps are built *through* the platform from `specs/` and driven by `sim/`, which posts through the public API.
+Demo apps are built **live through the platform** in the video: name and intent, then **Add a source** for each input, then a live Nemotron compile, review, confirm. No demo app is pre-built or hardcoded. When something doesn't work while building one, we fix the **platform**, not the demo. `specs/*.json` are test fixtures and an emergency fallback only. Simulators stand in for a dev's own app and users and post only through the public ingest API.
 
-- **Campus Alert** (public safety; State Farm "worst day" angle):
-  - **Inputs:** panic button (press → GPS stream; flexible), classroom buttons and police marker (locked authority; both use the `override` operator, rule 6), local news (Scout RSS; stiff).
-  - **Location:** a generic, non-school area (e.g., a business park or fairground). Not a real, recognizable school campus.
-  - **Labels:** threat origin, gathering point / exit (`destination`), shelter-in-place group (`sensitive`), suspected spoof cluster (`sensitive`).
-  - **Sim timeline:**
-    - t0: threat appears; presses start GPS streams
-    - hiders form groups inside rooms
-    - t+60 s: room button
-    - t+100 s: spoof burst (coordinated fake escape + exact-duplicate stationary accounts)
-    - t+150 s: police marker
-    - t+180 s: scripted news article through the RSS connector (labeled as scripted)
-    - the threat keeps moving throughout
-  - **End-user page:** must work on a phone over a tunnel; test that before judging.
-- **Flyway** (wildlife):
-  - **Inputs:** tag GPS tracks, Open-Meteo wind.
-  - **Labels:** watering hole, roost, feeding ground, stopover, grounded in OSM features near real Dallas-area lakes.
-  - **Demo:** live compile (the same GPS input becomes a different operator) plus a short replay with the POI Labeler running live.
+- **Wildfire** (State Farm "worst day" angle; replaces Campus Alert, 2026-11-08):
+  - **Sources:** crowd reports from people's phones (push), local news (pull, RSS; the Scout can find feeds), weather (pull, Open-Meteo preset; its wind is a vector field that carries spread).
+  - **Data:** `sim/wildfire.py` posts the crowd reports; news and weather are real sources. A scripted feed is an offline fallback only, labeled as scripted.
+  - **POIs:** whatever the intent calls for, proposed by the Compiler, named by the POI Labeler from code-made candidates.
+- **Bird tracking** (wildlife):
+  - **Sources:** tag GPS tracks (push, `sim/flyway.py`), weather (pull).
+  - **POIs:** places the birds use (e.g. water, roosts), grounded in OSM features.
+- **The point of showing both:** the same platform proposes different operators and the POI Labeler names different kinds of places, because the intents differ.
+- **Later:** receiving data by phone number (SMS); Campus Alert's specs and sim stay in the repo but are not in the video.
 
 Simulator ground truth stays in `sim/ground_truth/` and is read only by `api/debug.py` when `DEMO_MODE=1`.
 
@@ -456,3 +448,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-08:** Pitch and demo, for the 12:00 PM CT deadline. The story is the platform: anyone can build an app that protects their local community on its "worst day" and customize every input (State Farm framing). Campus Alert is one such app, built live through the Builder; catastrophe-scale statistics set the stakes, with sources cited. There is no GPU in the pitch: Nemotron runs on build.nvidia.com, and #86 part 3 (CuPy speed-up) is dropped as future work. Allen's order: #138 fix, then ScoutRunner, then #139, then a real-phone check, then the video; a light #108 (Flyway compile, cached if slow); the `api/webhooks.py` 501 stub. If the Scout is not live by 10:00 AM CT, the pitch says three agents run live and the Scout runs on request.
 - **2026-11-08:** Demo apps are built LIVE through the platform in the video (Builder: intent and inputs, then live Nemotron compile, review, confirm, keys). No pre-built demo apps, no demo compile cache, no replayed fixtures. `specs/*.json` stay as test fixtures and an emergency fallback only. The simulators stand in for a dev's own app and users, posting through the public ingest API with the keys the Builder showed. #108 is now the live build path and rehearsal (Allen). This replaces the cached-compile plan in the entry before.
 - **2026-11-08:** `CompileRequest` gets optional `destination_points: DestinationPoint[]` (the dev picks fixed destinations on the Builder map). The Compiler copies them verbatim into `routing.destination_points` and never invents or moves them; they count as a usable destination for `validate_spec`. The sim posts to the input ids the dev types in the Builder (`--input-map` as a backup); `tools/demo` is Builder-first, with `--from-spec` as the emergency fallback (Allen, #108).
+- **2026-11-08:** Demo apps: **Wildfire** replaces Campus Alert, and Bird tracking stays. Both are built live through the platform in the video, and neither is hardcoded; gaps found while building them are fixed in the platform. **Add a source** is essential: the dev describes a source in plain words, a model call infers push or pull, the shape and the source options **before** any technical choice is shown (`POST /v1/apps/{app}/sources/suggest`, `SourceSuggestion`, #152). Options now: POST API or webhook URL (push); RSS, or a JSON API preset or custom URL (pull). Receiving by phone number (SMS) comes later; the HTML scraper stays out (rule 10). All work goes to Allen and Ram; the others come back later. Issues: #152 Add a source (Allen), #153 wildfire sim (Allen), #154 live build rehearsals (Ram's machine).
