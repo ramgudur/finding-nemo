@@ -108,3 +108,83 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 OVERPASS = OverpassClient()
+
+
+# -- geocoding (Nominatim) -------------------------------------------------------------
+
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+MAX_PLACE_CHARS = 200
+
+Searcher = Callable[[dict[str, str]], list[dict[str, Any]]]  # query params -> parsed JSON results
+
+
+def _http_search(params: dict[str, str]) -> list[dict[str, Any]]:
+    import httpx
+
+    from app.core.config import get_settings
+
+    ua = get_settings().nominatim_user_agent or "geo-heatmap-platform"
+    resp = httpx.get(NOMINATIM_URL, params=params, headers={"User-Agent": ua}, timeout=15.0)
+    resp.raise_for_status()
+    return resp.json()
+
+
+class NominatimClient:
+    """Place name -> (lat, lon), bounded to an area. One request per second (Nominatim policy), cached
+    by (place, rounded viewbox) so the same lookup never repeats."""
+
+    def __init__(self, search: Searcher | None = None, min_interval_s: float = MIN_INTERVAL_S) -> None:
+        self._search = search or _http_search
+        self._min_interval = min_interval_s
+        self._cache: dict[tuple[str, tuple[float, ...]], dict[str, Any] | None] = {}
+        self._last = -math.inf
+        self._lock = threading.Lock()
+        self.requests = 0
+
+    def geocode(self, place: str, bbox: tuple[float, float, float, float]) -> dict[str, Any] | None:
+        """``bbox`` is (min_lon, min_lat, max_lon, max_lat). Returns {lat, lon, display_name} or None."""
+        place = " ".join(place.split())[:MAX_PLACE_CHARS]
+        if not place:
+            return None
+        key = (place.lower(), tuple(round(v, 3) for v in bbox))
+        with self._lock:
+            if key in self._cache:
+                return self._cache[key]
+            wait = self._min_interval - (time.monotonic() - self._last)
+            if wait > 0:
+                time.sleep(wait)
+            min_lon, min_lat, max_lon, max_lat = bbox
+            params = {
+                "q": place,
+                "format": "jsonv2",
+                "limit": "1",
+                "bounded": "1",
+                "viewbox": f"{min_lon},{max_lat},{max_lon},{min_lat}",
+            }
+            try:
+                results = self._search(params)
+            finally:
+                self._last = time.monotonic()
+                self.requests += 1
+            hit = None
+            if results:
+                r = results[0]
+                hit = {
+                    "lat": float(r["lat"]),
+                    "lon": float(r["lon"]),
+                    "display_name": str(r.get("display_name", ""))[:80],
+                }
+            self._cache[key] = hit
+            return hit
+
+
+NOMINATIM = NominatimClient()
+
+
+async def geocode_place(place: str, spec: Any, client: NominatimClient | None = None) -> tuple[float, float] | None:
+    """Plain async geocoder for code paths outside a tool call (connectors' locate). Bounded to the
+    app's area; None when nothing is found there."""
+    import asyncio
+
+    hit = await asyncio.to_thread((client or NOMINATIM).geocode, place, spec.grid.bbox.as_geojson())
+    return None if hit is None else (hit["lat"], hit["lon"])

@@ -97,12 +97,16 @@ def test_schemas_per_agent():
     assert {"run_backtest", "apply_changes", "set_user_trust"} <= critic
     assert "pin_weight" not in critic
     assert all(t["function"]["parameters"]["type"] == "object" for t in registry.tool_schemas("critic"))
-    # scout also gets create_connector/test_connector (#73); web_search/probe_feed/etc.
-    # land with Scout's own read tools.
+    # scout: create_connector/test_connector (#73) plus its own source tools (#105)
     assert {t["function"]["name"] for t in registry.tool_schemas("scout")} == {
         "annotate",
         "create_connector",
         "test_connector",
+        "web_search",
+        "fetch_url",
+        "probe_feed",
+        "geocode",
+        "set_source_reliability",
     }
 
 
