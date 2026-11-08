@@ -68,7 +68,7 @@ def env(monkeypatch):
     monkeypatch.setattr(geo_tools, "OVERPASS", geo_tools.OverpassClient(fetch=fake_fetch, min_interval_s=0))
     state = {}
 
-    def build(spec=None):
+    def build(spec=None, quiet=True):
         clock = SimClock(T0)
         db = Db(":memory:")
         src = InMemoryEventSource()
@@ -92,6 +92,10 @@ def env(monkeypatch):
             persisted_ticks=4,
         )
         rt.last.candidates = [cand]
+        if quiet:
+            # c1 sits on the reports' peak. Most tests here are about labels and visibility, so they
+            # read a quiet score map (a destination label is allowed); the #244 tests use the real one.
+            rt.last.score = np.zeros_like(rt.last.score)
         state.update(clock=clock, db=db, eng=eng, rt=rt, src=src)
 
         def ctx(agent="poi_labeler"):
@@ -255,6 +259,53 @@ def test_non_destination_label_follows_layer_rule(env):
     ctx = build(make_spec(public_layers=["pings.density"]))
     r = call(ctx(), "create_poi", candidate_id="c1", label="busy area", confidence=0.8)
     assert r["result"]["visibility"] == "public"
+
+
+def test_destination_label_rejected_where_the_score_is_high(env):
+    """#244: a destination (routing target) never goes on a place routing would refuse."""
+    build, st = env
+    ctx = build(quiet=False)  # c1 is on the reports' peak
+    rt = st["rt"]
+    r0, c0, _ = rt.grid.cell_of(rt.last.candidates[0].lat, rt.last.candidates[0].lon)
+    assert rt.last.score[int(r0), int(c0)] >= 0.5  # at or above min(impassable 0.8, hotspot 0.5)
+    r = call(ctx(), "create_poi", candidate_id="c1", label="gathering spot", confidence=0.9)
+    assert not r["ok"] and "destination" in r["error"] and "0.50" in r["error"]
+    assert st["db"].list_pois("poi-app", status="active") == []
+    assert st["db"].list_changes("poi-app", kind="poi") == []
+    # a non-destination label on the same place is fine
+    r = call(ctx(), "create_poi", candidate_id="c1", label="busy area", confidence=0.9)
+    assert r["ok"], r
+    # and relabeling it as a destination is rejected too
+    r = call(ctx(), "update_poi", poi_id=r["result"]["poi_id"], label="gathering spot")
+    assert not r["ok"] and "destination" in r["error"]
+
+
+def test_destination_label_uses_the_routing_threshold(env):
+    build, st = env
+    ctx = build()
+    rt = st["rt"]
+    cand = rt.last.candidates[0]
+    r0, c0, _ = rt.grid.cell_of(cand.lat, cand.lon)
+    rt.last.score[int(r0), int(c0)] = 0.49  # below min(0.8, 0.5)
+    assert call(ctx(), "create_poi", candidate_id="c1", label="gathering spot", confidence=0.9)["ok"]
+    pid = st["db"].list_pois("poi-app", status="active")[0].id
+    rt.last.score[int(r0), int(c0)] = 0.5  # the area heated up: relabels/updates as a destination fail
+    r = call(ctx(), "update_poi", poi_id=pid, confidence=0.95)
+    assert not r["ok"] and "destination" in r["error"]
+    rt.last.candidates = []  # candidate gone: judged at the POI's own (candidate-copied) position
+    r = call(ctx(), "update_poi", poi_id=pid, confidence=0.95)
+    assert not r["ok"] and "destination" in r["error"]
+    assert call(ctx(), "update_poi", poi_id=pid, label="busy area")["ok"]
+
+
+def test_destination_label_never_on_a_hotspot_candidate(env):
+    """A candidate made from a hotspot is a high-score area, whatever the score reads right now."""
+    build, st = env
+    ctx = build()  # quiet score map
+    st["rt"].last.candidates = [st["rt"].last.candidates[0].model_copy(update={"source": "persistent_hotspots"})]
+    r = call(ctx(), "create_poi", candidate_id="c1", label="gathering spot", confidence=0.9)
+    assert not r["ok"] and "hotspot" in r["error"]
+    assert call(ctx(), "create_poi", candidate_id="c1", label="busy area", confidence=0.9)["ok"]
 
 
 def test_overpass_failure_is_cached_briefly_per_place():

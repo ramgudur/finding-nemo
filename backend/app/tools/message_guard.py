@@ -4,7 +4,11 @@ Checks (each one is reported, pass or fail, and traced):
 1. ``destination_exists``    the destination is one of the app's current destinations.
 2. ``destination_safe``      its cell scores below min(impassable_score, hotspot_threshold).
 3. ``route_passable``        every step is inside the grid, adjacent to the last, and below
-                             impassable_score on the *current* grid (the start cell excepted).
+                             impassable_score on the *current* grid. One exception, the escape:
+                             a caller inside a blocked area may cross the blocked cells connected
+                             to their own start cell (``routing.escape_region``), only as the
+                             first part of the route. Any other blocked cell, or coming back into
+                             that region after leaving it, fails.
 4. ``no_coordinates``        the text holds no coordinate-like numbers (so no one's position,
                              including other users', can leak through it).
 5. ``no_sensitive_labels``   the text names no ``sensitive`` POI label.
@@ -107,10 +111,19 @@ def _route_check(grid: Grid, score: np.ndarray, pts: Sequence[tuple[float, float
     for (r0, c0), (r1, c1) in zip(cells, cells[1:], strict=False):
         if max(abs(r1 - r0), abs(c1 - c0)) > 1:
             return _check("route_passable", False, "route skips cells")
-    hot = [cell for cell in cells[1:] if float(score[cell]) >= imp]
+    blocked = score >= imp
+    region = routing.escape_region(blocked, cells[0])
+    escaping = True  # only the caller's own blocked region, and only as the route's first part
+    hot = 0
+    for cell in cells[1:]:
+        if escaping and region[cell]:
+            continue
+        escaping = False
+        if blocked[cell]:
+            hot += 1
     if hot:
-        return _check("route_passable", False, f"{len(hot)} route cell(s) at or above impassable score {imp:.2f}")
-    return _check("route_passable", True)
+        return _check("route_passable", False, f"{hot} route cell(s) at or above impassable score {imp:.2f}")
+    return _check("route_passable", True, "leaves the blocked area it starts in" if region.any() else "")
 
 
 def safe_instruction(
@@ -146,8 +159,11 @@ def safe_instruction(
     if outcome.route is None:
         return fallback
     route = outcome.route
-    avoid = routing.avoid_direction(grid, np.asarray(score, dtype=float), (lat, lon), spec.outputs.hotspot_threshold)
-    text = routing.instruction_text(route, grid, avoid)
+    score_arr = np.nan_to_num(np.asarray(score, dtype=float), nan=1.0)
+    avoid = routing.avoid_direction(grid, score_arr, (lat, lon), spec.outputs.hotspot_threshold)
+    sr, sc = route.cells[0]
+    leave = float(score_arr[sr, sc]) >= spec.outputs.hotspot_threshold  # the caller is in a high-score area
+    text = routing.instruction_text(route, grid, avoid, leave=leave)
     guard = check_instruction(
         text=text,
         destination=route.destination,

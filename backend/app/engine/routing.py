@@ -1,8 +1,13 @@
 """Grid routing for end-user instructions (CLAUDE.md "End-user instructions").
 
 - Graph: grid cells, 8 neighbours. Step cost = ``step_m * (1 + alpha * score(cell entered))``.
-- Cells with ``score >= impassable_score`` are blocked. The start cell is never blocked (the
-  caller is already there), and a diagonal step may not cut between two blocked cells.
+- Cells with ``score >= impassable_score`` are blocked, and a diagonal step may not cut past a
+  blocked corner cell.
+- Escape (#245): a caller standing inside a blocked area must still be able to leave it. The
+  blocked cells connected to the start cell (8-neighbour; ``escape_region``) are passable, at their
+  high step cost, but only while the route is still inside that region: once it steps out it can
+  never re-enter it, and every other blocked region stays blocked. With the start outside any
+  blocked cell the region is empty and routing is unchanged.
 - Start: the caller's own posted position. Destinations: active POIs whose label is a
   ``destination`` label, plus ``routing.destination_points``. A destination is usable only if its
   cell is inside the grid and below both the impassable score and the hotspot threshold.
@@ -18,6 +23,7 @@ from __future__ import annotations
 
 import heapq
 import math
+from collections import deque
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
@@ -42,6 +48,7 @@ class Route:
     points: list[tuple[float, float]]  # [lat, lon]: exact start, cell centres, exact destination
     distance_m: float
     cost: float
+    escape_cells: int = 0  # route cells (start included) inside the blocked region the caller started in
 
 
 @dataclass(frozen=True)
@@ -54,6 +61,28 @@ class RouteOutcome:
 def destination_threshold(spec: AppSpec) -> float:
     """A usable destination must score below this: never inside a hotspot or an impassable cell."""
     return min(spec.routing.impassable_score, spec.outputs.hotspot_threshold)
+
+
+def escape_region(blocked: np.ndarray, start: tuple[int, int]) -> np.ndarray:
+    """Boolean ``[H, W]`` mask of the blocked cells 8-connected to ``start`` (empty if it isn't blocked).
+
+    This is the blocked area the caller stands in; a route may cross it only to get out.
+    """
+    blocked = np.asarray(blocked, dtype=bool)
+    region = np.zeros(blocked.shape, dtype=bool)
+    if not blocked[start]:
+        return region
+    h, w = blocked.shape
+    region[start] = True
+    queue = deque([start])
+    while queue:
+        r, c = queue.popleft()
+        for dr, dc, _ in _NEIGHBOURS:
+            rr, cc = r + dr, c + dc
+            if 0 <= rr < h and 0 <= cc < w and blocked[rr, cc] and not region[rr, cc]:
+                region[rr, cc] = True
+                queue.append((rr, cc))
+    return region
 
 
 def collect_destinations(spec: AppSpec, pois: Iterable[POI]) -> list[DestinationPoint]:
@@ -106,6 +135,12 @@ def plan_route(
     if not targets:
         return RouteOutcome(None, "no usable destination", skipped)
 
+    # Inside the start's blocked region its cells are passable; from anywhere else they're blocked.
+    # A region cell can only be entered from another region cell, so a route that has left the
+    # region never comes back in, and no other blocked cell is ever passable.
+    region = escape_region(blocked, s)
+    blocked_inside = blocked & ~region
+
     step = grid.cell_m
     dist = np.full((h, w), np.inf)
     prev = np.full((h, w, 2), -1, dtype=np.intp)
@@ -116,13 +151,15 @@ def plan_route(
         if d0 > dist[r, c]:
             continue
         if (r, c) in targets:
-            return RouteOutcome(_build_route(grid, start, (r, c), targets[(r, c)][0], prev, d0, s), "ok", skipped)
+            route = _build_route(grid, start, (r, c), targets[(r, c)][0], prev, d0, s, region)
+            return RouteOutcome(route, "ok", skipped)
+        blk = blocked_inside if region[r, c] else blocked
         for dr, dc, mult in _NEIGHBOURS:
             rr, cc = r + dr, c + dc
-            if not (0 <= rr < h and 0 <= cc < w) or blocked[rr, cc]:
+            if not (0 <= rr < h and 0 <= cc < w) or blk[rr, cc]:
                 continue
-            if dr and dc and (blocked[r + dr, c] or blocked[r, c + dc]):
-                continue  # no squeezing diagonally between two blocked cells
+            if dr and dc and (blk[r + dr, c] or blk[r, c + dc]):
+                continue  # no squeezing diagonally past a blocked corner
             nd = d0 + step * mult * (1.0 + alpha * float(score[rr, cc]))
             if nd < dist[rr, cc]:
                 dist[rr, cc] = nd
@@ -139,6 +176,7 @@ def _build_route(
     prev: np.ndarray,
     cost: float,
     s: tuple[int, int],
+    region: np.ndarray,
 ) -> Route:
     cells = [end]
     while cells[-1] != s:
@@ -153,7 +191,8 @@ def _build_route(
     pts.append((float(dest.lat), float(dest.lon)))
     x, y = grid.to_xy([p[0] for p in pts], [p[1] for p in pts])
     distance = float(np.hypot(np.diff(x), np.diff(y)).sum())
-    return Route(destination=dest, cells=cells, points=pts, distance_m=distance, cost=float(cost))
+    escape = sum(1 for cell in cells if region[cell])
+    return Route(destination=dest, cells=cells, points=pts, distance_m=distance, cost=float(cost), escape_cells=escape)
 
 
 # -- text ------------------------------------------------------------------------
@@ -187,15 +226,23 @@ def avoid_direction(grid: Grid, score: np.ndarray, start: tuple[float, float], m
     return compass(float(c - c0), float(r - r0))
 
 
-def instruction_text(route: Route, grid: Grid, avoid: str | None) -> str:
-    """Code-built instruction: direction, distance, destination label, area to avoid."""
+def instruction_text(route: Route, grid: Grid, avoid: str | None, *, leave: bool = False) -> str:
+    """Code-built instruction: direction, distance, destination label, area to avoid.
+
+    ``leave`` (the caller stands in a high-score area), or a route that starts by escaping a blocked
+    area, puts "Leave this area now" first, so the first thing read is to get out.
+    """
     pts = route.points
     if route.distance_m < grid.cell_m:
         return f"You are at {route.destination.label}."
     x, y = grid.to_xy([p[0] for p in pts], [p[1] for p in pts])
     i = min(len(pts) - 1, HEADING_LOOKAHEAD_CELLS)
     heading = compass(float(x[i] - x[0]), float(y[i] - y[0]))
-    text = f"Head {heading} and continue about {_round_distance(route.distance_m)} m to {route.destination.label}."
+    dist = _round_distance(route.distance_m)
+    if leave or route.escape_cells > 0:
+        text = f"Leave this area now: head {heading} and continue about {dist} m to {route.destination.label}."
+    else:
+        text = f"Head {heading} and continue about {dist} m to {route.destination.label}."
     if avoid:
         text += f" Avoid the area to the {avoid}."
     return text

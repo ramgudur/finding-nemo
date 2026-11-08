@@ -15,6 +15,8 @@ from app.engine.operators.base import GridLike
 
 from .base import CandidateDraft
 
+SOURCE = "persistent_hotspots"  # Candidate.source of every candidate made here
+
 
 def persistent_hotspots(layer_id: str, extras: Mapping[str, Any], grid: GridLike) -> list[CandidateDraft]:
     """`extras["hotspots"]` is the tick's list of `Hotspot` models (`layer_id` is "score")."""
@@ -25,7 +27,7 @@ def persistent_hotspots(layer_id: str, extras: Mapping[str, Any], grid: GridLike
                 lat=float(h.lat),
                 lon=float(h.lon),
                 radius_m=max(float(h.radius_m), grid.cell_m / 2),
-                source="persistent_hotspots",
+                source=SOURCE,
                 stats={
                     "peak_score": float(h.score),
                     "mean_score": float(h.mean),

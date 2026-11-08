@@ -100,6 +100,20 @@ def test_text_never_carries_coordinates_or_sensitive_labels(p):
         assert label not in ins["text"].lower()
 
 
+def test_caller_inside_the_blocked_area_gets_a_route_out(p):
+    """#245: the person standing in the highest-score cell is the one the app must help most."""
+    rt = p["engine"].apps["campus-alert"]
+    score = p["engine"].latest("campus-alert").score
+    r0, c0 = np.unravel_index(int(np.argmax(score)), score.shape)
+    assert score[r0, c0] >= RAW["routing"]["impassable_score"]
+    lat, lon = rt.grid.cell_center(int(r0), int(c0))
+    ins = p["c"].post("/v1/apps/campus-alert/instruction", json={"lat": float(lat), "lon": float(lon)}).json()
+    assert ins["guard"]["passed"] is True, ins["guard"]
+    assert ins["destination"]["label"] in GATHERING
+    assert ins["text"].startswith("Leave this area now") and len(ins["text"]) <= 360
+    assert not re.search(r"-?\d+\.\d{3,}", ins["text"])
+
+
 def test_outside_the_area_gets_the_fallback(p):
     r = p["c"].post("/v1/apps/campus-alert/instruction", json={"lat": 32.70, "lon": -96.70})
     assert r.status_code == 200
