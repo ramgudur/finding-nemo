@@ -102,6 +102,30 @@ def test_invalid_final_answer_is_repaired():
     assert traces[-1].why == "validated after repair"
 
 
+def test_default_output_is_the_final_text_not_json_validated():
+    """Every real agent acts through tool calls and ends with a free-text summary, not
+    structured JSON (confirmed against every fixture in tests/fixtures/llm/); the
+    default (no output_model) must return that text as-is, never attempt repair."""
+    ctx = _ctx()
+    script = {"scenario": "s", "description": "d", "steps": [{"response": {"content": "All good, no changes."}}]}
+    result = asyncio.run(
+        run_agent(ctx, agent="critic", model_field="critic", system="s", task="t", llm=_router(script))
+    )
+    assert result == "All good, no changes."
+    traces = ctx.db.list_trace("test-app")
+    assert traces[-1].action == "output" and traces[-1].result == "All good, no changes."
+
+
+def test_critic_cold_start_fixture_reads_the_report_and_stops():
+    ctx = _ctx()
+    result = asyncio.run(
+        run_agent(ctx, agent="critic", model_field="critic", system="s", task="t", llm=_router("critic_cold_start"))
+    )
+    assert result == "Cold start: fewer than two verification methods have data, so no weight changes yet."
+    traces = ctx.db.list_trace("test-app")
+    assert traces[0].tool_calls[0].name == "get_verification_report"
+
+
 def test_endless_tool_calls_gives_up_at_max_iterations():
     ctx = _ctx()
     result = _run(ctx, _router("endless_tool_calls"), max_iterations=5)
