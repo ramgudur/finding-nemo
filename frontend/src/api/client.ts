@@ -7,6 +7,8 @@ import type {
   CompileRequest,
   ErrorSeries,
   HotspotsResponse,
+  Instruction,
+  InstructionRequest,
   MapResponse,
   PinRequest,
   TraceEntry,
@@ -50,6 +52,9 @@ export const api = {
   // builder (the console has no login; the authority key is issued at activation)
   compile: (appId: string, body: CompileRequest) => request<AppSpec>("POST", `${app(appId)}/compile`, undefined, body),
   activate: (appId: string) => request<ActivateResponse>("POST", `${app(appId)}/activate`),
+  // public: the caller's own position only (api/instructions.py)
+  instruction: (appId: string, body: InstructionRequest) =>
+    request<Instruction>("POST", `${app(appId)}/instruction`, undefined, body),
   // authority only (api/trace.py)
   trace: (appId: string, key: string) => get<TraceEntry[]>(`${app(appId)}/trace?limit=50`, key),
   changes: (appId: string, key: string) => get<Change[]>(`${app(appId)}/changes`, key),
