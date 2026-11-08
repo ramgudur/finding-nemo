@@ -770,3 +770,12 @@ def test_finalize_rejects_inputs_the_dev_did_not_declare_or_dropped(ctx):
     assert not r["ok"] and "not declared by the dev" in r["error"] and "invented" in r["error"]
     r2 = _call(ctx, "finalize_app", {"spec": _proposal(inputs=[])})
     assert not r2["ok"] and "missing" in r2["error"] and "pings" in r2["error"]
+
+
+def test_create_connector_declares_the_connectors_implied_fields(ctx):
+    """#259: an RSS connector's events carry doc_id/confidence, so they are declared with it."""
+    _call(ctx, "create_input", {"id": "docs", "kind": "pull", "shape": "document", "tier": "stiff", "meaning": "d"})
+    r = _call(ctx, "create_connector", {"input_id": "docs", "type": "rss", "url": "https://f.example.org/x"})
+    assert r["ok"] is True
+    got = {f.name: f.required for f in ctx.db.get_app("draft-app").inputs[0].fields}
+    assert got == {"doc_id": False, "confidence": False}

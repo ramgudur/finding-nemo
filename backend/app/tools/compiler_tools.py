@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.connectors import engine as connector_engine
 from app.connectors import url_guard
 from app.connectors.engine import check_connector_sync
+from app.connectors.fields import declare_input
 from app.core.models import (
     SLUG,
     AppSpec,
@@ -268,7 +269,11 @@ def set_connector(
     before = inp.connector.model_dump(mode="json") if inp.connector else None
     if config is not None:
         _check_connector_url(ctx, config)
-    new_inputs = [i.model_copy(update={"connector": config}) if i.id == input_id else i for i in spec.inputs]
+    # The connector's own fields (connectors/fields.py, #259) are declared with it; removing a
+    # connector leaves the input's fields as they are (all optional, so harmless).
+    new_inputs = [
+        declare_input(i.model_copy(update={"connector": config})) if i.id == input_id else i for i in spec.inputs
+    ]
     new_spec = spec.model_copy(update={"inputs": new_inputs})
     _save(ctx, new_spec)
     rt = getattr(ctx.engine, "apps", {}).get(ctx.app_id)

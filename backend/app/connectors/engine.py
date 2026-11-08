@@ -29,12 +29,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+from pydantic import ValidationError
 
 from app.api.ingest import _check_fields
+from app.connectors import fields as conn_fields
 from app.connectors import json_api, rss, url_guard
 from app.core import clock as clock_mod
+from app.core.config import get_settings
 from app.core.db import Db
-from app.core.models import AppSpec, ConnectorConfig, Event, InputSpec
+from app.core.models import AppSpec, ConnectorConfig, Event, InputSpec, TraceEntry
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +46,8 @@ CHECK_INTERVAL_S = 1.0
 DEFAULT_CONFIDENCE = 0.6
 MAX_LOCATE_PER_POLL = 5
 MAX_CONCURRENT_POLLS = 4  # due polls run concurrently, at most this many at once
+DEFAULT_USER_AGENT = "geo-heatmap-platform/1.0"  # some hosts refuse the default python-httpx agent
+MAX_STATUS_CHARS = 200
 
 # (app spec, input, item {doc_id, title, description, ts}) -> (lat, lon, confidence) or None
 Locator = Callable[[AppSpec, InputSpec, dict[str, Any]], Awaitable[tuple[float, float, float] | None]]
@@ -155,26 +160,36 @@ def connector_url(conn: ConnectorConfig) -> str | None:
     return preset_url or conn.url
 
 
-def _request(conn: ConnectorConfig) -> tuple[str, dict[str, Any] | None]:
-    """`(url, params)` for this connector. The connector type decides how to read the
-    response, not what's in it (rule 10: config, never code, drives the request itself)."""
+def _request(conn: ConnectorConfig) -> str:
+    """The URL this connector fetches, with a preset's rendered query merged into whatever query
+    the URL already has: a custom URL's own `?a=b` is kept, never replaced by an empty params
+    dict. The connector type decides how to read the response, not what's in it (rule 10:
+    config, never code, drives the request itself)."""
     spec = json_api.resolve_preset(conn.preset, conn.config) if conn.type == "json_api" else {}
     url = spec.get("url") or conn.url
     if url is None:
         raise ValueError("connector has no url (and no preset with one)")
-    params = json_api.render_query(spec.get("query", {}), conn.config) if conn.type == "json_api" else None
-    return url, params
+    if conn.type == "json_api" and conn.preset is None:
+        json_api.check_custom_config(conn.config)  # data-only read config: refuse a bad one before fetching
+    params = json_api.render_query(spec.get("query", {}), conn.config) if conn.type == "json_api" else {}
+    return str(httpx.URL(url).copy_merge_params(params)) if params else url
+
+
+def _headers() -> dict[str, str]:
+    """A descriptive User-Agent (`NOMINATIM_USER_AGENT` if set, else a generic one)."""
+    return {"User-Agent": get_settings().nominatim_user_agent or DEFAULT_USER_AGENT}
 
 
 async def fetch_raw(client: httpx.AsyncClient, conn: ConnectorConfig) -> Any:
-    url, params = _request(conn)
+    url = _request(conn)
     url_guard.check_url(url)  # every poll: an agent may have chosen this URL
-    resp = await client.get(url, params=params, timeout=FETCH_TIMEOUT_S)  # redirects followed by hand below
+    headers = _headers()
+    resp = await client.get(url, headers=headers, timeout=FETCH_TIMEOUT_S)  # redirects followed by hand below
     hops = 0
     while resp.status_code in url_guard.REDIRECT_CODES:  # each hop re-checked (SSRF)
         url = url_guard.next_hop(str(resp.url), resp.headers.get("location"), hops=hops)
         hops += 1
-        resp = await client.get(url, timeout=FETCH_TIMEOUT_S)
+        resp = await client.get(url, headers=headers, timeout=FETCH_TIMEOUT_S)
     resp.raise_for_status()
     return resp.json() if conn.type == "json_api" else resp.text
 
@@ -182,14 +197,15 @@ async def fetch_raw(client: httpx.AsyncClient, conn: ConnectorConfig) -> Any:
 def fetch_raw_sync(client: httpx.Client, conn: ConnectorConfig) -> Any:
     """For a one-shot check (`tools.compiler_tools.test_connector`) outside the async
     poll loop -- tool handlers are synchronous (`tools/registry.py`)."""
-    url, params = _request(conn)
+    url = _request(conn)
     url_guard.check_url(url)
-    resp = client.get(url, params=params, timeout=FETCH_TIMEOUT_S)  # redirects followed by hand below
+    headers = _headers()
+    resp = client.get(url, headers=headers, timeout=FETCH_TIMEOUT_S)  # redirects followed by hand below
     hops = 0
     while resp.status_code in url_guard.REDIRECT_CODES:  # each hop re-checked (SSRF)
         url = url_guard.next_hop(str(resp.url), resp.headers.get("location"), hops=hops)
         hops += 1
-        resp = client.get(url, timeout=FETCH_TIMEOUT_S)
+        resp = client.get(url, headers=headers, timeout=FETCH_TIMEOUT_S)
     resp.raise_for_status()
     return resp.json() if conn.type == "json_api" else resp.text
 
@@ -210,17 +226,25 @@ def write_events(db: Db, app_id: str, inp: InputSpec, raw_events: list[dict[str,
         for e in db.list_events(app_id, inp.id)
         if e.model_extra and e.model_extra.get("doc_id")
     }
+    # The connector's own implied fields count as declared (`connectors/fields.py`), so a spec
+    # stored before they were declared automatically still accepts its connector's events.
+    declared = conn_fields.with_implied(inp.fields, inp.connector)
     written, errors = 0, []
     for raw in raw_events:
         try:
             event = Event.model_validate(raw)
+        except ValidationError as e:  # one bad item must not drop the rest
+            # Where and what only: never echo the item's values into a status or trace.
+            where = sorted({".".join(str(p) for p in err["loc"]) or "event" for err in e.errors()})
+            errors.append(f"invalid event ({', '.join(where)})")
+            continue
         except Exception as e:  # noqa: BLE001 - one bad item must not drop the rest
-            errors.append(f"invalid event: {e}")
+            errors.append(f"invalid event: {type(e).__name__}")
             continue
         doc_id = (event.model_extra or {}).get("doc_id")
         if doc_id and (event.user_id, doc_id) in seen_docs:
             continue
-        reason = _check_fields(inp.fields, event.model_extra or {})
+        reason = _check_fields(declared, event.model_extra or {})
         if reason is not None:
             errors.append(reason)
             continue
@@ -262,8 +286,66 @@ async def poll_once(
         else:
             raw_events = events_from_raw(inp.connector, raw, now)
     except Exception as e:  # noqa: BLE001 - a bad feed must not crash the poll loop
-        return PollResult(app_id, inp.id, ok=False, error=f"{type(e).__name__}: {e}")
+        return PollResult(app_id, inp.id, ok=False, error=describe_error(e))
     return write_events(db, app_id, inp, raw_events, now)
+
+
+def describe_error(e: BaseException) -> str:
+    """A short, safe reason a poll failed: the HTTP status, or the exception type plus a capped
+    message. Never the URL (a custom URL's query may carry a key) and never a response body."""
+    if isinstance(e, httpx.HTTPStatusError):
+        return f"HTTP {e.response.status_code}"
+    if isinstance(e, httpx.HTTPError):  # connect / read / timeout errors: their text can name the URL
+        return type(e).__name__
+    if isinstance(e, url_guard.UnsafeUrl):  # the guard's own reasons name at most a host, never a query
+        return f"UnsafeUrl: {e}"[:MAX_STATUS_CHARS]
+    msg = " ".join(str(e).split())
+    return f"{type(e).__name__}: {msg}"[:MAX_STATUS_CHARS]
+
+
+def poll_status(result: PollResult | None) -> str:
+    """What the connector row's `last_status` holds: "ok" or "error: <reason>". No counts, so an
+    unchanged healthy (or failing) source keeps the same status from poll to poll."""
+    if result is None:
+        return "error: internal error"
+    if result.ok:
+        return "ok"
+    return f"error: {result.error or 'unknown'}"[:MAX_STATUS_CHARS]
+
+
+def record_poll(db: Db, spec: AppSpec, inp: InputSpec, result: PollResult | None, now: float) -> None:
+    """Store this poll's status on the connector row (`last_polled_at`, `last_status`). A
+    TraceEntry is written only when the status changes to a new error, or recovers from one, so a
+    failing feed shows up in the trace once rather than every poll. Agent "scout" (connectors are
+    the Scout's area; `AgentName` has no connector value), action "connector_poll"."""
+    assert inp.connector is not None  # noqa: S101 - only pull inputs with a connector are polled
+    status = poll_status(result)
+    previous = db.get_connector_status(spec.app_id, inp.id)
+    prev_status = previous[1] if previous is not None else None
+    db.upsert_connector(spec.app_id, inp.id, inp.connector)  # the row tracks the live config
+    db.record_connector_poll(spec.app_id, inp.id, polled_at=now, status=status)
+    failing = status != "ok"
+    recovered = not failing and prev_status is not None and prev_status != "ok"
+    if not ((failing and status != prev_status) or recovered):
+        return
+    try:
+        host = httpx.URL(connector_url(inp.connector) or "").host or "?"
+    except Exception:  # noqa: BLE001 - an unknown preset or a malformed URL
+        host = "?"
+    written = result.events_written if result is not None else 0
+    db.add_trace(
+        TraceEntry(
+            t=datetime.fromtimestamp(now, tz=UTC),
+            app_id=spec.app_id,
+            agent="scout",
+            saw=f"connector for input {inp.id!r} ({inp.connector.type}, host {host})",
+            result=status if failing else f"ok again: {written} event(s) written",
+            action="connector_poll",
+            why="the source's poll failed; no events arrive from it until it recovers"
+            if failing
+            else f"recovered after {prev_status}",
+        )
+    )
 
 
 class ConnectorEngine:
@@ -312,8 +394,9 @@ class ConnectorEngine:
 
         async def one(spec: AppSpec, inp: InputSpec, key: tuple[str, str]) -> PollResult | None:
             async with sem:
+                result: PollResult | None
                 try:
-                    return await poll_once(
+                    result = await poll_once(
                         self.client,
                         self.db,
                         spec.app_id,
@@ -325,7 +408,12 @@ class ConnectorEngine:
                     )
                 except Exception:  # noqa: BLE001 - one connector must not stop the others
                     log.exception("connector poll failed for %s/%s", spec.app_id, inp.id)
-                    return None
+                    result = None
+                try:
+                    record_poll(self.db, spec, inp, result, now)
+                except Exception:  # noqa: BLE001 - status bookkeeping must never stop polling
+                    log.exception("recording the poll of %s/%s failed", spec.app_id, inp.id)
+                return result
 
         results = await asyncio.gather(*(one(*d) for d in due))
         return [r for r in results if r is not None]

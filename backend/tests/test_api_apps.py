@@ -506,3 +506,54 @@ def test_compile_gate_forgets_old_entries():
     clock.t += 5.0
     assert gate.try_acquire("other") is None
     assert gate._finished_at == {}
+
+
+# -- #259: a connector's implied fields are declared before the Compiler sees the input ----
+
+
+def test_compile_declares_the_connectors_implied_fields(monkeypatch):
+    from app.connectors import url_guard
+
+    monkeypatch.setattr(url_guard, "check_url", lambda url, **kw: url)
+    app = _app_with_llm(_finalize_script())
+    with TestClient(app) as client:
+        r = client.post("/v1/apps/some-app/compile", json=_pull_compile_request())
+    assert r.status_code == 200, r.text
+    feed = next(i for i in r.json()["inputs"] if i["id"] == "feed")
+    assert {f["name"]: (f["type"], f["required"]) for f in feed["fields"]} == {
+        "doc_id": ("string", False),
+        "confidence": ("number", False),
+    }
+    pings = next(i for i in r.json()["inputs"] if i["id"] == "pings")
+    assert pings["fields"] == []  # push inputs are untouched
+
+
+def test_compile_refuses_a_bad_custom_json_config_before_any_model_call(monkeypatch):
+    from app.connectors import url_guard
+
+    monkeypatch.setattr(url_guard, "check_url", lambda url, **kw: url)
+    req = _pull_compile_request()
+    req["inputs"][1]["shape"] = "field"
+    req["inputs"][1]["connector"] = {"type": "json_api", "url": "https://a.example.org", "config": {"fields": ["lat"]}}
+    app = _app_with_llm({"scenario": "s", "description": "d", "steps": []})
+    with TestClient(app) as client:
+        r = client.post("/v1/apps/some-app/compile", json=req)
+    assert r.status_code == 422 and "reserved" in r.text
+
+
+def test_create_app_declares_a_presets_fields(client):
+    spec = _spec("preset-app")
+    spec["inputs"].append(
+        {
+            "id": "site",
+            "kind": "pull",
+            "shape": "field",
+            "tier": "stiff",
+            "meaning": "readings at one site",
+            "connector": {"type": "json_api", "preset": "open_meteo", "config": {"latitude": 0, "longitude": 0}},
+        }
+    )
+    r = client.post("/v1/apps", json=spec)
+    assert r.status_code == 201, r.text
+    site = next(i for i in r.json()["inputs"] if i["id"] == "site")
+    assert [f["name"] for f in site["fields"]] == ["wind_speed_10m", "wind_direction_10m"]

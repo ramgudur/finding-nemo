@@ -316,6 +316,13 @@ class Db:
         rows = self._query("SELECT input_id, config_json FROM connectors WHERE app_id = ? ORDER BY input_id", (app_id,))
         return [(r["input_id"], ConnectorConfig.model_validate_json(r["config_json"])) for r in rows]
 
+    def get_connector_status(self, app_id: str, input_id: str) -> tuple[float | None, str | None] | None:
+        """`(last_polled_at, last_status)` for a connector row, or None if it has no row yet."""
+        row = self._query_one(
+            "SELECT last_polled_at, last_status FROM connectors WHERE app_id = ? AND input_id = ?", (app_id, input_id)
+        )
+        return (row["last_polled_at"], row["last_status"]) if row else None
+
     def record_connector_poll(self, app_id: str, input_id: str, polled_at: float, status: str) -> None:
         with self._lock:
             self._conn.execute(

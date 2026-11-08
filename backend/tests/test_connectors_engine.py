@@ -243,7 +243,7 @@ def test_poll_once_reports_a_failed_fetch_without_raising():
             return await engine.poll_once(client, db, "app", _rss_input(), now=0.0)
 
     result = asyncio.run(go())
-    assert result.ok is False and "HTTPStatusError" in result.error
+    assert result.ok is False and result.error == "HTTP 500"  # status only, never the URL or body
 
 
 # -- ConnectorEngine scheduling ----------------------------------------------------------
@@ -484,3 +484,189 @@ def test_one_connector_raising_never_breaks_the_others(monkeypatch):
     assert [r.input_id for r in results] == ["feed_0", "feed_2"]
     assert all(r.ok and r.events_written == 1 for r in results)
     assert stamps == [42.0, 42.0, 42.0]  # every poll stamped with the same Clock time
+
+
+# -- #259: query kept, implied fields, poll status + traces, custom JSON, User-Agent -------
+
+
+def _custom_json_input(url: str, config: dict, fields: list | None = None) -> InputSpec:
+    return InputSpec.model_validate(
+        {
+            "id": "readings",
+            "kind": "pull",
+            "shape": "field",
+            "tier": "stiff",
+            "meaning": "readings at one site",
+            "fields": fields or [],
+            "connector": {"type": "json_api", "url": url, "poll_s": 60, "config": config},
+        }
+    )
+
+
+def test_a_custom_json_url_keeps_its_own_query_string():
+    inp = _custom_json_input(
+        "https://api.example.org/v1/data?station=7&units=si", {"latitude": 0.005, "longitude": 0.005}
+    )
+    seen = []
+
+    def handler(request):
+        seen.append(request.url)
+        return httpx.Response(200, json={})
+
+    async def go():
+        async with _client(handler) as client:
+            return await engine.fetch_raw(client, inp.connector)
+
+    asyncio.run(go())
+    assert seen[0].params["station"] == "7" and seen[0].params["units"] == "si"
+
+
+def test_a_preset_query_merges_into_an_existing_url_query():
+    conn = ConnectorConfig(type="json_api", url="https://x.example.org/q?keep=1")
+    assert engine._request(conn) == "https://x.example.org/q?keep=1"  # nothing to add: untouched
+    conn = _wind_input().connector
+    url = httpx.URL(engine._request(conn))
+    assert url.params["latitude"] == "32.8" and url.params["wind_speed_unit"] == "ms"
+
+
+def test_connector_fetches_send_a_descriptive_user_agent(monkeypatch):
+    from app.core import config as config_mod
+
+    agents = []
+
+    def handler(request):
+        agents.append(request.headers["user-agent"])
+        return httpx.Response(200, text=RSS_FEED)
+
+    conn = _rss_input().connector
+    with httpx.Client(transport=httpx.MockTransport(handler)) as c:
+        engine.fetch_raw_sync(c, conn)
+    assert agents[-1] == engine.DEFAULT_USER_AGENT
+
+    monkeypatch.setattr(
+        config_mod, "get_settings", lambda: config_mod.Settings(nominatim_user_agent="my-app (ops@x.org)")
+    )
+    monkeypatch.setattr(engine, "get_settings", config_mod.get_settings)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as c:
+        engine.fetch_raw_sync(c, conn)
+    assert agents[-1] == "my-app (ops@x.org)"
+
+
+def test_rss_events_pass_field_checks_on_an_input_with_no_declared_fields():
+    inp = _rss_input().model_copy(update={"fields": []})  # a spec stored before #259 (Builder: fields: [])
+    db = _db_with_app("app", [inp])
+    raw = engine.events_from_raw(inp.connector, RSS_FEED, now=0.0)
+    result = engine.write_events(db, "app", inp, raw, now=0.0)
+    assert result.ok and result.events_written == 1
+
+
+def test_preset_events_pass_field_checks_on_an_input_with_no_declared_fields():
+    inp = _wind_input().model_copy(update={"fields": []})
+    db = _db_with_app("app", [inp])
+    raw = engine.events_from_raw(inp.connector, {"current": {"wind_speed_10m": 3.0, "wind_direction_10m": 90}}, 0.0)
+    assert engine.write_events(db, "app", inp, raw, now=0.0).events_written == 1
+
+
+def test_implied_fields_still_reject_anything_else_undeclared():
+    inp = _rss_input().model_copy(update={"fields": []})
+    db = _db_with_app("app", [inp])
+    raw = [{"lat": 0.005, "lon": 0.005, "ts": "2026-11-08T05:00:00Z", "doc_id": "d", "secret_extra": 1}]
+    result = engine.write_events(db, "app", inp, raw, now=0.0)
+    assert not result.ok and "undeclared" in result.error
+
+
+def test_custom_json_reads_response_path_and_field_paths():
+    config = {
+        "latitude": 0.005,
+        "longitude": 0.005,
+        "response_path": "data.0",
+        "fields": {"level": "obs.level", "rate": "obs.rate"},
+    }
+    inp = _custom_json_input("https://api.example.org/v1/site", config)
+    db = _db_with_app("app", [inp])
+    body = {"data": [{"obs": {"level": 2.5, "rate": 0.1}}]}
+
+    def handler(request):
+        return httpx.Response(200, json=body)
+
+    async def go():
+        async with _client(handler) as client:
+            return await engine.poll_once(client, db, "app", inp, now=0.0)
+
+    result = asyncio.run(go())
+    assert result.ok and result.events_written == 1, result
+    extra = db.list_events("app", "readings")[0].model_extra
+    assert extra == {"level": 2.5, "rate": 0.1}
+
+
+def test_a_bad_custom_config_fails_the_poll_before_fetching():
+    inp = _custom_json_input("https://api.example.org/v1/site", {"fields": {"lat": "x"}})
+    db = _db_with_app("app", [inp])
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={})
+
+    async def go():
+        async with _client(handler) as client:
+            return await engine.poll_once(client, db, "app", inp, now=0.0)
+
+    result = asyncio.run(go())
+    assert not result.ok and "reserved" in result.error and calls == []
+
+
+def test_poll_status_is_recorded_and_traced_only_on_change():
+    db = _db_with_app("app", [_rss_input(poll_s=1)])
+    state = {"code": 403}
+
+    def handler(request):
+        if state["code"] != 200:
+            return httpx.Response(state["code"], text="<html>secret body</html>")
+        return httpx.Response(200, text=RSS_FEED)
+
+    eng = engine.ConnectorEngine(db, client=_client(handler))
+
+    def traces():
+        return [t for t in db.list_trace("app") if t.action == "connector_poll"]
+
+    asyncio.run(eng.check_once(now=10.0))
+    assert db.get_connector_status("app", "local_news") == (10.0, "error: HTTP 403")
+    assert len(traces()) == 1 and traces()[0].agent == "scout"
+    assert "HTTP 403" in traces()[0].result and "secret body" not in traces()[0].model_dump_json()
+
+    asyncio.run(eng.check_once(now=20.0))  # still failing the same way: recorded, not re-traced
+    assert db.get_connector_status("app", "local_news") == (20.0, "error: HTTP 403")
+    assert len(traces()) == 1
+
+    state["code"] = 200
+    asyncio.run(eng.check_once(now=30.0))  # recovered: one trace
+    assert db.get_connector_status("app", "local_news") == (30.0, "ok")
+    assert len(traces()) == 2 and "ok again" in traces()[1].result
+
+    asyncio.run(eng.check_once(now=40.0))  # healthy and unchanged: nothing new
+    assert len(traces()) == 2
+
+
+def test_a_first_successful_poll_is_recorded_without_a_trace():
+    db = _db_with_app("app", [_rss_input(poll_s=1)])
+    eng = engine.ConnectorEngine(db, client=_client(lambda r: httpx.Response(200, text=RSS_FEED)))
+    asyncio.run(eng.check_once(now=5.0))
+    assert db.get_connector_status("app", "local_news") == (5.0, "ok")
+    assert not [t for t in db.list_trace("app") if t.action == "connector_poll"]
+
+
+def test_poll_errors_never_include_the_url_or_its_query():
+    inp = _custom_json_input("https://api.example.org/v1/site?api_key=SECRET123", {"latitude": 0.0, "longitude": 0.0})
+
+    def handler(request):
+        raise httpx.ConnectError("could not reach https://api.example.org/v1/site?api_key=SECRET123")
+
+    db = _db_with_app("app", [inp])
+
+    async def go():
+        async with _client(handler) as client:
+            return await engine.poll_once(client, db, "app", inp, now=0.0)
+
+    result = asyncio.run(go())
+    assert not result.ok and "SECRET123" not in result.error
