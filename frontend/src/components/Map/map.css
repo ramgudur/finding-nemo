@@ -10,10 +10,10 @@
   font-family: "IBM Plex Mono", ui-monospace, monospace;
 }
 
-/* Muted, washed-out base map so the data reads first. */
+/* The base map keeps its own colours (a blue wash made an empty map one flat colour); only a
+   slight fade so the data cells still read first. */
 .hm-map .leaflet-tile-pane {
-  filter: grayscale(0.6) sepia(0.2) hue-rotate(150deg) saturate(0.5) brightness(1.1) contrast(0.72);
-  opacity: 0.62;
+  opacity: 0.85;
 }
 
 .hm-map .leaflet-hm-glow-pane svg {
