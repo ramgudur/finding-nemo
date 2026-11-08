@@ -4,7 +4,10 @@
 // Camera: orthographic, looking straight down at the pond. World units are viewport HEIGHT = 100:
 // x runs from -50*aspect (left edge) to +50*aspect (right edge), y from -50 (bottom) to +50 (top),
 // origin at the viewport centre. Use pctToWorld() to place things at DESIGN.md's % positions.
-import { Vector2 } from "three";
+import { Vector2, Vector3 } from "three";
+
+/** Size of the cursor-ripple ring buffer the water shader reads (keep in sync with shaders/water.ts). */
+export const RIPPLE_COUNT = 8;
 
 /** Map DESIGN.md percentages (x% of width from the left, y% of height from the top) to world x/y. */
 export function pctToWorld(xPct: number, yPct: number, aspect: number): [number, number] {
@@ -41,4 +44,11 @@ export const pond = {
   reducedMotion: false,
   mobile: false,
   koi: [new Vector2(), new Vector2()],
+  /** Viewport width / height, kept current by PondScene's camera rig. */
+  aspect: 16 / 9,
+  /** Scene clock in seconds, advanced by PondScene each frame (slowed when reducedMotion). */
+  time: 0,
+  /** Recent cursor ripples as (world x, world y, pond.time at birth); z < -100 means unused. */
+  ripples: Array.from({ length: RIPPLE_COUNT }, () => new Vector3(0, 0, -1000)),
+  rippleHead: 0,
 };
