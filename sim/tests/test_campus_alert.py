@@ -104,6 +104,7 @@ def test_rss_feed_has_article_only_after_news_time(sc):
 def test_ground_truth_never_in_posts(sc):
     lines = ca.ground_truth_lines(sc, 0.0, 7, 1.0)
     assert lines[0]["type"] == "meta" and lines[0]["spoof_users"]
+    assert {x["type"] for x in lines[1:]} == {"source"}  # the neutral line type api/debug.py reads
     blob = json.dumps([p.body for p in sc.posts])
     assert "spoof" not in blob and "threat" not in blob
 

@@ -137,6 +137,43 @@ def replay(posts: Iterable[Post], t0: float, speed: float, poster: Poster, log_e
             next_log += log_every_s
 
 
+class ServerClock:
+    """Reads the platform's clock from `GET /v1/debug/clock` (DEMO_MODE only) and extrapolates between polls,
+    so the sim posts events when the *server's* time reaches them: pausing or speeding up the server clock
+    (console SimControls) pauses or speeds up the sim with it."""
+
+    def __init__(self, api: str, poll_s: float = 0.5) -> None:
+        self.url = f"{api.rstrip('/').replace('://localhost', '://127.0.0.1')}/v1/debug/clock"
+        self.poll_s = poll_s
+        self._fetched_at = -1e9
+        self._now_s = 0.0
+        self._speed: float | None = None
+
+    def _fetch(self) -> None:
+        with urllib.request.urlopen(self.url, timeout=5) as r:
+            body = json.loads(r.read())
+        self._now_s, self._speed, self._fetched_at = float(body["now_s"]), body.get("speed"), time.monotonic()
+
+    def now(self) -> float:
+        if time.monotonic() - self._fetched_at >= self.poll_s:
+            self._fetch()
+        return self._now_s + (time.monotonic() - self._fetched_at) * (self._speed or 0.0)
+
+
+def replay_following(
+    posts: Iterable[Post], t0: float, clock: ServerClock, poster: Poster, log_every_s: float = 10.0
+) -> None:
+    """Send posts when the server clock passes t0 + sim_t (ts stays t0 + sim_t, matching the engine)."""
+    next_log = log_every_s
+    for p in sorted(posts):
+        while clock.now() < t0 + p.sim_t:
+            time.sleep(0.05)
+        poster.submit(p.input_id, p.stamped(t0))
+        if p.sim_t >= next_log:
+            print(f"  t={p.sim_t:5.0f}s  ok={poster.ok}  failed={poster.failed}", flush=True)
+            next_log += log_every_s
+
+
 def write_ground_truth(name: str, lines: Iterable[dict[str, Any]], out_dir: Path | None = None) -> Path:
     """Ground truth is read only by `api/debug.py` (DEMO_MODE=1). Never send it to the platform."""
     out_dir = out_dir or REPO / "sim" / "ground_truth"

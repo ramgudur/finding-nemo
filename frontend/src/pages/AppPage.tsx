@@ -5,6 +5,7 @@ import { forgetKey, loadKey, saveKey } from "../api/authorityKey";
 import { ApiError, api } from "../api/client";
 import { openStream, type StreamState } from "../api/stream";
 import type { CellCollection, GeoJsonBBox, Hotspot, HotspotsResponse, MapResponse, StreamFrame } from "../api/types";
+import { DemoTools } from "../components/DemoTools/DemoTools";
 import { LayerToggles } from "../components/LayerToggles/LayerToggles";
 import { Map } from "../components/Map/Map";
 
@@ -72,7 +73,7 @@ export function AppPage({ appId }: { appId: string }) {
       onFrame: (f: StreamFrame) => {
         if (f.type === "auth_ok") {
           if (activeKey && !f.authority) setKeyRejected(true);
-        } else apply(f.map, f.hotspots);
+        } else if (f.type === "tick") apply(f.map, f.hotspots);
       },
     });
   }, [appId, activeKey, refresh, apply]);
@@ -174,6 +175,7 @@ export function AppPage({ appId }: { appId: string }) {
           )}
         </div>
       </div>
+      {authority && <DemoTools appId={appId} authorityKey={activeKey} />}
     </div>
   );
 }
