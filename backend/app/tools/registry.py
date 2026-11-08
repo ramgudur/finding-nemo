@@ -19,9 +19,11 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from app.tools import compiler_tools as ct
+from app.tools import connector_tools as cn
 from app.tools import poi_tools as pt
 from app.tools import read_tools as rd
 from app.tools import scoring_tools as st
+from app.tools import search_tools as sr
 from app.tools.context import ToolContext
 from app.tools.guards import GuardError
 
@@ -238,6 +240,43 @@ TOOLS: dict[str, Tool] = {
             pt.RetirePoiArgs,
             pt.retire_poi,
             frozenset({"poi_labeler"}),
+        ),
+        Tool(
+            "web_search",
+            "Search the web for candidate sources (feeds, data endpoints). Returns titles, URLs and short "
+            "snippets; nothing is stored.",
+            sr.WebSearchArgs,
+            sr.web_search,
+            frozenset({"scout"}),
+        ),
+        Tool(
+            "fetch_url",
+            "Fetch a public http(s) page as plain text (size and time capped; no redirects, no private addresses).",
+            cn.UrlArgs,
+            cn.fetch_url,
+            frozenset({"scout"}),
+        ),
+        Tool(
+            "probe_feed",
+            "Check whether a URL is a usable feed: RSS/Atom item counts, how many items carry a location, "
+            "sample titles; or a JSON endpoint's top-level shape.",
+            cn.UrlArgs,
+            cn.probe_feed,
+            frozenset({"scout"}),
+        ),
+        Tool(
+            "geocode",
+            "Turn a place name into a point inside this app's area (or report that none was found there).",
+            cn.GeocodeArgs,
+            cn.geocode,
+            frozenset({"scout"}),
+        ),
+        Tool(
+            "set_source_reliability",
+            "Lower how much a document source's items count, with a reason. Raising it needs the Critic's backtest.",
+            cn.SourceReliabilityArgs,
+            cn.set_source_reliability,
+            frozenset({"scout"}),
         ),
     )
 }
