@@ -11,6 +11,7 @@ and not in prompts.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -340,6 +341,44 @@ def changes_state(name: str) -> bool:
     return tool is not None and tool.changes_state
 
 
+def _object_arg_names(model: type[BaseModel]) -> set[str]:
+    """Top-level argument names whose JSON schema is an object (a dict field, a nested model, or
+    an optional one of those)."""
+    names: set[str] = set()
+    for key, prop in model.model_json_schema().get("properties", {}).items():
+        options = [prop, *prop.get("anyOf", []), *prop.get("oneOf", []), *prop.get("allOf", [])]
+        if any(o.get("type") == "object" or "$ref" in o for o in options):
+            names.add(key)
+    return names
+
+
+def _decode_object_args(model: type[BaseModel], args: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Models sometimes send an object argument as a JSON *string*. Decode those strings (the
+    result is then validated normally, extra keys still rejected), or explain precisely why the
+    string isn't an object, so the model can repair its next call instead of repeating it."""
+    out = dict(args)
+    errors: list[str] = []
+    for key in _object_arg_names(model):
+        value = out.get(key)
+        if not isinstance(value, str):
+            continue
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as e:
+            errors.append(
+                f"{key} was a string, not an object; JSON parse error: {e.msg} at char {e.pos} "
+                f"(line {e.lineno} col {e.colno}); the string is {len(value)} chars long. Pass {key} as a JSON object."
+            )
+            continue
+        if not isinstance(decoded, dict):
+            errors.append(
+                f"{key} was a string holding JSON {type(decoded).__name__}, not an object. Pass {key} as a JSON object."
+            )
+            continue
+        out[key] = decoded
+    return out, errors
+
+
 def call_tool(ctx: ToolContext, name: str, args: dict[str, Any] | None) -> dict[str, Any]:
     tool = TOOLS.get(name)
     if tool is None:
@@ -347,8 +386,13 @@ def call_tool(ctx: ToolContext, name: str, args: dict[str, Any] | None) -> dict[
     caller = "dev" if ctx.actor == "dev" else (ctx.agent or "")
     if caller not in tool.agents:
         return {"ok": False, "error": f"tool {name!r} is not available to {caller or 'this caller'}"}
+    if args is not None and not isinstance(args, dict):
+        return {"ok": False, "error": "invalid arguments: pass the arguments as a JSON object"}
+    args, decode_errors = _decode_object_args(tool.args, args or {})
+    if decode_errors:
+        return {"ok": False, "error": "invalid arguments: " + "; ".join(decode_errors)}
     try:
-        parsed = tool.args.model_validate(args or {})
+        parsed = tool.args.model_validate(args)
     except ValidationError as e:
         errs = "; ".join(f"{'.'.join(map(str, x['loc'])) or 'args'}: {x['msg']}" for x in e.errors())
         return {"ok": False, "error": f"invalid arguments: {errs}"}
