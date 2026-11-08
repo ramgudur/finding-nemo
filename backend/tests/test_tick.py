@@ -7,7 +7,7 @@ from app.core.clock import SimClock
 from app.core.models import AppSpec
 from app.engine.grid import Grid
 from app.engine.operators import registry
-from app.engine.tick import AppRuntime, InMemoryEventSource, TickEngine, tick_app
+from app.engine.tick import LOOKBACK_S, AppRuntime, InMemoryEventSource, TickEngine, tick_app
 
 # Synthetic ~500 m box; nothing app-specific.
 BBOX = {"min_lat": 45.0, "min_lon": 10.0, "max_lat": 45.0045, "max_lon": 10.00635}
@@ -227,3 +227,77 @@ def test_engine_loop_reads_clock_and_notifies_listeners():
     asyncio.run(asyncio.wait_for(main(), timeout=10))
     assert seen[:3] == [T0, T0 + 2, T0 + 4]
     assert eng.latest("test-app").hotspots
+
+
+def _marker_spec(**op_params):
+    marker = {
+        "id": "marker",
+        "kind": "push",
+        "shape": "fixed_point",
+        "tier": "locked",
+        "meaning": "an authority point",
+        "operators": [{"op": "override", "weight": 0, "radius_m": 30, **op_params}],
+    }
+    return spec(inputs=[marker])
+
+
+def test_override_outlives_default_lookback_until_cleared():
+    """Authority overrides win until cleared, however old (rule 6); no fixed read window drops them."""
+    rt = AppRuntime(_marker_spec())
+    src = InMemoryEventSource()
+    lat, lon = rt.grid.to_latlon(200.0, 200.0)
+    src.add("test-app", "marker", [{"t": T0, "lat": float(lat), "lon": float(lon)}])
+    for dt in (60, LOOKBACK_S + 1, 6 * 3600):
+        assert tick_app(rt, src, now=T0 + dt, clock=SimClock(T0 + dt)).override.max() == 1.0, dt
+    src.add("test-app", "marker", [{"t": T0 + 7 * 3600, "lat": float(lat), "lon": float(lon), "cleared": True}])
+    now = T0 + 7 * 3600 + 1
+    assert tick_app(rt, src, now=now, clock=SimClock(now)).override.max() == 0.0
+
+
+def test_override_ttl_from_spec_bounds_its_history():
+    rt = AppRuntime(_marker_spec(ttl_s=120))
+    assert rt.input_lookback("marker", LOOKBACK_S) == 120
+    src = InMemoryEventSource()
+    lat, lon = rt.grid.to_latlon(200.0, 200.0)
+    src.add("test-app", "marker", [{"t": T0, "lat": float(lat), "lon": float(lon)}])
+    assert tick_app(rt, src, now=T0 + 60, clock=SimClock(T0 + 60)).override.max() == 1.0
+    assert tick_app(rt, src, now=T0 + 121, clock=SimClock(T0 + 121)).override.max() == 0.0
+
+
+def test_declared_operator_horizon_is_used(monkeypatch):
+    info = registry.OPERATORS["density"]
+    patched = type("Info", (), {**{k: getattr(info, k) for k in info.__dataclass_fields__}})()
+    patched.horizon_s = lambda p: 8 * p.half_life_s
+    monkeypatch.setitem(registry.OPERATORS, "density", patched)
+    rt = AppRuntime(spec())  # density half_life_s = 60
+    assert rt.input_lookback("crowd", LOOKBACK_S) == 480
+
+
+def test_hotspot_matching_scales_with_cell_size():
+    big = spec(grid={"cell_m": 50, "bbox": {"min_lat": 45.0, "min_lon": 10.0, "max_lat": 45.045, "max_lon": 10.0635}})
+    rt = AppRuntime(big)
+    src = InMemoryEventSource()
+    ids = []
+    for k in range(3):  # the cluster moves 100 m per tick: 2 cells here, far beyond a fixed 30 m
+        t = T0 + 2 * k
+        src.add("test-app", "crowd", cluster(rt.grid, 2000 + 100 * k, 2000, 40, t, seed=k, spread=20))
+        res = tick_app(rt, src, now=t, clock=SimClock(t))
+        ids.append(max(res.hotspots, key=lambda h: h.peak).id)
+    assert ids == ["h1", "h1", "h1"]
+
+
+def test_hotspot_threshold_comes_from_the_spec():
+    def peak_hotspots(threshold):
+        s = spec()
+        s = s.model_copy(update={"outputs": s.outputs.model_copy(update={"hotspot_threshold": threshold})})
+        rt = AppRuntime(s)
+        src = InMemoryEventSource()
+        src.add("test-app", "crowd", cluster(rt.grid, 200, 300, 30, T0))
+        res = tick_app(rt, src, now=T0, clock=SimClock(T0))
+        return res, sum(h.n_cells for h in res.hotspots)
+
+    res, cells_default = peak_hotspots(0.5)
+    _, cells_low = peak_hotspots(0.1)
+    _, cells_high = peak_hotspots(1.0)
+    assert cells_low > cells_default > cells_high
+    assert int((res.score >= 0.5).sum()) == cells_default

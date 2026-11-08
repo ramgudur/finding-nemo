@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -44,11 +45,11 @@ from app.engine.operators.base import Events
 log = logging.getLogger(__name__)
 
 TICK_S = 2.0
-LOOKBACK_S = 900.0  # events older than this are not passed to operators (they've decayed)
+LOOKBACK_S = 900.0  # default read window for operators that don't declare a horizon
+ALL_HISTORY = -1e300  # 'since' for layers that need every event (finite, so any store can compare it)
 CACHE_TICKS = 300  # 10 min of 2 s ticks: the backtest replay window
-HOTSPOT_THRESHOLD = 0.5
 HOTSPOT_MAX = 20
-HOTSPOT_MATCH_M = 30.0  # a hotspot within this distance of last tick's keeps its id
+HOTSPOT_MATCH_CELLS = 3.0  # a hotspot within this many cells of last tick's keeps its id (scales with cell_m)
 
 
 # -- event source -----------------------------------------------------------------
@@ -119,6 +120,31 @@ class LayerInfo:
     op: str
     noise_floor: float
     is_override: bool
+    # How much event history the operator needs: seconds, math.inf for all of it, or None for
+    # the tick's default lookback. Comes from the operator, never from a domain assumption.
+    horizon_s: float | None = None
+
+
+def operator_horizon(op: str, params: Mapping[str, Any]) -> float | None:
+    """History an operator needs, from the registry.
+
+    - An operator may declare ``OperatorInfo.horizon_s(params) -> float | None`` (None = all history).
+    - Without it, an override-role operator gets its ``ttl_s`` or, if it has none, all history: an
+      authority point stays active until cleared, however long ago it arrived (rule 6).
+    - Anything else falls back to the tick's default lookback.
+    """
+    if op not in registry.OPERATORS:
+        return None
+    info = registry.get(op)
+    parsed = registry.parse_params(op, params)
+    declared = getattr(info, "horizon_s", None)
+    if callable(declared):
+        h = declared(parsed)
+        return math.inf if h is None else float(h)
+    if info.role == "override":
+        ttl = getattr(parsed, "ttl_s", None)
+        return math.inf if ttl is None else float(ttl)
+    return None
 
 
 @dataclass
@@ -157,7 +183,9 @@ class AppRuntime:
                 is_override = o.op in registry.OPERATORS and registry.get(o.op).role == "override"
                 if nf is None and o.op in registry.OPERATORS:
                     nf = registry.parse_params(o.op, params).noise_floor
-                self.layers.append(LayerInfo(o.layer_id, inp.id, o.op, float(nf or 1.0), is_override))
+                self.layers.append(
+                    LayerInfo(o.layer_id, inp.id, o.op, float(nf or 1.0), is_override, operator_horizon(o.op, params))
+                )
                 self.op_params[o.layer_id] = params
                 self.weights[o.layer_id] = float(o.weight)
         self.weighted_ids = tuple(li.layer_id for li in self.layers if not li.is_override)
@@ -165,6 +193,11 @@ class AppRuntime:
         self.cache = LayerCache(cache_ticks, self.weighted_ids, self.grid.shape)
         self.last: TickResult | None = None
         self._next_hotspot = 0
+
+    def input_lookback(self, input_id: str, default_s: float) -> float:
+        """Read window for one input: the longest horizon among its layers (math.inf = all history)."""
+        hs = [li.horizon_s for li in self.layers if li.input_id == input_id]
+        return max((default_s if h is None else h) for h in hs) if hs else default_s
 
     def set_weights(self, weights: Mapping[str, float]) -> None:
         """Replace weights for known layers. Validation (tiers, backtests) happens in tools/guards.py."""
@@ -211,10 +244,12 @@ def find_hotspots(
     normalized: np.ndarray,
     weights: np.ndarray,
     *,
-    threshold: float = HOTSPOT_THRESHOLD,
+    threshold: float | None = None,
     max_hotspots: int = HOTSPOT_MAX,
 ) -> list[Hotspot]:
     grid = rt.grid
+    if threshold is None:
+        threshold = rt.spec.outputs.hotspot_threshold
     comps = _connected_components(score >= threshold)
     flat = score.ravel()
     # biggest peak first; ties by size
@@ -241,7 +276,7 @@ def find_hotspots(
                 contributing = tuple(rt.weighted_ids[i] for i in order if share[i] / total >= 0.1)
         # keep the id of the nearest unused hotspot from last tick
         hid, persisted = None, 0
-        best = HOTSPOT_MATCH_M
+        best = HOTSPOT_MATCH_CELLS * grid.cell_m
         for p in prev:
             if p.id in used:
                 continue
@@ -313,7 +348,9 @@ def tick_app(
         ev = events_by_input.get(li.input_id)
         if ev is None:
             try:
-                ev = source.events(rt.spec.app_id, li.input_id, now - lookback_s, now)
+                back = rt.input_lookback(li.input_id, lookback_s)
+                since = now - back if math.isfinite(back) else ALL_HISTORY
+                ev = source.events(rt.spec.app_id, li.input_id, since, now)
             except Exception as e:  # noqa: BLE001 - the tick must survive a bad store read
                 errors.append(f"{li.input_id}: event read failed: {e}")
                 ev = empty_events()
@@ -350,7 +387,7 @@ def tick_app(
     if last is None or now > float(last.t[0]):  # a paused clock doesn't duplicate ticks
         rt.cache.push(now, normalized, ov)
 
-    hotspots = find_hotspots(rt, score, normalized, w)
+    hotspots = find_hotspots(rt, score, normalized, w)  # threshold from spec.outputs.hotspot_threshold
     result = TickResult(
         app_id=rt.spec.app_id,
         t=now,
