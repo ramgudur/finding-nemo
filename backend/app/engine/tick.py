@@ -50,6 +50,8 @@ ALL_HISTORY = -1e300  # 'since' for layers that need every event (finite, so any
 CACHE_TICKS = 300  # 10 min of 2 s ticks: the backtest replay window
 HOTSPOT_MAX = 20
 HOTSPOT_MATCH_CELLS = 3.0  # a hotspot within this many cells of last tick's keeps its id (scales with cell_m)
+CONTRIBUTOR_SHARE = 0.10  # share of a hotspot's score mass to be listed in contributing_layers
+VISIBILITY_SHARE = 0.01  # any layer above this share decides visibility: one private one makes it authority
 
 
 # -- event source -----------------------------------------------------------------
@@ -229,9 +231,13 @@ def find_hotspots(
 ) -> list[Hotspot]:
     """Connected areas with score >= the spec's threshold.
 
-    ``contributing_layers``: weighted layers supplying >= 10% of the hotspot's score mass (so a
-    smoothing tail never counts), plus every override layer active in it. Visibility follows
-    from these, so an override-driven hotspot stays authority-only (rule 8)."""
+    ``contributing_layers`` (for display): weighted layers supplying >= 10% of the hotspot's score
+    mass, plus every override layer active in it.
+
+    Visibility uses a stricter cut (rule 8, fail safe): every weighted layer supplying more than
+    ``VISIBILITY_SHARE`` of the score mass, plus every active override, must be a public output
+    layer. So a private layer can't shape a public hotspot even when it's too small to be listed
+    as a contributor, and an override-driven hotspot stays authority-only."""
     grid = rt.grid
     if threshold is None:
         threshold = rt.spec.outputs.hotspot_threshold
@@ -253,14 +259,17 @@ def find_hotspots(
         x, y = float((cx * vals).sum() / wsum), float((cy * vals).sum() / wsum)
         lat, lon = (float(v) for v in grid.to_latlon(x, y))
         contributing: tuple[str, ...] = ()
+        shaping: tuple[str, ...] = ()  # every layer that decides visibility (stricter than `contributing`)
         mass = float(vals.sum())
         if contrib_all is not None and mass > 0:
             share = contrib_all[:, cells].sum(axis=1)
             order = np.argsort(-share)
-            contributing = tuple(rt.weighted_ids[i] for i in order if share[i] / mass >= 0.1)
+            contributing = tuple(rt.weighted_ids[i] for i in order if share[i] / mass >= CONTRIBUTOR_SHARE)
+            shaping = tuple(rt.weighted_ids[i] for i in order if share[i] / mass > VISIBILITY_SHARE)
         for lid, layer in (override_layers or {}).items():
             if float(layer.ravel()[cells].max()) > 0:
                 contributing += (lid,)
+                shaping += (lid,)
         # keep the id of the nearest unused hotspot from last tick
         hid, persisted = None, 0
         best = HOTSPOT_MATCH_CELLS * grid.cell_m
@@ -287,7 +296,7 @@ def find_hotspots(
                 n_cells=len(cells),
                 persisted_ticks=persisted,
                 contributing_layers=list(contributing),
-                visibility=hotspot_visibility(rt.spec, contributing),
+                visibility=hotspot_visibility(rt.spec, shaping),
             )
         )
     return out
