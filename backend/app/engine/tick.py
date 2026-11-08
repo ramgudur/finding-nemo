@@ -126,25 +126,12 @@ class LayerInfo:
 
 
 def operator_horizon(op: str, params: Mapping[str, Any]) -> float | None:
-    """History an operator needs, from the registry.
-
-    - An operator may declare ``OperatorInfo.horizon_s(params) -> float | None`` (None = all history).
-    - Without it, an override-role operator gets its ``ttl_s`` or, if it has none, all history: an
-      authority point stays active until cleared, however long ago it arrived (rule 6).
-    - Anything else falls back to the tick's default lookback.
-    """
+    """History an operator needs: ``registry.horizon_s`` (None there = all history, e.g. an override
+    with no ttl, which stays active until cleared: rule 6). Unregistered ops use the tick default."""
     if op not in registry.OPERATORS:
         return None
-    info = registry.get(op)
-    parsed = registry.parse_params(op, params)
-    declared = getattr(info, "horizon_s", None)
-    if callable(declared):
-        h = declared(parsed)
-        return math.inf if h is None else float(h)
-    if info.role == "override":
-        ttl = getattr(parsed, "ttl_s", None)
-        return math.inf if ttl is None else float(ttl)
-    return None
+    h = registry.horizon_s(op, params)
+    return math.inf if h is None else float(h)
 
 
 @dataclass
