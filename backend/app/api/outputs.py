@@ -1,9 +1,9 @@
 """`api/outputs.py`: `GET /map?format=geojson` and `GET /hotspots`.
 
-Both read the engine's latest `TickResult` and filter by visibility: without the
-`X-Authority-Key` header, only layers/hotspots marked `public` reach the response
-(rule 8). Visibility filtering details beyond "authority sees everything" are step 2;
-for now every hotspot is authority-only, matching `specs/campus-alert.json`.
+Both read the engine's latest `TickResult` and filter by visibility: no `X-Authority-Key`
+header gets public data (rule 8); a *wrong* key is rejected with 401, not silently
+downgraded to public. Visibility filtering details beyond "authority sees everything"
+are step 2; for now every hotspot is authority-only, matching `specs/campus-alert.json`.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import authority_key_header, get_db, get_engine
-from app.core.access import is_authority, visible
+from app.core.access import require_authority_if_present, visible
 from app.core.db import Db
 from app.core.models import CellCollection, Hotspot, HotspotsResponse, MapResponse
 from app.engine.tick import TickEngine
@@ -43,7 +43,7 @@ def get_map(
     if result is None:
         raise HTTPException(status_code=404, detail="app has not ticked yet")
 
-    authority = is_authority(db, app, authority_key)
+    authority = require_authority_if_present(db, app, authority_key)
     public_ids = {ol.id for ol in spec.outputs.layers if ol.visibility == "public"}
     grid = engine.apps[app].grid
     arrays = {"score": result.score, **dict(zip(result.layer_ids, result.normalized, strict=True))}
@@ -75,7 +75,7 @@ def get_hotspots(
     if result is None:
         raise HTTPException(status_code=404, detail="app has not ticked yet")
 
-    authority = is_authority(db, app, authority_key)
+    authority = require_authority_if_present(db, app, authority_key)
     hotspots = [
         Hotspot(
             id=h.id,

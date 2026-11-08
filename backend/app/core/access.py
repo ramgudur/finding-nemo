@@ -7,6 +7,8 @@ data stays in the authority view). Never log a key.
 
 from __future__ import annotations
 
+from fastapi import HTTPException
+
 from app.core.db import Db
 from app.core.models import Visibility
 
@@ -23,3 +25,16 @@ def is_valid_ingest_key(db: Db, app_id: str, ingest_key: str | None) -> bool:
 def visible(visibility: Visibility, caller_is_authority: bool) -> bool:
     """Whether an item at this visibility reaches this caller."""
     return caller_is_authority or visibility == "public"
+
+
+def require_authority_if_present(db: Db, app_id: str, authority_key: str | None) -> bool:
+    """REST visibility rule: no key gets public data; a *wrong* key is rejected outright.
+
+    Returns whether the caller is the authority (so the route can include authority-only
+    items). Raises 401 only when a key was given and it didn't match.
+    """
+    if authority_key is None:
+        return False
+    if not db.check_authority_key(app_id, authority_key):
+        raise HTTPException(status_code=401, detail="invalid authority key")
+    return True

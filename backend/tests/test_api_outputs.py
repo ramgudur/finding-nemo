@@ -120,6 +120,22 @@ def test_hotspots_are_authority_only_for_this_spec(setup):
         assert h["visibility"] == "authority"
 
 
+def test_map_with_wrong_authority_key_is_401_not_public(setup):
+    client, db, engine, clock, keys = setup
+    _post_pings(client, keys["ingest_key"])
+    engine.tick_once()
+    r = client.get("/v1/apps/test-app/map", headers={"X-Authority-Key": "wrong"})
+    assert r.status_code == 401
+
+
+def test_hotspots_with_wrong_authority_key_is_401_not_public(setup):
+    client, db, engine, clock, keys = setup
+    _post_pings(client, keys["ingest_key"])
+    engine.tick_once()
+    r = client.get("/v1/apps/test-app/hotspots", headers={"X-Authority-Key": "wrong"})
+    assert r.status_code == 401
+
+
 def test_hotspots_before_any_tick_is_404(setup):
     client, db, engine, clock, keys = setup
     r = client.get("/v1/apps/test-app/hotspots", headers={"X-Authority-Key": keys["authority_key"]})
