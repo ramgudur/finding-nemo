@@ -5,15 +5,17 @@
 // made it public, the score), /hotspots (only the public ones; the server filters per item),
 // /instruction and the public stream. The instruction text is the server's, shown as sent.
 // The camera fits the area once, then the first route once; after that only the user (or the
-// Recenter button) moves it.
+// Recenter button) moves it. Phones stack the page; from 768 px up the map fills the screen and
+// the instruction card floats over it as a sheet on the left (the camera pads for it).
 import L from "leaflet";
 import { Crosshair, Info, LocateFixed, MoveUpRight, Navigation, Phone, TriangleAlert } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../api/client";
 import { openStream } from "../api/stream";
 import type { CellCollection, GeoJsonBBox, Hotspot, Instruction, InstructionMode, MapResponse, PublicAppInfo } from "../api/types";
 import { bboxToBounds, toLatLng } from "../components/Map/geo";
 import { VectorFieldOverlay } from "../components/Map/VectorFieldLayer";
+import { appDisplayName } from "../components/app/appName";
 
 type Pos = { lat: number; lon: number };
 type Source = "gps" | "map" | null;
@@ -29,11 +31,32 @@ const GPS_SLOW_MS = 5000;
 const MAP_RETRY_MAX_MS = 10_000;
 const RISK = "#E07A5F"; // soft warm coral: noticeable, not alarming
 
-/** What a public caller may see of the risk: public hotspots, and the score only if it is public. */
-type Risk = { hotspots: Hotspot[]; score: CellCollection | null; vectors?: MapResponse["vectors"]; cellM?: number };
+/** What a public caller may see of the risk: public hotspots, the score only if it is public, and how
+ * many layers the public map carries at all (the server leaves out every authority-only one). */
+type Risk = { hotspots: Hotspot[]; score: CellCollection | null; layers: number; vectors?: MapResponse["vectors"]; cellM?: number };
 
 function riskOf(map: MapResponse | null, hotspots: Hotspot[]): Risk {
-  return { hotspots: hotspots.filter((h) => h.visibility === "public"), score: map?.layers?.score ?? null, vectors: map?.vectors, cellM: map?.cell_m };
+  return {
+    hotspots: hotspots.filter((h) => h.visibility === "public"),
+    score: map?.layers?.score ?? null,
+    layers: Object.keys(map?.layers ?? {}).length,
+    vectors: map?.vectors,
+    cellM: map?.cell_m,
+  };
+}
+
+/** /public lists one "N private source(s)" entry per kind (push, pull); say it once, summed. */
+function sourcesLine(sources: PublicAppInfo["sources"] | undefined): string[] {
+  let hidden = 0;
+  const named: string[] = [];
+  for (const s of sources ?? []) {
+    const label = s.label.trim();
+    const m = /^(\d+)\s+private\s+sources?$/i.exec(label);
+    if (m) hidden += Number(m[1]);
+    else if (label) named.push(label);
+  }
+  if (hidden > 0) named.push(`${hidden} private source${hidden === 1 ? "" : "s"}`);
+  return named;
 }
 
 /** A 404's detail tells a real "not active" / "routing off" apart from "not ticked yet" (transient). */
@@ -68,14 +91,9 @@ function distanceText(m: number): string {
   return `${(m / 1000).toFixed(m < 10_000 ? 1 : 0)} km`;
 }
 
-/** Same rule as the server's PublicAppInfo.title, for an older backend without /public. */
-function titleFromId(appId: string): string {
-  return appId
-    .split(/[-_]+/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
-}
+/** From this width up the map fills the screen and the card floats over it (Tailwind's md). */
+const WIDE = "(min-width: 768px)";
+const SHEET_GAP = 16; // the floating sheet's offset from the screen edge
 
 function modeOf(ins: Instruction): InstructionMode {
   if (ins.mode) return ins.mode;
@@ -124,10 +142,9 @@ export function EndUser({ appId }: { appId: string }) {
   const lastAsk = useRef(0);
   const watchId = useRef<number | null>(null);
   const slowTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const intentRef = useRef<HTMLParagraphElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
   const [info, setInfo] = useState<PublicAppInfo | null>(null);
-  const [intentOpen, setIntentOpen] = useState(false);
-  const [intentClamped, setIntentClamped] = useState(false);
+  const [infoDone, setInfoDone] = useState(false); // /public answered or failed (an older backend has none)
   const [lastTickAt, setLastTickAt] = useState<number | null>(null); // local ms of the last known tick
   const [bbox, setBbox] = useState<GeoJsonBBox | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
@@ -143,11 +160,19 @@ export function EndUser({ appId }: { appId: string }) {
   const [risk, setRisk] = useState<Risk | null>(null); // null: not known yet
 
   const live = phase === "loading" || phase === "active";
+  // routing off: keep watching the public map (area and any public risk); only "not active" stops
+  const watch = live || phase === "noDirections";
   const liveRef = useRef(live);
   liveRef.current = live;
   const bboxRef = useRef<GeoJsonBBox | null>(null);
   bboxRef.current = bbox;
   const outside = pos !== null && bbox !== null && !inside(bbox, pos);
+  // Routing off and nothing public at all (no public layer, no public hotspot): the map would be an
+  // empty outline, so the page says so in one line instead.
+  const publicRisk = risk !== null && (risk.score !== null || risk.hotspots.length > 0);
+  const nothingPublic = phase === "noDirections" && risk !== null && !publicRisk && risk.layers === 0;
+  const showMap = live || (phase === "noDirections" && risk !== null && !nothingPublic);
+
 
   // Public app info: who is asking you to do what, and from which data. Optional: on any failure
   // (an older backend without /public, or a network blip) the page works as before from /map and
@@ -167,28 +192,21 @@ export function EndUser({ appId }: { appId: string }) {
         if (i.status !== "active") setPhase("inactive");
         else if (!i.routing_enabled) setPhase("noDirections");
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (!stop) setInfoDone(true);
+      });
     return () => {
       stop = true;
     };
   }, [appId, checkKey]);
-
-  // does the intent overflow its two-line clamp? (only then offer "more")
-  useLayoutEffect(() => {
-    const p = intentRef.current;
-    if (!p || intentOpen) return;
-    const check = () => setIntentClamped(p.scrollHeight > p.clientHeight + 1);
-    check();
-    window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
-  }, [info?.intent, intentOpen]);
 
   // Area outline from the public map (bbox is always public). Right after activation /map is 404
   // "app has not ticked yet" for a tick or two, so retry with backoff until a bbox arrives (a stream
   // tick also carries it). Only a 404 that says the app doesn't exist ends the page.
   const haveBbox = bbox !== null;
   useEffect(() => {
-    if (haveBbox || !live) return;
+    if (haveBbox || !watch) return;
     let stop = false;
     let delay = 1000;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -212,7 +230,7 @@ export function EndUser({ appId }: { appId: string }) {
       stop = true;
       clearTimeout(timer);
     };
-  }, [appId, haveBbox, live, checkKey]);
+  }, [appId, haveBbox, watch, checkKey]);
 
   // Phone GPS, only once the user asks (or has already allowed it); tapping the map sets the position too.
   const startGps = useCallback(() => {
@@ -299,9 +317,10 @@ export function EndUser({ appId }: { appId: string }) {
   }, [pos, ask]);
 
   // recompute on every public tick (the hazard moves); keep a slow poll in case the stream is down.
-  // Both stop once the app is known not to be active (or gives no directions).
+  // Both stop once the app is known not to be active; with no directions only the risk keeps updating
+  // (ask() does nothing once the page isn't live).
   useEffect(() => {
-    if (!live) return;
+    if (!watch) return;
     const close = openStream(appId, "", {
       onState: () => undefined,
       onFrame: (f) => {
@@ -333,7 +352,7 @@ export function EndUser({ appId }: { appId: string }) {
       close();
       clearInterval(id);
     };
-  }, [appId, ask, live]);
+  }, [appId, ask, watch]);
 
   // a clock for the ages shown (1 s while directions are shown, else 15 s for the header)
   useEffect(() => {
@@ -344,7 +363,9 @@ export function EndUser({ appId }: { appId: string }) {
   // map: area, you, route, destination
   useEffect(() => {
     if (!el.current || map.current) return;
-    const m = L.map(el.current, { zoomControl: true, attributionControl: true });
+    // zoom sits bottom right: top left is under the floating sheet on wide screens
+    const m = L.map(el.current, { zoomControl: false, attributionControl: true });
+    L.control.zoom({ position: "bottomright" }).addTo(m);
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 20,
       maxNativeZoom: 19,
@@ -402,20 +423,28 @@ export function EndUser({ appId }: { appId: string }) {
     return bounds;
   }, []);
 
+  // On wide screens the sheet covers the map's left side, so the camera frames what's beside it.
+  const pad = useCallback((base: number): L.FitBoundsOptions => {
+    const s = sheetRef.current;
+    const left = s && window.matchMedia(WIDE).matches ? s.offsetWidth + SHEET_GAP + base : base;
+    return { paddingTopLeft: [left, base], paddingBottomRight: [base, base] };
+  }, []);
+
   const recenter = useCallback(() => {
     const m = map.current;
     const f = frame();
-    if (m && f) m.fitBounds(f, { padding: [28, 28] });
-  }, [frame]);
+    if (m && f) m.fitBounds(f, pad(28));
+  }, [frame, pad]);
 
   // First load: fit the area once (with you, if you're already outside it). Nothing refits later.
   useEffect(() => {
     const m = map.current;
-    if (!m || !bbox || fitArea.current) return;
+    if (!m || !bbox || !showMap || fitArea.current) return; // a hidden map has no size to fit
     fitArea.current = true;
+    m.invalidateSize();
     const f = frame();
-    if (f) m.fitBounds(f, { padding: [12, 12] });
-  }, [bbox, frame]);
+    if (f) m.fitBounds(f, pad(12));
+  }, [bbox, frame, pad, showMap]);
 
   // First route: fit route + you once. Later routes (a new tap, a tick) leave the camera alone.
   const hasRoute = !outside && ins !== null && ins.route.length > 1;
@@ -475,10 +504,11 @@ export function EndUser({ appId }: { appId: string }) {
     }).addTo(g);
   }, [score]);
 
-  // the map div is hidden in the terminal states; Leaflet needs a resize when it shows again
+  // the map div is hidden in the terminal states; Leaflet needs a resize when it shows again (and on
+  // wide screens the first area fit waits for that, since the hidden map has no size)
   useEffect(() => {
-    if (live && map.current) map.current.invalidateSize();
-  }, [live]);
+    if (showMap && map.current) map.current.invalidateSize();
+  }, [showMap]);
 
   const stale = ins !== null && now - insAt > STALE_MS;
   useEffect(() => {
@@ -503,12 +533,12 @@ export function EndUser({ appId }: { appId: string }) {
         .bindTooltip(shown.destination.label, { permanent: true, direction: "top" })
         .addTo(g);
     }
-    if (pos) {
+    if (pos && live) {
       L.circleMarker(toLatLng(pos.lat, pos.lon), { radius: 8, color: "#fff", fillColor: "#3b6895", fillOpacity: 1, weight: 3 })
         .bindTooltip("You", { direction: "bottom" })
         .addTo(g);
     }
-  }, [ins, pos, outside, stale]);
+  }, [ins, pos, outside, stale, live]);
 
   const recheck = () => {
     setNetError("");
@@ -525,8 +555,9 @@ export function EndUser({ appId }: { appId: string }) {
     if (posRef.current) setPos({ ...posRef.current }); // re-ask for the current position
   };
 
-  const title = info?.title || titleFromId(appId) || "Safety alert";
-  const sources = info?.sources.map((s) => s.label.trim()).filter(Boolean) ?? [];
+  // the server's title when /public answers, else the same rule applied to the id
+  const title = info?.title || appDisplayName(appId) || "Safety alert";
+  const sources = sourcesLine(info?.sources);
   const status: { label: string; dot: string } =
     phase === "inactive"
       ? { label: "Not active", dot: "bg-[#8199A0]" }
@@ -554,12 +585,17 @@ export function EndUser({ appId }: { appId: string }) {
         <p className="m-0 mt-1 text-[18px] leading-snug">There are no directions to show. Check again later.</p>
       </section>
     );
+  } else if (nothingPublic) {
+    panel = (
+      <p aria-live="polite" className="m-0 text-[16px] leading-snug text-inkSoft">
+        The organiser hasn't made this map public yet.
+      </p>
+    );
   } else if (phase === "noDirections") {
     panel = (
-      <section aria-live="polite" className="rounded-xl border-2 border-slate/40 bg-cream px-4 py-4 text-slate">
-        <h2 className="m-0 text-[20px] font-bold leading-snug">This alert doesn't give directions.</h2>
-        <p className="m-0 mt-1 text-[18px] leading-snug">The map shows the area it covers.</p>
-      </section>
+      <p aria-live="polite" className="m-0 text-[16px] leading-snug text-inkSoft">
+        This alert doesn't give directions.{showMap ? " The map shows the area it covers." : ""}
+      </p>
     );
   } else if (outside) {
     panel = (
@@ -612,111 +648,175 @@ export function EndUser({ appId }: { appId: string }) {
   }
 
   const showIns = live && ins !== null && !outside;
-  const publicRisk = risk !== null && (risk.score !== null || risk.hotspots.length > 0);
-  const askForLocation = live && !pos;
+  // Routing on: known from /public, else (older backend) from the instruction route answering.
+  const routingOn = phase !== "noDirections" && (info ? info.routing_enabled : phase === "active");
+  const askForLocation = live && !pos && infoDone && (info ? info.routing_enabled : true);
+  const showPosLegend = live && (routingOn || pos !== null);
+  const hasLegend = showPosLegend || routingOn || publicRisk;
 
+  // Phones: one stacked column (the sheet's children, then the map, then the legend, by flex order).
+  // Wide screens with a map: the map fills the screen and the sheet floats over its left side.
+  const wide = showMap;
   return (
-    <main className="mx-auto grid max-w-[640px] gap-4 pb-[calc(16px+env(safe-area-inset-bottom))] pl-[max(16px,env(safe-area-inset-left))] pr-[max(16px,env(safe-area-inset-right))] pt-[max(16px,env(safe-area-inset-top))] text-[#1F3440]">
-      {/* context: what this page is, whether it is live, and what data it uses */}
-      <header className="grid gap-2">
-        <h1 className="m-0 text-balance text-[28px] font-extrabold leading-tight tracking-[-0.02em] text-slate">{title}</h1>
-        <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] font-semibold text-inkSoft">
-          <span className="inline-flex items-center gap-1.5 text-slate">
-            <span aria-hidden className={`inline-block h-2.5 w-2.5 rounded-full ${status.dot}`} />
-            {status.label}
-          </span>
-          {lastTickAt !== null && phase !== "inactive" && <span>{updatedAgo(now - lastTickAt)}</span>}
-        </p>
-        {info?.intent && (
+    <main
+      className={`mx-auto flex max-w-[640px] flex-col gap-4 pb-[calc(16px+env(safe-area-inset-bottom))] pl-[max(16px,env(safe-area-inset-left))] pr-[max(16px,env(safe-area-inset-right))] pt-[max(16px,env(safe-area-inset-top))] text-[#1F3440] ${
+        wide ? "md:relative md:block md:h-[100dvh] md:max-w-none md:overflow-hidden md:p-0" : ""
+      }`}
+    >
+      <div
+        ref={sheetRef}
+        className={
+          wide
+            ? "contents md:absolute md:left-4 md:top-4 md:z-[1100] md:flex md:max-h-[calc(100%-32px)] md:w-[380px] md:max-w-[calc(100%-32px)] md:flex-col md:gap-4 md:overflow-y-auto md:rounded-2xl md:bg-cream/95 md:p-5 md:shadow-[0_6px_28px_rgba(31,52,64,0.22)] md:backdrop-blur-sm"
+            : "contents"
+        }
+      >
+        {/* context: what this page is, whether it is live, and what data it uses */}
+        <header className="order-1 grid gap-2">
           <div>
-            <p
-              ref={intentRef}
-              id="enduser-intent"
-              className={`m-0 max-w-[65ch] text-[18px] leading-snug text-[#2B4654] ${intentOpen ? "" : "line-clamp-2"}`}
-            >
-              {info.intent}
+            <h1 className="m-0 text-balance font-display text-[28px] font-semibold leading-tight tracking-[-0.015em] text-slate">{title}</h1>
+            <p className="m-0 mt-0.5 font-mono text-[13px] text-inkSoft">{appId}</p>
+          </div>
+          <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-[16px] font-semibold text-inkSoft">
+            <span className="inline-flex items-center gap-1.5 text-slate">
+              <span aria-hidden className={`inline-block h-2.5 w-2.5 rounded-full ${status.dot}`} />
+              {status.label}
+            </span>
+            {lastTickAt !== null && phase !== "inactive" && <span>{updatedAgo(now - lastTickAt)}</span>}
+          </p>
+          {sources.length > 0 && (
+            <p className="m-0 text-[16px] leading-snug text-inkSoft">
+              <span className="font-bold text-slate">Based on </span>
+              {sources.join(" · ")}
             </p>
-            {(intentClamped || intentOpen) && (
+          )}
+          {info?.intent && (
+            <details className="text-[16px]">
+              <summary className="-ml-1 inline-flex min-h-[44px] cursor-pointer list-none items-center gap-1.5 rounded px-1 font-bold text-primary [&::-webkit-details-marker]:hidden">
+                <Info aria-hidden className="h-[18px] w-[18px]" strokeWidth={2.25} />
+                <span className="underline underline-offset-4">About this alert</span>
+              </summary>
+              <p className="m-0 mt-1 max-w-[65ch] leading-snug text-[#2B4654]">{info.intent}</p>
+            </details>
+          )}
+        </header>
+
+        {askForLocation && (
+          <section aria-live="polite" className="order-1 grid gap-3 rounded-xl bg-[#FBF9F3] px-4 py-4 shadow-[0_2px_10px_rgba(53,89,107,0.12)]">
+            <h2 className="m-0 text-[22px] font-extrabold leading-tight text-slate">Share your location to get the safest way out</h2>
+            {gps !== "unsupported" && (
               <button
                 type="button"
-                aria-expanded={intentOpen}
-                aria-controls="enduser-intent"
-                onClick={() => setIntentOpen((o) => !o)}
-                className="-ml-1 min-h-[44px] rounded px-1 text-[17px] font-bold text-primary underline underline-offset-4"
+                onClick={startGps}
+                disabled={gps === "finding"}
+                className="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-xl bg-primary px-5 text-[19px] font-bold text-cream transition-colors hover:bg-primaryHover disabled:cursor-progress disabled:opacity-80"
               >
-                {intentOpen ? "less" : "more"}
+                <LocateFixed aria-hidden className="h-5 w-5" strokeWidth={2.5} />
+                {gps === "finding" || gps === "slow" ? "Finding your position…" : gps === "off" ? "Try location again" : "Share my location"}
+              </button>
+            )}
+            <p className="m-0 text-center text-[18px] font-semibold text-slate">or tap the map where you are</p>
+            {gpsLine && gps !== "finding" && (
+              <p role="status" className="m-0 text-[17px] font-semibold leading-snug text-danger">
+                {gpsLine}
+              </p>
+            )}
+            <p className="m-0 text-[16px] leading-snug text-inkSoft">
+              Only your position is sent, once, to compute your route. It isn't stored with your identity.
+            </p>
+          </section>
+        )}
+
+        {panel && <div className="order-1">{panel}</div>}
+
+        {showIns && (
+          <p className={`order-1 m-0 -mt-2 text-[16px] ${stale ? "font-semibold text-danger" : "text-inkSoft"}`}>
+            {stale ? `Directions not updated for ${duration(now - insAt)}.` : now - insAt < 5000 ? "Directions updated just now." : `Directions updated ${duration(now - insAt)} ago.`}
+          </p>
+        )}
+        {live && netError && (
+          <p role="status" className="order-1 m-0 text-[17px] font-semibold text-danger">
+            {netError}
+            {showIns ? " The directions above may be out of date." : ""}
+          </p>
+        )}
+
+        {phase === "inactive" && (
+          <button
+            type="button"
+            onClick={recheck}
+            className="order-1 min-h-[48px] self-start rounded-xl border-2 border-slate bg-[#FBF9F3] px-5 text-[18px] font-bold text-slate"
+          >
+            Check again
+          </button>
+        )}
+
+        {showMap && (hasLegend || (risk !== null && !publicRisk)) && (
+          <div className="order-3 grid gap-2">
+            {hasLegend && (
+              <ul aria-label="Map legend" className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-[15px] font-semibold text-inkSoft">
+                {showPosLegend && (
+                  <li className="inline-flex items-center gap-1.5">
+                    <span aria-hidden className="inline-block h-3 w-3 rounded-full border-2 border-white bg-[#3b6895] shadow-[0_0_0_1px_#3b6895]" />
+                    your position
+                  </li>
+                )}
+                {routingOn && (
+                  <li className="inline-flex items-center gap-1.5">
+                    <span aria-hidden className="inline-block h-1.5 w-5 rounded-full bg-[#3b6895]" />
+                    route
+                  </li>
+                )}
+                {publicRisk && (
+                  <li className="inline-flex items-center gap-1.5">
+                    <span aria-hidden className="inline-block h-3.5 w-3.5 rounded-full border" style={{ borderColor: RISK, background: `${RISK}59` }} />
+                    high-risk area
+                  </li>
+                )}
+                {routingOn && (
+                  <li className="inline-flex items-center gap-1.5">
+                    <span aria-hidden className="inline-block h-3 w-3 rounded-full border-2 border-[#0a6b37] bg-[#19a35b]" />
+                    destination
+                  </li>
+                )}
+              </ul>
+            )}
+            {risk !== null && !publicRisk && (
+              <p className="m-0 text-[15px] leading-snug text-inkSoft">
+                {routingOn ? "High-risk areas aren't shown on this public map, but your directions avoid them." : "High-risk areas aren't shown on this public map."}
+              </p>
+            )}
+          </div>
+        )}
+        {live && pos && (
+          <div className="order-3 grid gap-1">
+            <p className="m-0 text-[16px] leading-snug text-inkSoft">
+              {source === "gps" ? "Using your phone's location." : "Using the spot you tapped."} Tap the map to change it. Only your
+              own position is sent; it isn't stored with your identity.
+            </p>
+            {source === "map" && gps !== "unsupported" && gps !== "ok" && (
+              <button
+                type="button"
+                onClick={startGps}
+                className="inline-flex min-h-[44px] items-center gap-2 justify-self-start text-[17px] font-bold text-primary underline underline-offset-4"
+              >
+                <LocateFixed aria-hidden className="h-5 w-5" />
+                {gps === "finding" || gps === "slow" ? "Finding your position…" : "Use my location instead"}
               </button>
             )}
           </div>
         )}
-        {sources.length > 0 && (
-          <p className="m-0 text-[16px] leading-snug text-inkSoft">
-            <span className="font-bold text-slate">Based on: </span>
-            {sources.join(" · ")}
-          </p>
-        )}
-      </header>
+      </div>
 
-      {askForLocation && (
-        <section aria-live="polite" className="grid gap-3 rounded-xl bg-[#FBF9F3] px-4 py-4 shadow-[0_2px_10px_rgba(53,89,107,0.12)]">
-          <h2 className="m-0 text-[22px] font-extrabold leading-tight text-slate">Share your location to get the safest way out</h2>
-          {gps !== "unsupported" && (
-            <button
-              type="button"
-              onClick={startGps}
-              disabled={gps === "finding"}
-              className="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-xl bg-primary px-5 text-[19px] font-bold text-cream transition-colors hover:bg-primaryHover disabled:cursor-progress disabled:opacity-80"
-            >
-              <LocateFixed aria-hidden className="h-5 w-5" strokeWidth={2.5} />
-              {gps === "finding" || gps === "slow" ? "Finding your position…" : gps === "off" ? "Try location again" : "Share my location"}
-            </button>
-          )}
-          <p className="m-0 text-center text-[18px] font-semibold text-slate">or tap the map where you are</p>
-          {gpsLine && gps !== "finding" && (
-            <p role="status" className="m-0 text-[17px] font-semibold leading-snug text-danger">
-              {gpsLine}
-            </p>
-          )}
-          <p className="m-0 text-[16px] leading-snug text-inkSoft">
-            Only your position is sent, once, to compute your route. It isn't stored with your identity.
-          </p>
-        </section>
-      )}
-
-      {panel}
-
-      {showIns && (
-        <p className={`m-0 -mt-2 text-[16px] ${stale ? "font-semibold text-danger" : "text-inkSoft"}`}>
-          {stale ? `Directions not updated for ${duration(now - insAt)}.` : now - insAt < 5000 ? "Directions updated just now." : `Directions updated ${duration(now - insAt)} ago.`}
-        </p>
-      )}
-      {live && netError && (
-        <p role="status" className="m-0 text-[17px] font-semibold text-danger">
-          {netError}
-          {showIns ? " The directions above may be out of date." : ""}
-        </p>
-      )}
-
-      {!live && (
-        <button
-          type="button"
-          onClick={recheck}
-          className="min-h-[48px] justify-self-start rounded-xl border-2 border-slate bg-[#FBF9F3] px-5 text-[18px] font-bold text-slate"
-        >
-          Check again
-        </button>
-      )}
-
-      <div hidden={!live} className="grid gap-2">
-        <div className="relative">
+      <div hidden={!showMap} className="order-2 md:absolute md:inset-0">
+        <div className="relative md:h-full">
           <div
             ref={el}
-            aria-label="Map. Tap where you are to set your position."
-            className="w-full rounded-xl"
-            style={{ height: "min(60vh, 480px)", minHeight: 280 }}
+            aria-label={live ? "Map. Tap where you are to set your position." : "Map of the area this alert covers."}
+            className="h-[min(60vh,480px)] min-h-[280px] w-full rounded-xl md:h-full md:min-h-0 md:rounded-none"
           />
           {/* public vector-field layers only: the server sends none the owner kept private (rule 8) */}
-          <VectorFieldOverlay mapRef={map} vectors={risk?.vectors} bbox={bbox} cellM={risk?.cellM} pane="eu-vectors" zIndex={395} legendClassName="bottom-6 left-2 items-start" variant="public" />
+          <VectorFieldOverlay mapRef={map} vectors={risk?.vectors} bbox={bbox} cellM={risk?.cellM} pane="eu-vectors" zIndex={395} legendClassName="bottom-6 right-2.5 items-end" variant="public" />
           {bbox && (
             <button
               type="button"
@@ -729,48 +829,7 @@ export function EndUser({ appId }: { appId: string }) {
             </button>
           )}
         </div>
-        <ul aria-label="Map legend" className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-[15px] font-semibold text-inkSoft">
-          <li className="inline-flex items-center gap-1.5">
-            <span aria-hidden className="inline-block h-3 w-3 rounded-full border-2 border-white bg-[#3b6895] shadow-[0_0_0_1px_#3b6895]" />
-            your position
-          </li>
-          <li className="inline-flex items-center gap-1.5">
-            <span aria-hidden className="inline-block h-1.5 w-5 rounded-full bg-[#3b6895]" />
-            route
-          </li>
-          <li className="inline-flex items-center gap-1.5">
-            <span aria-hidden className="inline-block h-3.5 w-3.5 rounded-full border" style={{ borderColor: RISK, background: `${RISK}59` }} />
-            high-risk area
-          </li>
-          <li className="inline-flex items-center gap-1.5">
-            <span aria-hidden className="inline-block h-3 w-3 rounded-full border-2 border-[#0a6b37] bg-[#19a35b]" />
-            destination
-          </li>
-        </ul>
-        {risk !== null && !publicRisk && (
-          <p className="m-0 text-[15px] leading-snug text-inkSoft">
-            This alert's owner keeps the risk map private — your directions already avoid high-risk areas.
-          </p>
-        )}
       </div>
-      {live && pos && (
-        <div className="grid gap-1">
-          <p className="m-0 text-[16px] leading-snug text-inkSoft">
-            {source === "gps" ? "Using your phone's location." : "Using the spot you tapped."} Tap the map to change it. Only your
-            own position is sent; it isn't stored with your identity.
-          </p>
-          {source === "map" && gps !== "unsupported" && gps !== "ok" && (
-            <button
-              type="button"
-              onClick={startGps}
-              className="inline-flex min-h-[44px] items-center gap-2 justify-self-start text-[17px] font-bold text-primary underline underline-offset-4"
-            >
-              <LocateFixed aria-hidden className="h-5 w-5" />
-              {gps === "finding" || gps === "slow" ? "Finding your position…" : "Use my location instead"}
-            </button>
-          )}
-        </div>
-      )}
     </main>
   );
 }

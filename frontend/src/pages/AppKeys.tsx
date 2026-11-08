@@ -12,6 +12,7 @@ import { api } from "../api/client";
 import type { AppSpec, InputSpec } from "../api/types";
 import { AppShell, Breadcrumb, CopyButton, StatusChip, primaryBtn } from "../components/app/AppShell";
 import { PublicLinkRow, isLocalBase, publicGoLink } from "../components/app/PublicLink";
+import { appDisplayName } from "../components/app/appName";
 import { PushInputGuide } from "../components/keys/PushInputGuide";
 import { TryIt } from "../components/keys/TryIt";
 import { LANGS, type Lang } from "../components/keys/snippets";
@@ -194,9 +195,9 @@ export default function AppKeys() {
       <>
         <PublicLinkRow link={publicLink} />
         {localPublic && (
-          <p className="max-w-[68ch] text-[13.5px] text-ink">
-            A localhost link only works on this computer. Share it via your public host or a tunnel (e.g. cloudflared), and set VITE_PUBLIC_BASE to put that
-            address here.
+          <p className="max-w-[68ch] text-[13px] text-ink">
+            Tip: a localhost link opens only on this computer. To share it, serve the app from a public host or a tunnel and set{" "}
+            <span className="font-mono text-[12px]">VITE_PUBLIC_BASE</span> to that address.
           </p>
         )}
       </>
@@ -208,7 +209,6 @@ export default function AppKeys() {
     summary: "The map updates about every 2 s as events arrive.",
     body: (
       <ul className="space-y-2 text-[15px] text-slate">
-        <Bullet>The map updates about every 2 s as events arrive.</Bullet>
         <Bullet>The agents start tuning weights and naming places once data flows.</Bullet>
         <Bullet>Watch it all in the console, unlocked with your authority key.</Bullet>
       </ul>
@@ -221,30 +221,35 @@ export default function AppKeys() {
     <AppShell>
       <header className="space-y-3">
         <Breadcrumb appId={appId} />
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="font-display text-[32px] font-semibold leading-tight tracking-[-0.015em] text-deep max-sm:text-[27px]">
-            <span className="font-mono text-[0.85em] font-semibold tracking-[-0.02em] text-slate">{appId}</span> is live
-          </h1>
-          <StatusChip live />
+        <div>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="font-display text-[32px] font-semibold leading-tight tracking-[-0.015em] text-deep max-sm:text-[27px]">
+              {appDisplayName(appId) || appId} is live
+            </h1>
+            <StatusChip live />
+          </div>
+          <p className="mt-0.5 font-mono text-[13px] text-ink">{appId}</p>
         </div>
         <p role="status" aria-live="polite" className="max-w-[68ch] text-[16px] text-ink">
           {activation
             ? "Your tiers, locked weights and verification order are locked. Save your keys, connect your app, then send a test event."
-            : "Keys are shown only once, right after activation, and this page no longer has them."}
+            : spec
+              ? "Share the public link, and connect your app with the setup guide below."
+              : "Share the public link below. Open the console to watch the map and the agents."}
         </p>
       </header>
 
-      {activation ? (
+      {activation && (
         <section aria-labelledby="k-keys" className="wp-sheet space-y-5 p-5 sm:p-6">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
-            <h2 id="k-keys" className="text-[18px] font-bold text-slate">
-              First, save your keys
-            </h2>
-            <p className="flex items-center gap-1.5 text-[13.5px] font-bold text-attn">
-              <TriangleAlert aria-hidden className="h-4 w-4 shrink-0" />
-              Shown once: the platform can't show these keys again, and there is no reset.
-            </p>
-          </div>
+          <h2 id="k-keys" className="text-[18px] font-bold text-slate">
+            First, save your keys
+          </h2>
+          <p role="note" className="flex items-start gap-2.5 rounded-xl bg-attnBg px-4 py-3 text-[15px] font-semibold leading-snug text-attn">
+            <TriangleAlert aria-hidden className="mt-0.5 h-5 w-5 shrink-0" />
+            <span>
+              Shown once. Copy both keys somewhere safe now: the platform can't show them again, and there is no reset.
+            </span>
+          </p>
           <KeyField label="Ingest key" hint="Your app and services send data with it. Keep it server-side." value={activation.ingest_key} />
           <KeyField label="Authority key" hint="Opens your console. Never put it in a public app." value={activation.authority_key} />
           <label className="flex flex-wrap items-center gap-2 text-[15px] text-slate">
@@ -260,19 +265,6 @@ export default function AppKeys() {
             Remember the authority key on this device
             <span className="text-[13.5px] text-ink">{remember ? "(kept in this browser until you forget it)" : "(this tab only)"}</span>
           </label>
-        </section>
-      ) : (
-        <section className="wp-sheet space-y-3 p-5 sm:p-6">
-          <h2 className="text-[18px] font-bold text-slate">Lost the keys?</h2>
-          <p className="max-w-[68ch] text-[15px] text-ink">
-            If you saved the authority key, paste it in the console to unlock the authority view. Without it, the console shows the public view only.
-            {spec
-              ? " The guide below shows a placeholder where your ingest key goes."
-              : " The setup guide needs your app's inputs, which only the authority key can read."}
-          </p>
-          <Link to={consoleHref} className={primaryBtn}>
-            Open the console <ArrowRight aria-hidden className="h-4 w-4" />
-          </Link>
         </section>
       )}
 
@@ -303,7 +295,11 @@ export default function AppKeys() {
           </button>
         </div>
       ) : (
-        <div className="flex justify-end pt-2">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 pt-2">
+          <p className="max-w-[60ch] text-[13.5px] text-ink">
+            Keys are shown only once, at activation. If you saved the authority key, paste it in the console to unlock the authority view
+            {spec ? "; the guide above shows a placeholder where your ingest key goes." : ". The setup guide needs your app's inputs, which only that key can read."}
+          </p>
           <Link to={consoleHref} className={primaryBtn}>
             Open the console <ArrowRight aria-hidden className="h-4 w-4" />
           </Link>

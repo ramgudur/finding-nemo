@@ -34,6 +34,8 @@ export interface HeatmapPanelProps {
   weights?: WeightsView | null;
   colourMode?: ColourMode;
   onColourMode?: (m: ColourMode) => void;
+  /** Public view with no public layer: a card over the plain map (area outline only) in place of the empty state. */
+  lockedCard?: ReactNode;
 }
 
 function maxValue(m: MapResponse | null, id: string): number | null {
@@ -64,6 +66,7 @@ export default function HeatmapPanel({
   weights = null,
   colourMode = "score",
   onColourMode,
+  lockedCard,
 }: HeatmapPanelProps) {
   const { map, hotspots, pois } = live;
   // Destination labels come from the spec (authority view); without it no pin is marked as a destination.
@@ -112,7 +115,7 @@ export default function HeatmapPanel({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <h2 className="text-[18px] font-bold text-slate">Live map</h2>
-          <p className="mt-1 text-[13.5px] text-ink">{shown === "score" || shown === null ? "The combined score, updated every engine tick." : "One layer before weighting. Pick score in Layers to see the combined map."}</p>
+          <p className="mt-1 text-[13.5px] text-ink">{phase === "noPublic" ? "The area this app watches." : shown === "score" || shown === null ? "The combined score, updated every engine tick." : "One layer before weighting. Pick score in Layers to see the combined map."}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canBySource && onColourMode && (
@@ -131,7 +134,11 @@ export default function HeatmapPanel({
               ))}
             </div>
           )}
-          <span className="font-mono text-[12px] text-ink">showing {shown ?? "nothing yet"}</span>
+          {shown && (
+            <span className="text-[12px] text-ink">
+              Showing <span className="font-mono">{shown}</span>
+            </span>
+          )}
         </div>
       </div>
 
@@ -141,8 +148,14 @@ export default function HeatmapPanel({
         </p>
       )}
       {selectedHidden && (
-        <p className="font-mono text-[12px] text-ink">
-          {selectedLayerId} isn't visible with the current key{shown ? `; showing ${shown}` : ""}.
+        <p className="text-[12px] text-ink">
+          <span className="font-mono">{selectedLayerId}</span> isn't visible with the current key
+          {shown ? (
+            <>
+              ; showing <span className="font-mono">{shown}</span>
+            </>
+          ) : null}
+          .
         </p>
       )}
 
@@ -233,7 +246,10 @@ export default function HeatmapPanel({
             <p className="max-w-[34ch] rounded-2xl bg-cream/95 px-4 py-3 text-center text-[13px] text-slate shadow-sm">The map couldn't be loaded. It retries every 2 s.</p>
           </div>
         )}
-        {phase === "noPublic" && (
+        {phase === "noPublic" && lockedCard && (
+          <div className="absolute inset-0 z-[600] flex items-center justify-center p-3 sm:p-6">{lockedCard}</div>
+        )}
+        {phase === "noPublic" && !lockedCard && (
           <div role="status" className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center rounded-xl bg-mist/70">
             <p className="max-w-[34ch] rounded-2xl bg-cream/95 px-4 py-3 text-center text-[13px] text-slate shadow-sm">No layer of this app is public. Unlock the authority view to see the map.</p>
           </div>
@@ -261,6 +277,7 @@ export default function HeatmapPanel({
         )}
       </div>
 
+      {phase !== "noPublic" && (
       <div className="flex flex-col gap-1 font-mono text-[11px] text-ink">
         <div className="flex items-center gap-2">
           <span>0</span>
@@ -279,7 +296,10 @@ export default function HeatmapPanel({
             : `${shown ?? "layer"}: normalized layer, before weights`}
         </p>
       </div>
+      )}
 
+      {/* Without the key the stats are shown only when the score itself is public (never a row of blanks). */}
+      {(live.authority || maxScore !== null) && (
       <HeatmapStats
         items={[
           {
@@ -306,6 +326,7 @@ export default function HeatmapPanel({
           },
         ]}
       />
+      )}
     </section>
   );
 }

@@ -12,6 +12,7 @@ import {
   saveSpecSnapshot,
   type ProjectRecord,
 } from "../api/authorityKey";
+import { appDisplayName } from "../components/app/appName";
 import { useUndoToast } from "../components/builder/UndoToast";
 import { ProjectCard } from "../components/past-projects/ProjectCard";
 import { usePrefersReducedMotion } from "../hooks/usePrefersReducedMotion";
@@ -34,7 +35,7 @@ export function PastProjects() {
     removeProject(appId);
     dropSpecSnapshot(appId);
     setProjects(listProjects());
-    show(`Removed ${record.name?.trim() || appId}`, () => {
+    show(`Removed ${appDisplayName(appId) || appId}`, () => {
       recordProject(record);
       if (snapshot) saveSpecSnapshot(snapshot);
       setProjects(listProjects());
@@ -61,7 +62,7 @@ export function PastProjects() {
           <ArrowLeft size={14} /> Home
         </Link>
         <div className="mt-3 flex flex-wrap items-end gap-3">
-          <h1 className="text-2xl font-semibold text-slate">Past Projects</h1>
+          <h1 className="font-display text-[32px] font-semibold leading-tight text-slate max-sm:text-[27px]">Past Projects</h1>
           <Link
             to="/new"
             className="ml-auto rounded-full bg-primary px-4 py-2 text-sm font-semibold text-cream shadow-sm transition-colors duration-150 hover:bg-primaryHover"
