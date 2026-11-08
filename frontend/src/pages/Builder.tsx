@@ -4,6 +4,7 @@ import L from "leaflet";
 import { useEffect, useRef, useState } from "react";
 import { saveKey } from "../api/authorityKey";
 import { ApiError, api } from "../api/client";
+import { MAX_GRID_CELLS } from "../api/types";
 import type {
   ActivateResponse,
   AppSpec,
@@ -19,14 +20,14 @@ const KINDS: InputKind[] = ["push", "pull"];
 const SHAPES: InputShape[] = ["point", "track", "fixed_point", "field", "document"];
 const FIELD_TYPES: FieldType[] = ["number", "integer", "string", "boolean"];
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-const MAX_CELLS = 250_000; // e.g. 500 x 500; larger grids slow every tick and every backtest
+const M_PER_DEG = (6_371_008.8 * Math.PI) / 180; // same Earth radius as engine/grid.py and GridSpec
 
-/** Grid size in cells for a bbox at cell_m (equirectangular, like engine/grid.py). */
+/** Grid size in cells for a bbox at cell_m, computed like GridSpec.shape() so client and server agree. */
 function gridCells(b: BBox, cellM: number): [number, number] {
   const midLat = ((b.min_lat + b.max_lat) / 2) * (Math.PI / 180);
-  const h = ((b.max_lat - b.min_lat) * 111_320) / cellM;
-  const w = ((b.max_lon - b.min_lon) * 111_320 * Math.cos(midLat)) / cellM;
-  return [Math.ceil(h), Math.ceil(w)];
+  const h = ((b.max_lat - b.min_lat) * M_PER_DEG) / cellM;
+  const w = ((b.max_lon - b.min_lon) * M_PER_DEG * Math.cos(midLat)) / cellM;
+  return [Math.max(1, Math.ceil(h - 1e-9)), Math.max(1, Math.ceil(w - 1e-9))];
 }
 
 type Draft = { id: string; kind: InputKind; shape: InputShape; meaning: string; fields: string };
@@ -235,8 +236,9 @@ export function Builder() {
     !intent.trim() && "Describe what the app is for.",
     !bbox && "Pick the area on the map.",
     !(cellM > 0) && "Cell size must be positive.",
-    dims && dims[0] * dims[1] > MAX_CELLS &&
-      `The grid would be ${dims[0]} x ${dims[1]} cells; zoom in or use bigger cells (max ${MAX_CELLS.toLocaleString()}).`,
+    dims &&
+      dims[0] * dims[1] > MAX_GRID_CELLS &&
+      `The grid would be ${dims[0]} x ${dims[1]} cells; the limit is ${MAX_GRID_CELLS.toLocaleString()}. Use a smaller area or bigger cells.`,
     inputs.some((i) => !SLUG.test(i.id) || !i.meaning.trim()) && "Every input needs an id and a meaning.",
   ].filter(Boolean) as string[];
 
