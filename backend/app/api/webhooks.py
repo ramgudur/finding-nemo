@@ -6,6 +6,10 @@ optional list indices (e.g. "geometry.coordinates.1") -- data only, never code. 
 body is never stored (rule 8): only per-item accept/reject outcomes are kept, and only the first
 20 rejection reasons are returned.
 
+Coordinates are validated like `/events`: `Event.model_validate` in Pydantic's default (lax) mode,
+so a numeric string such as "45.51" is accepted as a number, while a non-numeric string is
+rejected. Mapped `fields` values are type-checked strictly, also exactly like `/events`.
+
 Auth is the input's ingest key, same as `/events`, via `X-Ingest-Key` or `?key=` for senders that
 can't set headers (the docs note a query-string key can end up in sender/proxy logs).
 """
@@ -17,6 +21,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import ValidationError
 
 from app.api.deps import get_db, ingest_key_header
 from app.api.ingest import _check_fields, _check_position
@@ -31,7 +36,9 @@ MAX_ITEMS = 500
 
 
 class _PathNotFound(Exception):
-    pass
+    def __init__(self, path: str) -> None:
+        super().__init__(f"path {path!r} not found")
+        self.path = path
 
 
 def _dig(data: Any, path: str) -> Any:
@@ -63,6 +70,16 @@ def _parse_ts(raw: Any, ts_format: TsFormat) -> datetime:
     if ts_format == "epoch_ms":
         return datetime.fromtimestamp(float(raw) / 1000.0, tz=UTC)
     return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+
+
+def _short_reason(e: Exception) -> str:
+    """One short line per rejected item: Pydantic errors condensed to `field: message` (no docs
+    URL, no echoed input), anything else as its own message."""
+    if isinstance(e, ValidationError):
+        parts = [f"{'.'.join(map(str, x['loc'])) or 'item'}: {x['msg']}" for x in e.errors()[:3]]
+        more = len(e.errors()) - 3
+        return "; ".join(parts) + (f" (+{more} more)" if more > 0 else "")
+    return str(e)
 
 
 def _map_item(item: Any, mapping: WebhookMapping, now: datetime) -> dict[str, Any]:
@@ -118,7 +135,7 @@ async def post_webhook(
     try:
         items = _items(body, inp.webhook.items_path)
     except _PathNotFound as e:
-        raise HTTPException(status_code=422, detail=f"items_path not found: {e}") from None
+        raise HTTPException(status_code=422, detail=f"items_path: {e}") from None
     if len(items) > MAX_ITEMS:
         raise HTTPException(status_code=413, detail=f"over {MAX_ITEMS} items in one call")
 
@@ -134,7 +151,7 @@ async def post_webhook(
                 raise ValueError(reason)
         except Exception as e:  # noqa: BLE001 - one bad item must not fail the whole call
             if len(rejected) < 20:
-                rejected.append(WebhookRejection(index=index, reason=str(e)))
+                rejected.append(WebhookRejection(index=index, reason=_short_reason(e)))
             continue
         db.insert_event(app, input, event, received_at=clock_mod.now())
         accepted += 1

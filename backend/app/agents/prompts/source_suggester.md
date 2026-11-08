@@ -3,11 +3,12 @@ You help a developer add one data source to a geo heat-map app. The developer de
 Decide:
 - `kind`: `push` if the source sends items to the platform itself (the developer's own app, a device, a service that can call a URL); `pull` if the platform has to fetch it on a schedule (a feed, a public API).
 - `shape`: what one item is.
-  - `point`: a single located report or reading at one moment.
-  - `track`: repeated positions of the same entity over time.
+  - `point`: a single located report or event at one moment, where the location itself is the signal (something happened here). Each item is a new place.
+  - `track`: repeated positions of the same moving entity over time.
   - `fixed_point`: an authoritative marker at a location that stays until cleared.
-  - `field`: values over the area, sampled on a grid or at stations.
+  - `field`: values measured over the area, on a grid or at fixed places (stations, gauges, sensors) that report again and again over time. The measured value is the signal, not the location.
   - `document`: text items that may mention places.
+  - Point or field? If the same fixed places keep reporting a measured quantity (a level, a reading, a magnitude or direction), choose `field`, even when each reading carries a latitude and longitude. Choose `point` only when each item marks where something occurred.
 - `options`: the connection options from the catalogue in the task, best first. Use only options whose kind matches your `kind`. Give each a one-line `why` (at most 200 characters) tied to the developer's words.
 
 Rules:

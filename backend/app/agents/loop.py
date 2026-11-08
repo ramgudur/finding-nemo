@@ -113,14 +113,21 @@ async def _run_tool_calls(
     for tc in tool_calls:
         try:
             args = json.loads(tc.function.arguments or "{}")
+            if isinstance(args, str):  # double-encoded arguments: decode once more
+                args = json.loads(args)
         except json.JSONDecodeError as e:
             result: dict[str, Any] = {"ok": False, "error": f"invalid JSON arguments: {e}"}
             args = {}
         else:
-            # In a worker thread: tools may block on network (Overpass, geocoding, fetch_url,
-            # test_connector) or CPU (batch backtests); on the event loop they would freeze every
-            # request, WebSocket stream and tick schedule meanwhile. The Db is thread-safe (RLock).
-            result = await asyncio.to_thread(call_tool, ctx, tc.function.name, args)
+            if not isinstance(args, dict):
+                result = {"ok": False, "error": "invalid arguments: pass the arguments as a JSON object"}
+                args = {}
+            else:
+                # In a worker thread: tools may block on network (Overpass, geocoding, fetch_url,
+                # test_connector) or CPU (batch backtests); on the event loop they would freeze
+                # every request, WebSocket stream and tick schedule meanwhile. The Db is
+                # thread-safe (RLock).
+                result = await asyncio.to_thread(call_tool, ctx, tc.function.name, args)
         if on_tool_result is not None:
             on_tool_result(tc.function.name, args, result)
         ok = bool(result.get("ok", False))

@@ -56,7 +56,10 @@ def catalogue() -> list[SourceOption]:
         SourceOption(
             type="webhook",
             label="Webhook URL",
-            why="The same generated endpoint, given to a service that calls a webhook.",
+            why=(
+                "A dedicated receiver URL (POST /v1/apps/{app}/webhooks/{input}) that maps "
+                "another service's own JSON into items."
+            ),
         ),
         SourceOption(
             type="rss",

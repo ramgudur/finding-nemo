@@ -155,7 +155,7 @@ def test_a_bad_item_is_rejected_without_failing_the_others(client, keys):
     assert r.status_code == 202
     body = r.json()
     assert body["received"] == 3 and body["accepted"] == 2
-    assert body["rejected"] == [{"index": 1, "reason": "location.lat"}]
+    assert body["rejected"] == [{"index": 1, "reason": "path 'location.lat' not found"}]
 
 
 def test_undeclared_mapped_field_rejects_every_item(client, keys):
@@ -295,3 +295,29 @@ def test_item_outside_the_grid_bbox_is_rejected_without_failing_the_others(clien
     body = r.json()
     assert body["received"] == 3 and body["accepted"] == 2
     assert body["rejected"] == [{"index": 1, "reason": "position outside the app's area"}]
+
+
+def test_items_path_not_found_names_the_path(client, keys):
+    r = _post(client, keys["ingest_key"], {"something_else": []})
+    assert r.status_code == 422
+    assert r.json()["detail"] == "items_path: path 'reports' not found"
+
+
+def test_numeric_string_coordinates_are_accepted_like_events(client, keys):
+    # Same lax coercion as POST /events (Event.model_validate): "0.004" is a number.
+    r = _post(client, keys["ingest_key"], _payload(_report(location={"lat": "0.004", "lon": "0.006"})))
+    assert r.status_code == 202 and r.json()["accepted"] == 1
+    ev = client.post(
+        "/v1/apps/test-app/inputs/pings/events",
+        json={"lat": "0.004", "lon": "0.006", "ts": "2026-01-01T00:00:00Z"},
+        headers={"X-Ingest-Key": keys["ingest_key"]},
+    )
+    assert ev.status_code == 202
+
+
+def test_validation_errors_are_one_short_line(client, keys):
+    r = _post(client, keys["ingest_key"], _payload(_report(location={"lat": "north", "lon": 0.006})))
+    assert r.status_code == 202
+    (rej,) = r.json()["rejected"]
+    assert rej["reason"].startswith("lat: ")
+    assert chr(10) not in rej["reason"] and "http" not in rej["reason"] and "north" not in rej["reason"]
