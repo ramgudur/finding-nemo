@@ -3,15 +3,19 @@
 // unlock field, never a full-page gate. Rule 8: the spec, weights, verification, trace and changes are
 // requested only with a key, and a rejected key drops back to public data at once. A proposed app
 // redirects to its review.
-import { Activity, Bot, FlaskConical, History, KeyRound, Layers, Lock, Scale, type LucideIcon } from "lucide-react";
+import { Activity, Bot, FlaskConical, History, KeyRound, Layers, Lock, Radio, Scale, type LucideIcon } from "lucide-react";
 import { motion } from "motion/react";
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { forgetKey, listProjects, loadKey, recordProject, saveKey } from "../api/authorityKey";
 import { ApiError, archApi } from "../api/client";
 import type { AppSpec } from "../api/types";
 import { AgentTrace } from "../components/AgentTrace/AgentTrace";
-import { AppShell, Breadcrumb, Centered, CopyButton, StatusChip, ghostBtn } from "../components/app/AppShell";
+import { AppShell, Breadcrumb, Centered, StatusChip, ghostBtn } from "../components/app/AppShell";
+import { PublicLinkButtons, publicGoLink } from "../components/app/PublicLink";
+import { SourcesPanel } from "../components/app/SourcesPanel";
+import { TestControls, centreOf, inArea, type TestPoint } from "../components/app/TestControls";
+import { useSourceStatus } from "../hooks/useSourceStatus";
 import { ChangesList } from "../components/architecture/ChangesList";
 import DebugDrawer from "../components/architecture/DebugDrawer";
 import HeatmapPanel, { shownLayer } from "../components/architecture/HeatmapPanel";
@@ -27,14 +31,15 @@ import { LabelProposals } from "../components/app/LabelProposals";
 import { ScoutRequestForm } from "../components/app/ScoutRequestForm";
 
 type Status = "loading" | "live" | "proposed" | "notFound" | "error";
-type Tab = "layers" | "weights" | "verification" | "agents" | "trace" | "changes";
-const TABS: { id: Tab; label: string; Icon: LucideIcon; authority: boolean }[] = [
-  { id: "layers", label: "Layers", Icon: Layers, authority: false },
-  { id: "weights", label: "Weights", Icon: Scale, authority: true },
-  { id: "verification", label: "Verification", Icon: FlaskConical, authority: true },
-  { id: "agents", label: "Agents", Icon: Bot, authority: true },
-  { id: "trace", label: "Trace", Icon: Activity, authority: true },
-  { id: "changes", label: "Changes", Icon: History, authority: true },
+type Tab = "layers" | "sources" | "weights" | "verification" | "agents" | "trace" | "changes";
+const TABS: { id: Tab; label: string; Icon: LucideIcon; authority: boolean; desc: string }[] = [
+  { id: "layers", label: "Layers", Icon: Layers, authority: false, desc: "Each input's layer and how much it counts. Pick one to draw it on the map." },
+  { id: "sources", label: "Sources", Icon: Radio, authority: true, desc: "Whether each input is receiving data, and when it was last polled." },
+  { id: "weights", label: "Weights", Icon: Scale, authority: true, desc: "The live layer weights. Pin one so the agents can't move it." },
+  { id: "verification", label: "Verification", Icon: FlaskConical, authority: true, desc: "How well the map anticipates new events, scored per method." },
+  { id: "agents", label: "Agents", Icon: Bot, authority: true, desc: "New place labels the POI Labeler suggests, and requests to the Scout." },
+  { id: "trace", label: "Trace", Icon: Activity, authority: true, desc: "Every agent step: what it saw, what it tested and what it did." },
+  { id: "changes", label: "Changes", Icon: History, authority: true, desc: "Every change to weights, trust and labels, with before and after. Revert any." },
 ];
 
 export default function AppConsole() {
@@ -107,6 +112,20 @@ export default function AppConsole() {
   useEffect(() => {
     if (data.rejected) reject();
   }, [data.rejected, reject]);
+  const sources = useSourceStatus(appId, authority ? key : null, reject);
+
+  // Test your app: where simulated events land (the area's centre until the dev picks a point)
+  const [testPoint, setTestPoint] = useState<TestPoint | null>(null);
+  const [picking, setPicking] = useState(false);
+  useEffect(() => {
+    setTestPoint(null);
+    setPicking(false);
+  }, [appId]);
+  const point = useMemo<TestPoint | null>(() => testPoint ?? (spec ? { ...centreOf(spec), radius_m: 200 } : null), [testPoint, spec]);
+  const openTab = (t: Tab) => {
+    setTab(t);
+    requestAnimationFrame(() => document.getElementById(`tab-${t}`)?.focus());
+  };
 
   // ?layer=<id> preselects a layer (shareable deep link); read once per app
   useEffect(() => {
@@ -140,7 +159,8 @@ export default function AppConsole() {
 
   const conn = live.streamState === "open" ? "Live stream" : live.streamState === "connecting" ? "Connecting" : "Polling every 2 s";
   const updated = live.lastUpdate ? new Date(live.lastUpdate).toLocaleTimeString() : null;
-  const publicLink = spec?.routing?.enabled ? `${window.location.origin}/apps/${encodeURIComponent(appId)}/go` : null;
+  const publicLink = publicGoLink(appId);
+  const tabInfo = TABS.find((t) => t.id === tab)!;
   const visibleIds = live.map ? Object.keys(live.map.layers) : [];
 
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -176,7 +196,7 @@ export default function AppConsole() {
               {conn}
               {updated && <span className="text-ink">· {updated}</span>}
             </span>
-            {publicLink && <CopyButton value={publicLink} label="Copy public link" />}
+            <PublicLinkButtons link={publicLink} />
           </div>
         </div>
 
@@ -212,9 +232,51 @@ export default function AppConsole() {
       </header>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(360px,1fr)]">
-        <HeatmapPanel spec={spec} live={live} selectedLayerId={selectedLayerId} />
+        <div className="flex min-w-0 flex-col gap-5">
+          <HeatmapPanel
+            spec={spec}
+            live={live}
+            selectedLayerId={selectedLayerId}
+            onPick={
+              authority && picking && spec
+                ? (lat, lon) => {
+                    if (!inArea(spec, lat, lon)) return;
+                    setTestPoint({ lat, lon, radius_m: point?.radius_m ?? 200 });
+                    setPicking(false);
+                  }
+                : null
+            }
+            marker={authority && (picking || testPoint) ? point : null}
+            emptyHint={
+              authority ? (
+                <>
+                  Cells appear when events land inside the area. Send one from the{" "}
+                  <Link to={`/apps/${encodeURIComponent(appId)}/keys`} className="pointer-events-auto font-semibold text-primary underline underline-offset-2">
+                    keys page
+                  </Link>
+                  , or use Test your app below.
+                </>
+              ) : (
+                "Nothing is happening in this area right now. Cells appear as events arrive."
+              )
+            }
+          />
+          {authority && spec && key && point && (
+            <TestControls
+              appId={appId}
+              authorityKey={key}
+              spec={spec}
+              point={point}
+              onPointChange={setTestPoint}
+              picking={picking}
+              onPickingChange={setPicking}
+              onRejected={reject}
+              onOpenTab={openTab}
+            />
+          )}
+        </div>
 
-        <section aria-label="Console" className="flex min-w-0 flex-col gap-3 rounded-3xl bg-cream/55 p-4 shadow-[0_8px_30px_-14px_rgba(53,89,107,0.3)]">
+        <section aria-label="Console" className="flex min-w-0 flex-col gap-3 self-start rounded-3xl bg-cream/55 p-4 shadow-[0_8px_30px_-14px_rgba(53,89,107,0.3)]">
           <div role="tablist" aria-label="Console" onKeyDown={onTabKey} className="-mx-1 flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden rounded-full bg-white/50 p-1 sm:mx-0 sm:flex-wrap sm:overflow-visible">
             {TABS.map(({ id, label, Icon, authority: needsKey }) => {
               const on = tab === id;
@@ -263,8 +325,12 @@ export default function AppConsole() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.15 }}
-            className="min-w-0"
+            className="min-w-0 space-y-3"
           >
+            <div className="px-1">
+              <h2 className="text-[15px] font-bold text-slate">{tabInfo.label}</h2>
+              <p className="text-[12.5px] text-ink">{tabInfo.desc}</p>
+            </div>
             {tab === "layers" ? (
               <LayerList
                 spec={authority ? spec : null}
@@ -275,17 +341,20 @@ export default function AppConsole() {
                 selectedLayerId={selectedLayerId}
                 shownId={shownLayer(live.map, selectedLayerId)}
                 onSelectLayer={setSelectedLayerId}
+                sources={authority ? sources.rows : null}
               />
             ) : !authority ? (
               <div className="space-y-2 rounded-2xl bg-white/40 p-4 text-[13.5px] text-slate">
                 <p className="flex items-center gap-1.5 font-semibold">
                   <Lock aria-hidden className="h-3.5 w-3.5" /> Authority view only
                 </p>
-                <p className="text-ink">Weights, verification, agent requests, the agent trace and the change log need this app's authority key.</p>
+                <p className="text-ink">Source status, weights, verification, agent requests, the trace and the change log need this app's authority key.</p>
                 <button type="button" onClick={() => keyInput.current?.focus()} className={`${ghostBtn} -ml-3`}>
                   <KeyRound aria-hidden className="h-3.5 w-3.5" /> Enter the key
                 </button>
               </div>
+            ) : tab === "sources" && spec ? (
+              <SourcesPanel appId={appId} inputs={spec.inputs ?? []} status={sources} />
             ) : !data.loaded ? (
               <div aria-busy className="space-y-2">
                 {[0, 1, 2].map((i) => (
@@ -321,10 +390,7 @@ export default function AppConsole() {
                   authorityKey={key}
                   inputs={spec.inputs ?? []}
                   onRejected={reject}
-                  onOpenTrace={() => {
-                    setTab("trace");
-                    requestAnimationFrame(() => document.getElementById("tab-trace")?.focus());
-                  }}
+                  onOpenTrace={() => openTab("trace")}
                 />
               </div>
             ) : tab === "trace" ? (

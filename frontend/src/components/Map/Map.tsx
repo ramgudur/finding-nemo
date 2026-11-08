@@ -19,6 +19,10 @@ interface Props {
   cellM?: number;
   height?: number | string;
   className?: string;
+  /** When set, a click on the map reports its position (the cursor becomes a crosshair). */
+  onPick?: ((lat: number, lon: number) => void) | null;
+  /** A marked point with a radius (e.g. where test events will land). */
+  marker?: { lat: number; lon: number; radius_m: number } | null;
 }
 
 /** Cells at or above this value also get a blurred copy underneath (the soft glow). */
@@ -100,7 +104,7 @@ function paint(el: Element | undefined, v: number, opacity: number, delayMs = 0)
  * Plain Leaflet inside React: one map instance; cells are long-lived paths keyed by layer/row/col and
  * restyled in place each tick, so values ease between frames instead of flashing.
  */
-export function Map({ bbox, layers, visible, hotspots, pois, destinationLabels, cellM, height = "min(70vh, 560px)", className }: Props) {
+export function Map({ bbox, layers, visible, hotspots, pois, destinationLabels, cellM, height = "min(70vh, 560px)", className, onPick, marker }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const renderers = useRef<{ cells: L.Renderer; glow: L.Renderer } | null>(null);
@@ -108,6 +112,9 @@ export function Map({ bbox, layers, visible, hotspots, pois, destinationLabels, 
   const gridGroup = useRef<L.LayerGroup | null>(null);
   const hotspotGroup = useRef<L.LayerGroup | null>(null);
   const poiGroup = useRef<L.LayerGroup | null>(null);
+  const markerGroup = useRef<L.LayerGroup | null>(null);
+  const onPickRef = useRef(onPick);
+  onPickRef.current = onPick;
   const fittedFor = useRef("");
   const reduced = usePrefersReducedMotion();
   const reducedRef = useRef(reduced);
@@ -143,6 +150,9 @@ export function Map({ bbox, layers, visible, hotspots, pois, destinationLabels, 
     gridGroup.current = L.layerGroup().addTo(m);
     hotspotGroup.current = L.layerGroup().addTo(m);
     poiGroup.current = L.layerGroup().addTo(m);
+    pane("hm-marker", 640);
+    markerGroup.current = L.layerGroup().addTo(m);
+    m.on("click", (e: L.LeafletMouseEvent) => onPickRef.current?.(e.latlng.lat, e.latlng.lng));
     map.current = m;
     const cellMap = cells.current;
     return () => {
@@ -352,10 +362,21 @@ export function Map({ bbox, layers, visible, hotspots, pois, destinationLabels, 
     }
   }, [pois, destinationLabels]);
 
+  // The marked point: a coral ring for the radius and a small centre dot.
+  useEffect(() => {
+    const g = markerGroup.current;
+    if (!g) return;
+    g.clearLayers();
+    if (!marker) return;
+    const at = toLatLng(marker.lat, marker.lon);
+    L.circle(at, { pane: "hm-marker", radius: marker.radius_m, color: "#C46F52", weight: 1.5, dashArray: "2 4", fillColor: "#D9937E", fillOpacity: 0.12, interactive: false }).addTo(g);
+    L.circleMarker(at, { pane: "hm-marker", radius: 4, color: "#F0EBDD", weight: 2, fillColor: "#C46F52", fillOpacity: 1, interactive: false }).addTo(g);
+  }, [marker?.lat, marker?.lon, marker?.radius_m]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div
       ref={el}
-      className={`hm-map ${className ?? ""}`}
+      className={`hm-map ${onPick ? "hm-map--picking" : ""} ${className ?? ""}`}
       style={{ height, minHeight: 280, width: "100%", borderRadius: 12 }}
     />
   );

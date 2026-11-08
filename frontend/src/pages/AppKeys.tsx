@@ -8,6 +8,7 @@ import { loadKey, saveKey } from "../api/authorityKey";
 import { api } from "../api/client";
 import type { AppSpec, FieldType, InputSpec, WebhookMapping } from "../api/types";
 import { AppShell, Breadcrumb, CopyButton, StatusChip, primaryBtn } from "../components/app/AppShell";
+import { PublicLinkRow, isLocalBase, publicGoLink } from "../components/app/PublicLink";
 import { webhookMappingParts } from "../components/sources/WebhookSummary";
 import { useBuilderStore } from "../store/useBuilderStore";
 
@@ -20,8 +21,6 @@ function sampleValue(type: FieldType): unknown {
 /** Where the examples send events: VITE_API_BASE when the frontend is built for a separate API host,
  * else this page's origin (the dev server, or a reverse proxy, forwards /v1 to the backend). */
 const API_BASE_ENV = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").trim().replace(/\/+$/, "");
-/** Where end users open the /go page (a public host or tunnel); else this page's origin. */
-const PUBLIC_BASE_ENV = ((import.meta.env.VITE_PUBLIC_BASE as string | undefined) ?? "").trim().replace(/\/+$/, "");
 
 type Shell = "bash" | "powershell";
 const SHELLS: Array<{ id: Shell; label: string }> = [
@@ -315,9 +314,9 @@ export default function AppKeys() {
   const push = (spec?.inputs ?? []).filter((i) => i.kind === "push");
   const pull = (spec?.inputs ?? []).filter((i) => i.kind === "pull");
   // Always shown (it doesn't need the spec, which is fetched with the key); the /go page handles routing-off.
-  const publicBase = PUBLIC_BASE_ENV || origin;
-  const publicLink = `${publicBase}/apps/${encodeURIComponent(appId)}/go`;
-  const localPublic = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(publicBase);
+  // VITE_PUBLIC_BASE (a public host or tunnel) when set, else this page's origin
+  const publicLink = publicGoLink(appId);
+  const localPublic = isLocalBase();
   const ingestKey = activation?.ingest_key ?? INGEST_PLACEHOLDER;
 
   const openConsole = () => {
@@ -468,17 +467,7 @@ export default function AppKeys() {
         <p className="max-w-[70ch] text-[13.5px] text-ink">
           Share it with end users: they get route instructions only, never your data. If routing is off for this app, the page says so.
         </p>
-        <div className="flex items-center gap-2">
-          <a
-            href={publicLink}
-            target="_blank"
-            rel="noreferrer"
-            className="min-w-0 flex-1 break-all rounded-lg bg-white/70 px-2.5 py-1.5 font-mono text-[12.5px] text-slate underline decoration-mutedTeal/50 underline-offset-2 transition-colors hover:decoration-slate"
-          >
-            {publicLink}
-          </a>
-          <CopyButton value={publicLink} />
-        </div>
+        <PublicLinkRow link={publicLink} />
         {localPublic && (
           <p className="max-w-[70ch] text-[12.5px] text-ink">
             Share it via your public host or a tunnel (e.g. cloudflared): a localhost link only works on this computer. Set VITE_PUBLIC_BASE to put the public address here.

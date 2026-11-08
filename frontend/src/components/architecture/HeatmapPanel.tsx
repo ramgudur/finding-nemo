@@ -2,7 +2,8 @@
 // Rule 8: what is drawn is exactly what the server returned for this key; without a key that is
 // public layers and public hotspots only. `spec` is null in the public view (the spec is authority-only),
 // so the geometry then comes from the MapResponse itself.
-import { useMemo } from "react";
+import { Hourglass } from "lucide-react";
+import { useMemo, type ReactNode } from "react";
 import type { AppSpec, GeoJsonBBox, MapResponse } from "../../api/types";
 import type { LiveAppData } from "../../hooks/useLiveAppData";
 import { Map } from "../Map/Map";
@@ -14,6 +15,11 @@ export interface HeatmapPanelProps {
   live: LiveAppData;
   selectedLayerId: string | null;
   className?: string;
+  /** Map click handler while a point is being picked (Test your app). */
+  onPick?: ((lat: number, lon: number) => void) | null;
+  marker?: { lat: number; lon: number; radius_m: number } | null;
+  /** Shown under the "no activity yet" state: how to make something happen (authority view). */
+  emptyHint?: ReactNode;
 }
 
 function maxValue(m: MapResponse | null, id: string): number | null {
@@ -31,7 +37,7 @@ export function shownLayer(map: MapResponse | null, selectedLayerId: string | nu
   return ids.includes("score") ? "score" : (ids[0] ?? null);
 }
 
-export default function HeatmapPanel({ spec, live, selectedLayerId, className }: HeatmapPanelProps) {
+export default function HeatmapPanel({ spec, live, selectedLayerId, className, onPick, marker, emptyHint }: HeatmapPanelProps) {
   const { map, hotspots, pois } = live;
   // Destination labels come from the spec (authority view); without it no pin is marked as a destination.
   const labelSet = spec?.outputs?.poi_labels?.label_set;
@@ -54,6 +60,9 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className }:
   const hsCount = hotspots?.hotspots.length ?? null;
   const emptyShown = map !== null && shown !== null && (map.layers[shown]?.features.length ?? 0) === 0;
   const threshold = spec?.outputs?.hotspot_threshold ?? 0.5;
+  // Three distinct pre-data states: loading (no answer yet), waiting (active, no tick yet), quiet (ticks, no cells).
+  const phase: "loading" | "waiting" | "unavailable" | "noPublic" | "quiet" | "data" =
+    map === null ? (live.notTicked ? "waiting" : live.settled ? "unavailable" : "loading") : shown === null ? "noPublic" : emptyShown ? "quiet" : "data";
 
   return (
     <section
@@ -61,7 +70,10 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className }:
       className={`flex min-w-0 flex-col gap-3 rounded-3xl bg-washedSky/70 p-4 shadow-[0_8px_30px_-12px_rgba(53,89,107,0.3)] ${className ?? ""}`}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-[15px] font-bold text-slate">Live map</h2>
+        <div>
+          <h2 className="text-[15px] font-bold text-slate">Live map</h2>
+          <p className="text-[12.5px] text-ink">{shown === "score" || shown === null ? "The combined score, updated every engine tick." : "One layer before weighting. Pick score in Layers to see the combined map."}</p>
+        </div>
         <span className="font-mono text-[12px] text-ink">showing {shown ?? "nothing yet"}</span>
       </div>
 
@@ -78,9 +90,20 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className }:
 
       <div className="relative">
         {bbox ? (
-          <Map bbox={bbox} layers={map?.layers ?? {}} visible={shown ? [shown] : []} hotspots={hotspots?.hotspots ?? []} pois={pois ?? []} destinationLabels={destinationLabels} cellM={cellM ?? undefined} height="clamp(300px, 52vh, 480px)" />
+          <Map
+            bbox={bbox}
+            layers={map?.layers ?? {}}
+            visible={shown ? [shown] : []}
+            hotspots={hotspots?.hotspots ?? []}
+            pois={pois ?? []}
+            destinationLabels={destinationLabels}
+            cellM={cellM ?? undefined}
+            height="clamp(320px, 56vh, 540px)"
+            onPick={onPick}
+            marker={marker}
+          />
         ) : (
-          <div aria-hidden className="h-[clamp(300px,52vh,480px)] rounded-2xl bg-mist/70 motion-safe:animate-pulse" />
+          <div aria-hidden className="h-[clamp(320px,56vh,540px)] rounded-xl bg-mist/70 motion-safe:animate-pulse" />
         )}
         {bbox && (
           <>
@@ -92,15 +115,45 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className }:
             </div>
           </>
         )}
-        {(map === null || emptyShown || shown === null) && (
-          <div className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center">
-            <p className="rounded-lg bg-mist/95 px-3 py-1.5 font-mono text-[12px] text-slate shadow-sm">
-              {map === null
-                ? "Waiting for the first tick"
-                : shown === null
-                  ? "No layers are public. Unlock the authority view to see them."
-                  : "No cells above 0.01 yet: waiting for events"}
-            </p>
+        {phase === "loading" && (
+          <div role="status" className="pointer-events-none absolute inset-0 z-[500] flex flex-col items-center justify-center gap-3 rounded-xl bg-mist/55 motion-safe:animate-pulse">
+            <div aria-hidden className="grid grid-cols-6 gap-1 opacity-60">
+              {Array.from({ length: 18 }, (_, i) => (
+                <span key={i} className="h-5 w-5 rounded-[4px] bg-paleWater" />
+              ))}
+            </div>
+            <p className="font-mono text-[12px] text-slate">Loading map…</p>
+          </div>
+        )}
+        {phase === "waiting" && (
+          <div role="status" className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center rounded-xl bg-[rgba(220,238,241,0.78)]">
+            <div className="max-w-[34ch] space-y-1 rounded-2xl bg-cream/95 px-4 py-3 text-center shadow-[0_8px_24px_-12px_rgba(53,89,107,0.4)]">
+              <p className="flex items-center justify-center gap-1.5 text-[14px] font-bold text-slate">
+                <Hourglass aria-hidden className="h-4 w-4 text-mutedTeal" /> Waiting for the first tick
+              </p>
+              <p className="text-[12.5px] text-ink">The engine draws a new map every 2 s once it picks the app up. If this stays, the backend may be restarting.</p>
+            </div>
+          </div>
+        )}
+        {phase === "unavailable" && (
+          <div className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center rounded-xl bg-[rgba(220,238,241,0.7)]">
+            <p className="max-w-[34ch] rounded-2xl bg-cream/95 px-4 py-3 text-center text-[13px] text-slate shadow-sm">The map couldn't be loaded. It retries every 2 s.</p>
+          </div>
+        )}
+        {phase === "noPublic" && (
+          <div role="status" className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center rounded-xl bg-[rgba(220,238,241,0.7)]">
+            <p className="max-w-[34ch] rounded-2xl bg-cream/95 px-4 py-3 text-center text-[13px] text-slate shadow-sm">No layer of this app is public. Unlock the authority view to see the map.</p>
+          </div>
+        )}
+        {phase === "quiet" && (
+          <div role="status" className="absolute inset-x-0 bottom-9 z-[500] flex justify-center px-3">
+            <div className="max-w-[44ch] rounded-2xl bg-cream/95 px-3.5 py-2 text-center shadow-[0_6px_20px_-10px_rgba(53,89,107,0.45)]">
+              <p className="flex items-center justify-center gap-1.5 text-[13px] font-semibold text-slate">
+                <span aria-hidden className="h-2 w-2 rounded-full bg-mutedTeal motion-safe:animate-pulse" />
+                {shown === "score" ? "Live — no activity yet in your area" : `Live — ${shown} has no cells yet`}
+              </p>
+              <p className="text-[12px] text-ink">{emptyHint ?? "Cells appear here when events land inside the area."}</p>
+            </div>
           </div>
         )}
       </div>

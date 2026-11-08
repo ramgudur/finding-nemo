@@ -3,7 +3,9 @@
 // public view the spec is authority-only (rule 8), so it lists only the layers the server sent.
 import { Layers } from "lucide-react";
 import { useMemo } from "react";
-import type { AppSpec, Change, OperatorConfig, TraceEntry, WeightsView } from "../../api/types";
+import type { AppSpec, Change, OperatorConfig, SourceStatus, TraceEntry, WeightsView } from "../../api/types";
+import { useNow } from "../../hooks/useSourceStatus";
+import { describeSource } from "../app/sourceStatus";
 import { LayerRow } from "./LayerRow";
 import { specLayers, useOperatorCatalog, type SpecLayer } from "./specLayers";
 import { TierBadge } from "./TierBadge";
@@ -113,18 +115,27 @@ export interface LayerListProps {
   /** The layer the map actually draws (score, or the first public layer when score is private). */
   shownId: string | null;
   onSelectLayer: (id: string | null) => void;
+  /** GET /sources/status rows (authority view), for each row's freshness; null when unknown. */
+  sources?: SourceStatus[] | null;
 }
 
-export function LayerList({ spec, visibleIds, weights, trace, changes, selectedLayerId, shownId, onSelectLayer }: LayerListProps) {
+export function LayerList({ spec, visibleIds, weights, trace, changes, selectedLayerId, shownId, onSelectLayer, sources }: LayerListProps) {
+  const now = useNow(5000);
+  const srcById = new Map((sources ?? []).map((r) => [r.input_id, r]));
   const catalog = useOperatorCatalog();
   const layers = useMemo(() => (spec ? specLayers(spec) : []), [spec]);
   const live = new Map((weights?.layers ?? []).map((l) => [l.layer_id, l]));
   const infoOf = (op: string) => catalog?.find((o) => o.name === op) ?? null;
   const weightOf = (l: SpecLayer) => live.get(l.layerId)?.weight ?? l.op.weight;
   const maxWeight = Math.max(0, ...layers.filter((l) => l.op.op !== "override").map(weightOf));
-  const statusOf = (l: SpecLayer) => {
-    if ((infoOf(l.op.op)?.role ?? (l.op.op === "override" ? "override" : "layer")) === "override") return "override";
-    return live.get(l.layerId)?.pinned ? "pinned" : "live";
+  // Real freshness from the layer's input (never a blanket "live"); pinned and override say so.
+  const statusOf = (l: SpecLayer): { status: string; tone?: NonNullable<Parameters<typeof LayerRow>[0]["tone"]> } => {
+    const src = srcById.get(l.input.id);
+    const fresh = src ? describeSource(src, now) : null;
+    if ((infoOf(l.op.op)?.role ?? (l.op.op === "override" ? "override" : "layer")) === "override")
+      return fresh ? { status: `override · ${fresh.short}`, tone: fresh.tone === "error" ? "error" : "override" } : { status: "override", tone: "override" };
+    if (live.get(l.layerId)?.pinned) return { status: fresh ? `pinned · ${fresh.short}` : "pinned", tone: fresh?.tone === "error" ? "error" : "pinned" };
+    return fresh ? { status: fresh.short, tone: fresh.tone } : { status: "" };
   };
   const tierCounts = layers.reduce<Record<string, number>>((acc, l) => ({ ...acc, [l.input.tier]: (acc[l.input.tier] ?? 0) + 1 }), {});
   const showScore = spec ? true : visibleIds.includes("score");
@@ -183,7 +194,7 @@ export function LayerList({ spec, visibleIds, weights, trace, changes, selectedL
               info={infoOf(l.op.op)}
               weight={weightOf(l)}
               maxWeight={maxWeight}
-              status={statusOf(l)}
+              {...statusOf(l)}
               selected={selected}
               onToggle={() => onSelectLayer(selected ? null : l.layerId)}
             >

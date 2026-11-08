@@ -21,6 +21,9 @@ import type {
   PublicAppInfo,
   ScoutJobAccepted,
   ScoutRequest,
+  SimulateRequest,
+  SimulateResult,
+  SourceStatus,
   SourceSuggestion,
   SpecEditResponse,
   SuggestSourceRequest,
@@ -142,6 +145,10 @@ export const api = {
   // public-safe compile progress (step count, elapsed, last validation); 404 when nothing is known
   compileStatus: (appId: string) => get<CompileStatus>(`${app(appId)}/compile/status`),
 
+  // --- Console (FE3): authority only; 404 on a backend without these routes ---
+  sourcesStatus: (appId: string, key: string) => get<SourceStatus[]>(`${app(appId)}/sources/status`, key),
+  simulate: (appId: string, key: string, body: SimulateRequest) =>
+    request<SimulateResult>("POST", `${app(appId)}/simulate`, key, body),
   // --- End-user page (FE1, #269) ---
   // public: title, intent, status, area, last update and public sources; 404 unknown app (or an
   // older backend without the route: callers fall back to /map and /instruction alone)
