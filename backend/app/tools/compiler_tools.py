@@ -20,6 +20,8 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.connectors import engine as connector_engine
+from app.connectors import url_guard
 from app.connectors.engine import check_connector_sync
 from app.core.models import (
     SLUG,
@@ -202,6 +204,12 @@ def create_connector(ctx: ToolContext, args: CreateConnectorArgs) -> dict[str, A
         raise GuardError(f"input {args.input_id!r} is {inp.kind!r}; only a pull input takes a connector")
     before = inp.connector.model_dump(mode="json") if inp.connector else None
     config = ConnectorConfig(type=args.type, url=args.url, poll_s=args.poll_s, config=args.config, preset=args.preset)
+    url = connector_engine.connector_url(config)
+    if url is not None:  # the server would fetch this every poll_s: refuse internal targets up front
+        try:
+            url_guard.check_url(url, allow_private=ctx.extra.get("allow_private_urls", url_guard.demo_allows_private()))
+        except url_guard.UnsafeUrl as e:
+            raise GuardError(f"connector URL refused: {e}") from e
     new_inputs = [i.model_copy(update={"connector": config}) if i.id == args.input_id else i for i in spec.inputs]
     _save(ctx, spec.model_copy(update={"inputs": new_inputs}))
     ctx.db.add_change(

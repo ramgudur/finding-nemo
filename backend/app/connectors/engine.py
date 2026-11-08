@@ -31,7 +31,7 @@ from typing import Any
 import httpx
 
 from app.api.ingest import _check_fields
-from app.connectors import json_api, rss
+from app.connectors import json_api, rss, url_guard
 from app.core import clock as clock_mod
 from app.core.db import Db
 from app.core.models import AppSpec, ConnectorConfig, Event, InputSpec
@@ -148,6 +148,12 @@ def _json_api_events(
     return [event]
 
 
+def connector_url(conn: ConnectorConfig) -> str | None:
+    """The URL this connector fetches (the preset's, else its own), without rendering the query."""
+    preset_url = json_api.resolve_preset(conn.preset, conn.config).get("url") if conn.type == "json_api" else None
+    return preset_url or conn.url
+
+
 def _request(conn: ConnectorConfig) -> tuple[str, dict[str, Any] | None]:
     """`(url, params)` for this connector. The connector type decides how to read the
     response, not what's in it (rule 10: config, never code, drives the request itself)."""
@@ -161,7 +167,8 @@ def _request(conn: ConnectorConfig) -> tuple[str, dict[str, Any] | None]:
 
 async def fetch_raw(client: httpx.AsyncClient, conn: ConnectorConfig) -> Any:
     url, params = _request(conn)
-    resp = await client.get(url, params=params, timeout=FETCH_TIMEOUT_S)
+    url_guard.check_url(url)  # every poll: an agent may have chosen this URL
+    resp = await client.get(url, params=params, timeout=FETCH_TIMEOUT_S)  # no redirects (httpx default)
     resp.raise_for_status()
     return resp.json() if conn.type == "json_api" else resp.text
 
@@ -170,7 +177,8 @@ def fetch_raw_sync(client: httpx.Client, conn: ConnectorConfig) -> Any:
     """For a one-shot check (`tools.compiler_tools.test_connector`) outside the async
     poll loop -- tool handlers are synchronous (`tools/registry.py`)."""
     url, params = _request(conn)
-    resp = client.get(url, params=params, timeout=FETCH_TIMEOUT_S)
+    url_guard.check_url(url)
+    resp = client.get(url, params=params, timeout=FETCH_TIMEOUT_S)  # no redirects (httpx default)
     resp.raise_for_status()
     return resp.json() if conn.type == "json_api" else resp.text
 

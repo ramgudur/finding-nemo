@@ -5,6 +5,16 @@ from app.core.models import AppSpec
 from app.tools import registry
 from app.tools.context import ToolContext
 
+
+@pytest.fixture(autouse=True)
+def _permissive_url_guard(monkeypatch):
+    """These tests cover connector behaviour against a local/mock feed; the SSRF guard has its own
+    tests (test_url_guard.py)."""
+    from app.connectors import url_guard
+
+    monkeypatch.setattr(url_guard, "check_url", lambda url, **kw: url)
+
+
 BBOX = {"min_lat": 0.0, "min_lon": 0.0, "max_lat": 0.01, "max_lon": 0.01}
 
 
