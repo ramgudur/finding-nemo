@@ -12,6 +12,7 @@ import { ConnectorConfigFields } from "./ConnectorConfigFields";
 import { KindBadge } from "./SourceSuggestionCard";
 import {
   JSON_LIST_OPTION,
+  LOCAL_FILE_OPTION,
   OPTION_KIND,
   SHAPES,
   SHAPE_INFO,
@@ -38,15 +39,17 @@ export function SourceSuggestions({ suggestion, bbox, takenIds, onAdd, onDismiss
   const reduce = useReducedMotion();
   const uid = useId();
   const unranked = new Set(suggestion.options.map((o) => OPTION_KIND[o.type])).size > 1;
-  // Ranked best first; the JSON list option is always available, last unless the suggester ranked it.
+  // Ranked best first; the JSON list and local file options are always available, last unless the suggester ranked them.
   const all = useMemo(
-    () =>
-      suggestion.options.some((o) => o.type === "json_list") ? suggestion.options : [...suggestion.options, JSON_LIST_OPTION],
+    () => [
+      ...suggestion.options,
+      ...[JSON_LIST_OPTION, LOCAL_FILE_OPTION].filter((x) => !suggestion.options.some((o) => o.type === x.type)),
+    ],
     [suggestion.options],
   );
   const first = all[0] ?? JSON_LIST_OPTION;
   const [chosen, setChosen] = useState<SourceOption>(first);
-  const [draft, setDraft] = useState<ConnectorDraft>(() => connectorDraftFor(first, bbox));
+  const [draft, setDraft] = useState<ConnectorDraft>(() => connectorDraftFor(first, bbox, suggestion.meaning));
   const [shape, setShape] = useState<InputShape>(suggestion.shape);
   const [open, setOpen] = useState<"details" | "others" | null>(unranked ? "details" : null);
 
@@ -72,7 +75,7 @@ export function SourceSuggestions({ suggestion, bbox, takenIds, onAdd, onDismiss
 
   const choose = (o: SourceOption) => {
     setChosen(o);
-    setDraft(connectorDraftFor(o, bbox));
+    setDraft(connectorDraftFor(o, bbox, suggestion.meaning));
     setOpen(null);
   };
 

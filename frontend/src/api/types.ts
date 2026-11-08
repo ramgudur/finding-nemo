@@ -9,7 +9,7 @@ export type InputShape = "point" | "track" | "fixed_point" | "field" | "document
 export type AppStatus = "draft" | "pending_confirmation" | "active";
 export type VerificationMethod = "authority_confirmation" | "predictive_check" | "cross_input_agreement";
 export type FieldType = "number" | "integer" | "string" | "boolean";
-export type ConnectorType = "rss" | "json_api" | "json_list"; // json_list: contract E (a fetched JSON / GeoJSON list)
+export type ConnectorType = "rss" | "json_api" | "json_list" | "local_file"; // json_list: contract E (a fetched JSON / GeoJSON list); local_file: a text file in backend/data/feeds/
 export type PoiLabelMode = "auto" | "on" | "off";
 export type PoiStatus = "active" | "retired";
 export type AgentName = "compiler" | "scout" | "critic" | "poi_labeler" | "message_guard";
@@ -469,7 +469,7 @@ export interface CompileInput {
 }
 
 /** "Add a source" option types. No HTML scraper (rule 10). */
-export type SourceOptionType = "post_api" | "webhook" | "rss" | "json_api" | "json_list";
+export type SourceOptionType = "post_api" | "webhook" | "rss" | "json_api" | "json_list" | "local_file";
 
 /** Body of POST /v1/apps/{app}/sources/suggest. */
 export interface SuggestSourceRequest {
@@ -602,7 +602,7 @@ export interface ScoutJobAccepted {
 // Both are authority only. Older backends answer 404; the console then hides these panels' data.
 
 /** How an input receives data: push endpoints or a pull connector type. */
-export type SourceVia = "post_api" | "webhook" | "rss" | "json_api" | "json_list";
+export type SourceVia = "post_api" | "webhook" | "rss" | "json_api" | "json_list" | "local_file";
 
 /** One row of GET /v1/apps/{app}/sources/status, one per input. */
 export interface SourceStatus {
@@ -619,23 +619,47 @@ export interface SourceStatus {
   last_event_at: string | null;
 }
 
-export type SimulateMode = "normal" | "spoof";
+export type SimulateMode = "normal" | "spoof" | "line";
 
-/** Body of POST /v1/apps/{app}/simulate: push inputs only; the point must be inside the area. */
-export interface SimulateRequest {
-  input_id: string;
-  count: number; // 1..200
+/** A point as {lat, lon} (the simulate line ends). */
+export interface SimPoint {
   lat: number;
   lon: number;
-  radius_m: number; // 10..5000
-  mode: SimulateMode;
 }
 
-/** 202 from POST /simulate. */
+/** Body of POST /v1/apps/{app}/simulate: push inputs only; points must be inside the area.
+ *  mode "line": clusters sit evenly from from_point to to_point, each with its own ids (line-<k>-<n>),
+ *  and the server keeps posting waves (about every 10 s) for duration_s. */
+export interface SimulateRequest {
+  input_id: string;
+  count: number; // 1..200 (line: per cluster, per wave)
+  lat?: number; // normal / spoof
+  lon?: number;
+  radius_m: number; // 10..5000
+  mode: SimulateMode;
+  from_point?: SimPoint | null; // line only
+  to_point?: SimPoint | null; // line only
+  clusters?: number; // line only, 2..20, default 8
+  duration_s?: number; // line only, 0..900, default 240
+}
+
+/** 202 from POST /simulate. `accepted` counts the first wave; job_id / duration_s for a line job. */
 export interface SimulateResult {
   accepted: number;
   rejected: number;
   user_id_prefix: string;
+  job_id?: string | null;
+  duration_s?: number | null;
+}
+
+// --- Run an agent now (contract D): POST /v1/apps/{app}/agents/{agent}/run, authority only ---
+// 409 not active; 429 (Retry-After) inside the 15 s per-app cooldown.
+export type RunnableAgent = "critic" | "poi_labeler";
+
+/** 202 from POST /agents/{agent}/run: a triggered run is queued. */
+export interface AgentRunAccepted {
+  agent: RunnableAgent;
+  queued: boolean;
 }
 
 // --- End-user page (FE1, #269): public app info and routing modes ---

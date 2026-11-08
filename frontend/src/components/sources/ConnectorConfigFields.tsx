@@ -5,8 +5,22 @@
 import type { SourceOption } from "../../api/types";
 import { Labeled } from "../builder/Help";
 import { WebhookEditor } from "./WebhookEditor";
-import { POLL_CHOICES, emptyWebhook, parseConfig, presetOf, urlRequired } from "./sourceUtils";
+import { LOCAL_FILE_NAME, POLL_CHOICES, emptyWebhook, parseConfig, presetOf, urlRequired } from "./sourceUtils";
 import type { ConnectorDraft } from "./sourceUtils";
+
+function PollSelect({ value, onChange, label }: { value: number; onChange: (s: number) => void; label: string }) {
+  return (
+    <Labeled label={label} htmlFor="poll-s">
+      <select id="poll-s" value={value} onChange={(e) => onChange(Number(e.target.value))} className="bld-field is-sm w-fit">
+        {POLL_CHOICES.map((c) => (
+          <option key={c.s} value={c.s}>
+            {c.label}
+          </option>
+        ))}
+      </select>
+    </Labeled>
+  );
+}
 
 export function ConnectorConfigFields({
   option,
@@ -26,7 +40,33 @@ export function ConnectorConfigFields({
   const configBad = option.type === "json_api" && parseConfig(draft.configText) === null;
   const urlMissing = urlRequired(option) && !draft.url.trim();
   const list = option.type === "json_list";
+  const file = option.type === "local_file";
   const urlId = `url-${option.type}`;
+  if (file) {
+    const name = (draft.filename ?? "").trim();
+    const bad = !!name && !LOCAL_FILE_NAME.test(name);
+    return (
+      <div className="flex flex-col gap-4">
+        {main && (
+          <Labeled label="File name" htmlFor="local-file">
+            <input
+              id="local-file"
+              value={draft.filename ?? ""}
+              onChange={(e) => onChange({ ...draft, filename: e.target.value })}
+              placeholder="myfeed.txt"
+              spellCheck={false}
+              aria-invalid={!name || bad}
+              className="bld-field is-mono w-full"
+            />
+            <span className={`bld-hint ${bad ? "text-danger" : ""}`}>
+              {bad ? "A bare name ending in .txt: letters, digits, . _ or -, no folders." : "Put the file in backend/data/feeds/. One line per item: lat, lon | text."}
+            </span>
+          </Labeled>
+        )}
+        {more && <PollSelect value={draft.pollS ?? 60} onChange={(pollS) => onChange({ ...draft, pollS })} label="How often to read it" />}
+      </div>
+    );
+  }
   if (!(main && (showUrl || list)) && !(more && (list || option.type === "json_api"))) return null;
   return (
     <div className="flex flex-col gap-4">
@@ -59,22 +99,7 @@ export function ConnectorConfigFields({
           )}
         </Labeled>
       )}
-      {more && list && (
-          <Labeled label="How often to fetch it" htmlFor="poll-s">
-            <select
-              id="poll-s"
-              value={draft.pollS ?? 300}
-              onChange={(e) => onChange({ ...draft, pollS: Number(e.target.value) })}
-              className="bld-field is-sm w-fit"
-            >
-              {POLL_CHOICES.map((c) => (
-                <option key={c.s} value={c.s}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-          </Labeled>
-      )}
+      {more && list && <PollSelect value={draft.pollS ?? 300} onChange={(pollS) => onChange({ ...draft, pollS })} label="How often to fetch it" />}
       {main && list && (
           <div className="flex flex-col gap-1.5">
             <span className="bld-label">What each item holds</span>

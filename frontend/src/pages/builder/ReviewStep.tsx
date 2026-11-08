@@ -21,6 +21,8 @@ import {
   connectorForCompile,
   gridCells,
   listMappingOf,
+  localFileLabel,
+  localFileOf,
   stepProblems,
   webhookForCompile,
 } from "../../components/sources/sourceUtils";
@@ -244,6 +246,11 @@ export function ReviewStep() {
                     </span>
                   )}
                   {x.kind === "push" && x.webhook && <WebhookSummary w={webhookForCompile(x.webhook, x.fields)} />}
+                  {x.connector?.type === "local_file" && (
+                    <span className="text-[13px] text-ink">
+                      {localFileLabel(x.connector)} · <span className="font-mono">{localFileOf(x.connector)}</span>
+                    </span>
+                  )}
                   {x.connector?.type === "json_list" && (
                     <WebhookSummary
                       title={`Fetches a JSON list from ${x.connector.url ?? ""}`}

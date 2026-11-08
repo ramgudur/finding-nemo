@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { forgetKey, listProjects, loadKey, recordProject, saveKey } from "../api/authorityKey";
 import { ApiError, archApi } from "../api/client";
-import type { AppSpec } from "../api/types";
+import type { AppSpec, SimPoint } from "../api/types";
 import { AgentTrace } from "../components/AgentTrace/AgentTrace";
 import { AppShell, Breadcrumb, Centered, ghostBtn } from "../components/app/AppShell";
 import { appDisplayName } from "../components/app/appName";
@@ -146,6 +146,7 @@ export default function AppConsole() {
   // Test your app: where simulated events land (the area's centre until the dev picks a point)
   const [testPoint, setTestPoint] = useState<TestPoint | null>(null);
   const [picking, setPicking] = useState(false);
+  const [simLine, setSimLine] = useState<{ from: SimPoint; to: SimPoint } | null>(null);
   useEffect(() => {
     setTestPoint(null);
     setPicking(false);
@@ -325,6 +326,7 @@ export default function AppConsole() {
                 : null
             }
             marker={authority && (picking || testPoint) ? point : null}
+            previewLine={authority ? simLine : null}
             vectors={authority ? vectors : []}
             learning={authority ? learning : null}
             weights={authority ? data.weights : null}
@@ -365,6 +367,7 @@ export default function AppConsole() {
               onPickingChange={setPicking}
               onRejected={reject}
               onOpenTab={openTab}
+              onLineChange={setSimLine}
             />
           )}
         </div>

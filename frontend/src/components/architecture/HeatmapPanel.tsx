@@ -25,6 +25,8 @@ export interface HeatmapPanelProps {
   /** Map click handler while a point is being picked (Test your app). */
   onPick?: ((lat: number, lon: number) => void) | null;
   marker?: { lat: number; lon: number; radius_m: number } | null;
+  /** Faint dashed path of a running full simulation. */
+  previewLine?: { from: { lat: number; lon: number }; to: { lat: number; lon: number } } | null;
   /** Shown under the "no activity yet" state: how to make something happen (authority view). */
   emptyHint?: ReactNode;
   /** Vector-field layers with their latest reading (authority view): drawn as a corner arrow. */
@@ -60,6 +62,7 @@ export default function HeatmapPanel({
   className,
   onPick,
   marker,
+  previewLine = null,
   emptyHint,
   vectors = [],
   learning = null,
@@ -173,6 +176,7 @@ export default function HeatmapPanel({
             height="clamp(320px, 56vh, 540px)"
             onPick={onPick}
             marker={marker}
+            previewLine={previewLine}
             tint={tint}
             flash={learning?.flash ?? null}
             distrusted={learning?.distrusted ?? []}

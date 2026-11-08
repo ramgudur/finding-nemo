@@ -25,6 +25,8 @@ interface Props {
   onPick?: ((lat: number, lon: number) => void) | null;
   /** A marked point with a radius (e.g. where test events will land). */
   marker?: { lat: number; lon: number; radius_m: number } | null;
+  /** A faint dashed line, e.g. the path a full simulation places its clusters along. */
+  previewLine?: { from: { lat: number; lon: number }; to: { lat: number; lon: number } } | null;
   /** "row|col" → fill colour for the score layer (colour by source); absent cells and null use the heat ramp. */
   tint?: ReadonlyMap<string, string> | null;
   /** Cells to outline once after an agent change (fades over ~3 s). */
@@ -155,6 +157,7 @@ export function Map({
   className,
   onPick,
   marker,
+  previewLine,
   tint,
   flash,
   distrusted,
@@ -172,6 +175,7 @@ export function Map({
   const hotspotGroup = useRef<L.LayerGroup | null>(null);
   const poiGroup = useRef<L.LayerGroup | null>(null);
   const markerGroup = useRef<L.LayerGroup | null>(null);
+  const lineGroup = useRef<L.LayerGroup | null>(null);
   const flashGroup = useRef<L.LayerGroup | null>(null);
   const distrustGroup = useRef<L.LayerGroup | null>(null);
   const serverNowRef = useRef(serverNow);
@@ -219,6 +223,7 @@ export function Map({
     distrustGroup.current = L.layerGroup().addTo(m);
     pane("hm-marker", 640);
     markerGroup.current = L.layerGroup().addTo(m);
+    lineGroup.current = L.layerGroup().addTo(m);
     m.on("click", (e: L.LeafletMouseEvent) => onPickRef.current?.(e.latlng.lat, e.latlng.lng));
     map.current = m;
     const cellMap = cells.current;
@@ -555,6 +560,19 @@ export function Map({
     L.circle(at, { pane: "hm-marker", radius: marker.radius_m, color: "#C46F52", weight: 1.5, dashArray: "2 4", fillColor: "#D9937E", fillOpacity: 0.12, interactive: false }).addTo(g);
     L.circleMarker(at, { pane: "hm-marker", radius: 4, color: "#F0EBDD", weight: 2, fillColor: "#C46F52", fillOpacity: 1, interactive: false }).addTo(g);
   }, [marker?.lat, marker?.lon, marker?.radius_m]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The simulated path: a faint dashed line with small ends, under the marker pane, never interactive.
+  useEffect(() => {
+    const g = lineGroup.current;
+    if (!g) return;
+    g.clearLayers();
+    if (!previewLine) return;
+    const a = toLatLng(previewLine.from.lat, previewLine.from.lon);
+    const b = toLatLng(previewLine.to.lat, previewLine.to.lon);
+    L.polyline([a, b], { pane: "hm-marker", color: "#2B5670", weight: 2, opacity: 0.45, dashArray: "6 7", interactive: false }).addTo(g);
+    for (const at of [a, b])
+      L.circleMarker(at, { pane: "hm-marker", radius: 3, color: "#2B5670", weight: 1, opacity: 0.5, fillColor: "#F0EBDD", fillOpacity: 0.9, interactive: false }).addTo(g);
+  }, [previewLine?.from.lat, previewLine?.from.lon, previewLine?.to.lat, previewLine?.to.lon]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Regression guard (#284): Leaflet owns the container's classes (leaflet-container gives it
   // overflow:hidden and lifts preflight's img max-width so tiles keep their size). If anything ever
