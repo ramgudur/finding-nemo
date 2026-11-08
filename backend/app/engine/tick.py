@@ -48,7 +48,6 @@ TICK_S = 2.0
 LOOKBACK_S = 900.0  # default read window for operators that don't declare a horizon
 ALL_HISTORY = -1e300  # 'since' for layers that need every event (finite, so any store can compare it)
 CACHE_TICKS = 300  # 10 min of 2 s ticks: the backtest replay window
-HOTSPOT_THRESHOLD = 0.5
 HOTSPOT_MAX = 20
 HOTSPOT_MATCH_CELLS = 3.0  # a hotspot within this many cells of last tick's keeps its id (scales with cell_m)
 
@@ -245,10 +244,12 @@ def find_hotspots(
     normalized: np.ndarray,
     weights: np.ndarray,
     *,
-    threshold: float = HOTSPOT_THRESHOLD,
+    threshold: float | None = None,
     max_hotspots: int = HOTSPOT_MAX,
 ) -> list[Hotspot]:
     grid = rt.grid
+    if threshold is None:
+        threshold = rt.spec.outputs.hotspot_threshold
     comps = _connected_components(score >= threshold)
     flat = score.ravel()
     # biggest peak first; ties by size
@@ -386,7 +387,7 @@ def tick_app(
     if last is None or now > float(last.t[0]):  # a paused clock doesn't duplicate ticks
         rt.cache.push(now, normalized, ov)
 
-    hotspots = find_hotspots(rt, score, normalized, w)
+    hotspots = find_hotspots(rt, score, normalized, w)  # threshold from spec.outputs.hotspot_threshold
     result = TickResult(
         app_id=rt.spec.app_id,
         t=now,

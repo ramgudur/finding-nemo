@@ -284,3 +284,20 @@ def test_hotspot_matching_scales_with_cell_size():
         res = tick_app(rt, src, now=t, clock=SimClock(t))
         ids.append(max(res.hotspots, key=lambda h: h.peak).id)
     assert ids == ["h1", "h1", "h1"]
+
+
+def test_hotspot_threshold_comes_from_the_spec():
+    def peak_hotspots(threshold):
+        s = spec()
+        s = s.model_copy(update={"outputs": s.outputs.model_copy(update={"hotspot_threshold": threshold})})
+        rt = AppRuntime(s)
+        src = InMemoryEventSource()
+        src.add("test-app", "crowd", cluster(rt.grid, 200, 300, 30, T0))
+        res = tick_app(rt, src, now=T0, clock=SimClock(T0))
+        return res, sum(h.n_cells for h in res.hotspots)
+
+    res, cells_default = peak_hotspots(0.5)
+    _, cells_low = peak_hotspots(0.1)
+    _, cells_high = peak_hotspots(1.0)
+    assert cells_low > cells_default > cells_high
+    assert int((res.score >= 0.5).sum()) == cells_default
