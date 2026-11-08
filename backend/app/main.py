@@ -15,6 +15,7 @@ from app.agents.critic import CriticScheduler
 from app.agents.llm import LlmRouter
 from app.agents.poi_labeler import PoiLabelerScheduler
 from app.agents.scout import ScoutRunner, article_extractor
+from app.api import agents as agents_api
 from app.api import apps as apps_api
 from app.api import catalog as catalog_api
 from app.api import debug as debug_api
@@ -160,6 +161,7 @@ def create_app(
     fastapi_app.include_router(catalog_api.router)  # public operator catalogue
     fastapi_app.include_router(simulate_api.router)  # dev-requested simulated events (authority only, #268)
     fastapi_app.include_router(sources_status_api.router)  # authority-only source status (#267)
+    fastapi_app.include_router(agents_api.router)  # authority-only "run an agent now"
     if get_settings().demo_mode:  # /v1/debug/* exists only in demo mode; it alone reads sim ground truth (rule 9)
         debug_api.install(fastapi_app, engine)
 

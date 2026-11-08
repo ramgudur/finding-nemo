@@ -161,6 +161,7 @@ def test_critic_sees_read_and_write_tools():
         "get_layer_stats",
         "get_verification_report",
         "get_suspicious_users",
+        "get_corroboration",
         "annotate",
         "run_backtest",
         "run_backtest_batch",

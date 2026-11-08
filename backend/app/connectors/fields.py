@@ -15,7 +15,7 @@ Data only (rule 10); nothing here names a domain (rule 3).
 
 from __future__ import annotations
 
-from app.connectors import json_api, json_list
+from app.connectors import json_api, json_list, local_file
 from app.core.models import AppSpec, CompileInput, ConnectorConfig, InputField, InputSpec
 
 # What `connectors/engine._rss_event` writes besides user_id/lat/lon/ts.
@@ -36,6 +36,8 @@ def implied_fields(conn: ConnectorConfig | None) -> list[InputField]:
         return []
     if conn.type == "rss":
         return [f.model_copy() for f in RSS_FIELDS]
+    if conn.type == "local_file":
+        return [f.model_copy() for f in local_file.FIELDS]
     if conn.type == "json_api":
         try:
             names = json_api.field_names(conn.preset, conn.config)

@@ -27,7 +27,7 @@ from app.api.compile_gate import CompileGate
 from app.api.deps import authority_key_header, get_compile_gate, get_compiler_cache, get_db, get_engine, get_llm
 from app.connectors import engine as connector_engine
 from app.connectors import fields as connector_fields
-from app.connectors import json_api, json_list, url_guard
+from app.connectors import json_api, json_list, local_file, url_guard
 from app.core import clock as clock_mod
 from app.core.access import is_authority
 from app.core.db import Db
@@ -145,6 +145,8 @@ def _custom_config_error(conn: Any) -> str | None:
                 raise ValueError("a json_list connector needs a url")
         elif conn.type == "json_api" and conn.preset is None:
             json_api.check_custom_config(conn.config)
+        elif conn.type == "local_file":
+            local_file.check_config(conn.config)
     except ValueError as e:
         return f"connector config refused: {e}"
     return None

@@ -81,6 +81,15 @@ TOOLS: dict[str, Tool] = {
             frozenset({"critic"}),
         ),
         Tool(
+            "get_corroboration",
+            "How far each crowd reporter (flexible point/track inputs) is corroborated by the app's reference "
+            "inputs (stiff or locked): the share of the user's recent events within 3 cells of any recent "
+            "reference event, with the user's trust. Returns nothing to act on when there are no reference events.",
+            rd.CorroborationArgs,
+            rd.get_corroboration,
+            frozenset({"critic"}),
+        ),
+        Tool(
             "annotate",
             "Leave a short note for the dev in the trace. Changes nothing.",
             rd.AnnotateArgs,

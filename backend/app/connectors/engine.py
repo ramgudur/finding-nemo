@@ -33,7 +33,7 @@ from pydantic import ValidationError
 
 from app.api.ingest import _check_fields
 from app.connectors import fields as conn_fields
-from app.connectors import json_api, json_list, rss, url_guard
+from app.connectors import json_api, json_list, local_file, rss, url_guard
 from app.core import clock as clock_mod
 from app.core.config import get_settings
 from app.core.db import Db
@@ -60,7 +60,8 @@ class PollResult:
     ok: bool
     events_written: int = 0
     error: str | None = None
-    dropped_outside: int = 0  # json_list items outside the app's area (dropped, not written)
+    dropped_outside: int = 0  # json_list / local_file items outside the app's area (dropped, not written)
+    note: str | None = None  # counts shown in a healthy poll's status ("ok (<note>)"); local_file only
 
 
 def _rss_event(item: dict[str, Any], source_id: str, lat: float, lon: float, confidence: float) -> dict[str, Any]:
@@ -261,6 +262,8 @@ def events_from_raw(
         return _json_api_events(raw, conn.preset, conn.config, now, area_points(conn, bbox))
     if conn.type == "json_list":
         return json_list.parse(raw, conn.config, now, bbox=bbox, declared=declared).events
+    if conn.type == "local_file":
+        return local_file.parse(raw, conn.config, now, bbox).events
     raise ValueError(f"connector type {conn.type!r} has no fetcher")
 
 
@@ -355,6 +358,8 @@ def check_connector_sync(
     """Fetch once and parse, without writing anything -- what `test_connector` needs to
     honestly say it saw at least one item. With `bbox`, a `json_list` counts only items inside the
     area, and says why when none are."""
+    if conn.type == "local_file":  # no fetch: the feeds-folder file, read as text
+        return local_file.check(conn.config, now, bbox).events
     raw = fetch_raw_sync(client, conn, bbox)
     if conn.type == "rss":
         # Count every parsed item, located or not: the live poller places items without a point via
@@ -382,6 +387,8 @@ async def poll_once(
 ) -> PollResult:
     assert inp.connector is not None  # noqa: S101 - callers only pass pull inputs with a connector
     outside = 0
+    if inp.connector.type == "local_file":
+        return _file_poll(db, app_id, inp, now, spec)
     try:
         if spec is None and inp.connector.type == "json_api":
             spec = db.get_app(app_id)  # its bbox: a preset with `area_grid` samples across it
@@ -400,6 +407,31 @@ async def poll_once(
     result.dropped_outside = outside
     if outside:
         log.info("connector %s/%s: %d item(s) outside the area dropped", app_id, inp.id, outside)
+    return result
+
+
+def _file_poll(db: Db, app_id: str, inp: InputSpec, now: float, spec: AppSpec | None) -> PollResult:
+    """One `local_file` poll: read the feeds-folder file, keep the lines inside the area, write
+    the lines not stored yet (stable doc_id). The counts go into the status note."""
+    assert inp.connector is not None  # noqa: S101 - only called for pull inputs with a connector
+    try:
+        spec = spec if spec is not None else db.get_app(app_id)
+        bbox = spec.grid.bbox if spec is not None else None
+        parsed = local_file.parse(local_file.read_text(inp.connector.config), inp.connector.config, now, bbox)
+    except Exception as e:  # noqa: BLE001 - a missing or unreadable file must not crash the poll loop
+        return PollResult(app_id, inp.id, ok=False, error=describe_error(e))
+    if not parsed.events:
+        return PollResult(
+            app_id,
+            inp.id,
+            ok=False,
+            error=f"no valid lines inside the area ({parsed.note()})",
+            dropped_outside=parsed.outside,
+        )
+    result = write_events(db, app_id, inp, parsed.events, now)
+    result.dropped_outside = parsed.outside
+    if result.ok:
+        result.note = parsed.note()
     return result
 
 
@@ -422,8 +454,12 @@ def poll_status(result: PollResult | None) -> str:
     if result is None:
         return "error: internal error"
     if result.ok:
-        return "ok"
+        return f"ok ({result.note})"[:MAX_STATUS_CHARS] if result.note else "ok"
     return f"error: {result.error or 'unknown'}"[:MAX_STATUS_CHARS]
+
+
+def _is_ok(status: str | None) -> bool:
+    return status is not None and (status == "ok" or status.startswith("ok ("))
 
 
 def record_poll(db: Db, spec: AppSpec, inp: InputSpec, result: PollResult | None, now: float) -> None:
@@ -437,14 +473,16 @@ def record_poll(db: Db, spec: AppSpec, inp: InputSpec, result: PollResult | None
     prev_status = previous[1] if previous is not None else None
     db.upsert_connector(spec.app_id, inp.id, inp.connector)  # the row tracks the live config
     db.record_connector_poll(spec.app_id, inp.id, polled_at=now, status=status)
-    failing = status != "ok"
-    recovered = not failing and prev_status is not None and prev_status != "ok"
+    failing = not _is_ok(status)
+    recovered = not failing and prev_status is not None and not _is_ok(prev_status)
     if not ((failing and status != prev_status) or recovered):
         return
     try:
         host = httpx.URL(connector_url(inp.connector) or "").host or "?"
     except Exception:  # noqa: BLE001 - an unknown preset or a malformed URL
         host = "?"
+    if inp.connector.type == "local_file":
+        host = f"file {inp.connector.config.get('filename', '?')}"
     written = result.events_written if result is not None else 0
     db.add_trace(
         TraceEntry(

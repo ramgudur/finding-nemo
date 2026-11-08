@@ -6,9 +6,12 @@ generic tool-calling loop (`agents.loop.run_agent`), then append a line to
 records that nothing happened).
 
 `CriticScheduler` decides *when* to call it: on a new hotspot, a newly active authority
-override, or a drop in the deciding verification method -- each throttled to at most once
-per `TRIGGER_COOLDOWN_S` per app, since a moving hotspot can change id every poll -- or a
-plain scheduled check at least every `MIN_INTERVAL_S`. It runs as its own asyncio task,
+override, new events on a reference input (tier stiff or locked: a connector poll or an
+ingest), a drop in the deciding verification method, or a dev's "run now" request -- each
+throttled to at most once per `TRIGGER_COOLDOWN_S` per app, since a moving hotspot can change
+id every poll -- or a plain scheduled check at least every `MIN_INTERVAL_S`. A reference trigger
+or a run-now request that lands inside the cooldown is kept pending and runs once it ends.
+It runs as its own asyncio task,
 reading only cached/latest tick state, so a Critic run (async, LLM-bound) never blocks the
 2 s tick (rule 2).
 """
@@ -26,7 +29,7 @@ from app.agents import budget
 from app.agents.llm import LlmRouter
 from app.agents.loop import run_agent
 from app.core.db import Db
-from app.core.models import TraceEntry
+from app.core.models import AppSpec, TraceEntry
 from app.engine.tick import TickEngine, TickResult
 from app.tools.context import ToolContext
 from app.tools.registry import call_tool
@@ -54,10 +57,20 @@ FLYWHEEL_PATH = Path("data/flywheel/critic.jsonl")
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "critic.md").read_text(encoding="utf-8")
 
 
+REFERENCE_TIERS = ("stiff", "locked")
+REFERENCE_FRESH_S = 600.0  # first sight of a reference input: trigger only if its newest event is this recent
+RUN_NOW_TRIGGER = "the dev asked for a run now"
+
+
 def _task_prompt(trigger: str) -> str:
+    hint = (
+        " Reference data arrived: call get_corroboration first and act on what it shows."
+        if trigger.startswith("new reference data")
+        else ""
+    )
     return (
         f"Trigger: {trigger}. Review the current map, weights, and verification; "
-        "act only if a change is justified by what you find."
+        f"act only if a change is justified by what you find.{hint}"
     )
 
 
@@ -169,7 +182,29 @@ class _AppTriggerState:
     seen_hotspots: set[str] = field(default_factory=set)
     had_override: bool = False
     last_verification_value: float | None = None
-    pending_trigger: str | None = None  # a trigger deferred because the rate budget was low
+    pending_trigger: str | None = None  # a trigger deferred (low rate budget, or inside the cooldown)
+    reference_seen: dict[str, tuple[int, float | None]] = field(default_factory=dict)  # input -> (count, max ts)
+
+
+def reference_trigger(db: Db, spec: AppSpec, state: _AppTriggerState, now: float) -> str | None:
+    """New events on a reference input (tier stiff or locked), from any path (connector poll or
+    ingest). One aggregate query per reference input. The first look at an input only counts if
+    its newest event is recent, so a restart doesn't re-trigger on old data."""
+    fresh: list[str] = []
+    for inp in spec.inputs:
+        if inp.tier not in REFERENCE_TIERS:
+            continue
+        total, _, last_ts = db.event_counts(spec.app_id, inp.id, since=now)
+        prev = state.reference_seen.get(inp.id)
+        state.reference_seen[inp.id] = (total, last_ts)
+        if total == 0 or last_ts is None:
+            continue
+        if prev is None:
+            if now - last_ts <= REFERENCE_FRESH_S:
+                fresh.append(inp.id)
+        elif total > prev[0] or (prev[1] is None or last_ts > prev[1]):
+            fresh.append(inp.id)
+    return f"new reference data on {', '.join(fresh)}" if fresh else None
 
 
 def hotspot_trigger(state: _AppTriggerState, result: TickResult) -> str | None:
@@ -213,6 +248,19 @@ class CriticScheduler:
         self._running: set[tuple[str, str]] = set()  # (app_id, agent) runs in flight
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
+        self._wake = asyncio.Event()  # set by request_run so a queued run starts without a full poll wait
+
+    def request_run(self, app_id: str, now: float) -> float | None:
+        """Queue a triggered run for `app_id` (the dev's "run now"), through the same path as the
+        other triggers: the same per-app cooldown and rate budget. Returns None when queued, else
+        the seconds left in the cooldown. Call it from the scheduler's event loop."""
+        st = self._state_for(app_id, now)
+        left = TRIGGER_COOLDOWN_S - (now - st.last_triggered_at)
+        if left > 0:
+            return left
+        st.pending_trigger = RUN_NOW_TRIGGER
+        self._wake.set()
+        return None
 
     def _state_for(self, app_id: str, now: float) -> _AppTriggerState:
         if app_id not in self._state:
@@ -223,7 +271,13 @@ class CriticScheduler:
         st = self._state_for(app_id, now)
         ctx = ToolContext(app_id=app_id, db=self.db, engine=self.engine, agent="critic", clock=self.engine.clock)
 
+        spec = self.engine.apps[app_id].spec if app_id in self.engine.apps else self.db.get_app(app_id)
+        reference = reference_trigger(self.db, spec, st, now) if spec is not None else None
         triggered = hotspot_trigger(st, result) or override_trigger(st, result)
+        if reference is not None:
+            triggered = reference
+            if now - st.last_triggered_at < TRIGGER_COOLDOWN_S:
+                st.pending_trigger = reference  # not lost: it runs as soon as the cooldown ends
         if triggered is None:
             # numpy-heavy (verification.evaluate); keep it off the event loop.
             triggered = await asyncio.to_thread(verification_drop_trigger, ctx, st)
@@ -271,11 +325,20 @@ class CriticScheduler:
     async def run(self) -> None:
         self._stop.clear()
         while not self._stop.is_set():
+            self._wake.clear()
             await self.check_once()
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.poll_s)
+                await asyncio.wait_for(self._wake_or_stop(), timeout=self.poll_s)
             except TimeoutError:
                 pass
+
+    async def _wake_or_stop(self) -> None:
+        waits = [asyncio.ensure_future(self._stop.wait()), asyncio.ensure_future(self._wake.wait())]
+        try:
+            await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for w in waits:
+                w.cancel()
 
     def start(self) -> asyncio.Task[None]:
         if self._task is None or self._task.done():
