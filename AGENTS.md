@@ -33,7 +33,7 @@ Humans over agents. The team lead is `@ramgudur`. Only the team lead reassigns w
 
 **One idea, kept in one place.** `CLAUDE.md` is the single source of truth for what we are building. Only the lead edits it, including its **Decisions log**. Agents propose changes on the board; they never edit `CLAUDE.md` or treat a board thread as overriding it. Before acting on an older board thread, check the Decisions log.
 
-The lead's machine routes issues, approves contracts and checks that work stays on the core idea. It does not take build tasks.
+The lead's machine routes issues, approves contracts and checks that work stays on the core idea. Since 2026-11-07 it also takes a few small build tasks (see Areas).
 
 ## 3. Workflow
 
@@ -70,10 +70,10 @@ Assigned by the lead on 2026-11-07. Paths are under `backend/app/` unless they s
 
 | Area | Owner | Folders | Notes |
 |---|---|---|---|
-| Lead: scope, routing, contracts | `@ramgudur` | `CLAUDE.md`, `AGENTS.md`; approves every change to `core/models.py`, `frontend/src/api/types.ts`, `specs/*.json` | Routes issues and checks PR scope. Takes no build tasks. |
-| Scoring model (physics-informed / physics-based ML) | `@kida-k:b` | `engine/operators/` (incl. `flow_source.py`), `engine/combine.py`, `engine/layer_cache.py`, `engine/verification.py`, `engine/backtest.py`, `engine/trust.py`, `reference/` | `reference/flowsource.py` is the lead's reference; seat b ports it into `engine/operators/flow_source.py`. |
+| Lead: scope, routing, contracts | `@ramgudur` | `CLAUDE.md`, `AGENTS.md`; approves every change to `core/models.py`, `frontend/src/api/types.ts`, `specs/*.json` | Routes issues and checks PR scope. Also owns `engine/tick.py` hotspot visibility and the Critic's `run_backtest_batch` tool (#52, #88). |
+| Scoring model (physics-informed / physics-based ML) | `@AllenZheng-05` (from Kida, 2026-11-07) | `engine/operators/` (incl. `flow_source.py`), `engine/combine.py`, `engine/layer_cache.py`, `engine/verification.py`, `engine/backtest.py`, `engine/trust.py`, `reference/` | Reassigned by the lead when Kida left. |
 | Token-heavy work: scaffold, frontend, sim | `@AllenZheng-05` | initial skeleton (first draft of `core/models.py` + `types.ts`, lead approves), `frontend/`, `sim/`, `specs/`, `backend/tests/fixtures/`, `api/debug.py`, `api/trace.py` (handed over by the lead) | Claude Max. Also takes large refactors, broad reviews and bulk test writing that other owners hand off. |
-| Engine runtime + tool layer | `@kida-k:a` | `engine/tick.py`, `engine/grid.py`, `engine/tiers.py`, `engine/routing.py`, `engine/candidates/`, `core/clock.py`, `tools/` (incl. `guards.py`, `message_guard.py`) | |
+| Engine runtime + tool layer | `@AllenZheng-05` (from Kida, 2026-11-07); `tools/` Compiler tools: `@Navmi-Srithaj` | `engine/tick.py`, `engine/grid.py`, `engine/tiers.py`, `engine/routing.py`, `engine/candidates/`, `core/clock.py`, `tools/` (incl. `guards.py`, `message_guard.py`) | Reassigned by the lead when Kida left. The lead's machine takes #52 and #88 here. |
 | API, data, connectors, Nemotron agents | `@Navmi-Srithaj` | `api/` (incl. `instructions.py`; except `debug.py`, `trace.py`), `main.py` (after scaffold), `core/db.py`, `core/config.py`, `core/access.py`, `connectors/`, `agents/` | |
 
 ## 5. Escalation: when to stop and ask
