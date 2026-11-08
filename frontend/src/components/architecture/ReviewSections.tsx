@@ -58,6 +58,8 @@ function reviewWarnings(spec: AppSpec): string[] {
 
 // ---------- draft state ----------
 
+const SAVED_MS = 3000;
+
 export interface SpecDraft {
   draft: AppSpec;
   dirty: boolean;
@@ -65,6 +67,8 @@ export interface SpecDraft {
   warnings: string[];
   saveWarnings: string[] | null;
   saveErrors: string[];
+  /** True for a few seconds after a save the server accepted with no warnings. */
+  justSaved: boolean;
   change: (next: AppSpec) => void;
   discard: () => void;
   save: () => Promise<AppSpec | null>;
@@ -76,6 +80,13 @@ export function useSpecDraft(spec: AppSpec, appId: string, onSaved: (spec: AppSp
   const [saving, setSaving] = useState(false);
   const [saveWarnings, setSaveWarnings] = useState<string[] | null>(null);
   const [saveErrors, setSaveErrors] = useState<string[]>([]);
+  const [justSaved, setJustSaved] = useState(false);
+
+  useEffect(() => {
+    if (!justSaved) return;
+    const id = setTimeout(() => setJustSaved(false), SAVED_MS);
+    return () => clearTimeout(id);
+  }, [justSaved]);
 
   // a new spec from the parent (e.g. the server copy arriving) replaces the draft
   useEffect(() => {
@@ -92,9 +103,11 @@ export function useSpecDraft(spec: AppSpec, appId: string, onSaved: (spec: AppSp
     warnings,
     saveWarnings,
     saveErrors,
+    justSaved,
     change: (next) => {
       setDraft(next);
       setSaveErrors([]);
+      setJustSaved(false);
     },
     discard: () => {
       setDraft(JSON.parse(specJson) as AppSpec);
@@ -103,10 +116,12 @@ export function useSpecDraft(spec: AppSpec, appId: string, onSaved: (spec: AppSp
     save: async () => {
       setSaving(true);
       setSaveErrors([]);
+      setJustSaved(false);
       try {
         const r = await api.updateSpec(appId, draft);
         setDraft(r.spec);
         setSaveWarnings(r.warnings);
+        setJustSaved(r.warnings.length === 0);
         onSaved(r.spec);
         return r.spec;
       } catch (e) {

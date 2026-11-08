@@ -21,6 +21,16 @@ function LogoWave() {
 
 export function Header() {
   const [health, setHealth] = useState<"ok" | "down" | "checking">("checking");
+  // Transparent over the top of a page (and over the home scene); once content scrolls under it the
+  // bar gets a solid misty backing so it never sits on top of text.
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 4);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -34,7 +44,13 @@ export function Header() {
   }, []);
 
   return (
-    <header className="pointer-events-none fixed inset-x-0 top-0 z-30 flex items-center justify-between px-5 py-5 sm:px-8 sm:py-6">
+    <header
+      className={`fixed inset-x-0 top-0 z-30 flex items-center justify-between px-5 py-5 transition-[background-color,box-shadow,padding] duration-200 ease-out sm:px-8 ${
+        scrolled
+          ? "bg-mist/90 py-3 shadow-[0_6px_18px_-10px_rgba(53,89,107,0.35)] backdrop-blur-md sm:py-3.5"
+          : "pointer-events-none sm:py-6"
+      }`}
+    >
       <Link
         to="/"
         className="pointer-events-auto relative inline-flex flex-col font-display text-[26px] font-medium leading-none text-slate transition-opacity hover:opacity-80 sm:text-[28px]"

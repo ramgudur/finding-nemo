@@ -5,15 +5,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../api/client";
 import { openStream, type StreamState } from "../api/stream";
-import type { HotspotsResponse, MapResponse, StreamFrame } from "../api/types";
+import type { HotspotsResponse, MapResponse, POI, StreamFrame } from "../api/types";
 
 const POLL_MS = 2000; // engine tick; used only while the stream is down
+const POI_POLL_MS = 10_000; // POIs change on the labeler's cadence (~60 s), not every tick
 
 const isAuthError = (e: unknown) => e instanceof ApiError && (e.status === 401 || e.status === 403);
 
 export interface LiveAppData {
   map: MapResponse | null;
   hotspots: HotspotsResponse | null;
+  /** POIs as the server filtered them for this key (public items only without one), or null before the first poll. */
+  pois: POI[] | null;
   /** True while the WebSocket is open (otherwise REST polling is running). */
   connected: boolean;
   streamState: StreamState;
@@ -35,6 +38,7 @@ export function useLiveAppData(
   const [streamState, setStreamState] = useState<StreamState>("connecting");
   const [map, setMap] = useState<MapResponse | null>(null);
   const [hotspots, setHotspots] = useState<HotspotsResponse | null>(null);
+  const [pois, setPois] = useState<POI[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
   const onAuthError = useRef(opts?.onAuthError);
@@ -45,6 +49,7 @@ export function useLiveAppData(
     setKeyRejected(false);
     setMap(null);
     setHotspots(null);
+    setPois(null);
     setError(null);
   }, [appId, authorityKey]);
 
@@ -55,6 +60,7 @@ export function useLiveAppData(
     // drop authority data at once; the public view refills on the next frame/poll
     setMap(null);
     setHotspots(null);
+    setPois(null);
     onAuthError.current?.();
   }, []);
 
@@ -105,9 +111,32 @@ export function useLiveAppData(
     return () => clearInterval(id);
   }, [appId, streamState, refresh]);
 
+  // POIs: their own slower poll (not on the stream). A failed poll keeps the last list; a rejected
+  // key drops it like the map. The server filters per item, so nothing is filtered here.
+  useEffect(() => {
+    if (!appId) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const p = await api.pois(appId, activeKey || undefined);
+        if (!cancelled && alive.current) setPois(p);
+      } catch (e) {
+        if (cancelled || !alive.current) return;
+        if (activeKey && isAuthError(e)) reject();
+      }
+    };
+    void load();
+    const id = setInterval(() => void load(), POI_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [appId, activeKey, reject]);
+
   return {
     map,
     hotspots,
+    pois,
     connected: streamState === "open",
     streamState,
     lastUpdate: map?.t ?? null,

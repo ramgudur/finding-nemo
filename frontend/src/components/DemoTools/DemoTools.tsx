@@ -1,7 +1,7 @@
 // DEMO_MODE tools for the authority console: SimControls + ErrorChart. Renders nothing when the server
 // isn't in demo mode (/v1/debug/* is 404), so production consoles never show ground-truth data.
 import { useEffect, useState } from "react";
-import { api } from "../../api/client";
+import { ApiError, api } from "../../api/client";
 import type { ClockState, ErrorSeries } from "../../api/types";
 import { ErrorChart } from "../ErrorChart/ErrorChart";
 import { SimControls } from "../SimControls/SimControls";
@@ -24,9 +24,14 @@ export function DemoTools({ appId, authorityKey }: { appId: string; authorityKey
           setDemo(true);
           setClock(c);
         })
-        .catch(() => alive && setDemo(false));
-    void poll();
+        .catch((e: unknown) => {
+          if (!alive) return;
+          setDemo(false);
+          // 404 means DEMO_MODE is off; it won't turn on while the backend runs, so stop asking.
+          if (e instanceof ApiError && e.status === 404) clearInterval(id);
+        });
     const id = setInterval(poll, CLOCK_POLL_MS);
+    void poll();
     return () => {
       alive = false;
       clearInterval(id);
