@@ -44,7 +44,7 @@ void main() {
   float lit = clamp(dot(n, normalize(vec3(L2, 0.7))), 0.0, 1.0);
 
   vec3 stone = vec3(0.624, 0.686, 0.651);      // #9FAFA6
-  vec3 stoneDark = vec3(0.498, 0.569, 0.541);  // #7F918A
+  vec3 stoneDark = vec3(0.44, 0.52, 0.49);     // a little below #7F918A for contrast
   vec3 moss = vec3(0.55, 0.63, 0.46);
   vec3 mossLight = vec3(0.64, 0.71, 0.52);
 
@@ -53,9 +53,9 @@ void main() {
   // Moss patches, favoured on the lit upper side.
   float mossN = pFbm(uv * 2.6 + s * 2.3 + 4.0) + 0.18 * dot(uv, L2);
   float mossMask = smoothstep(0.50, 0.66, mossN);
-  col = mix(col, mix(moss, mossLight, pNoise(uv * 6.0 + s)), mossMask * 0.7);
+  col = mix(col, mix(moss, mossLight, pNoise(uv * 6.0 + s)), mossMask * 0.8);
 
-  col *= 0.80 + 0.34 * lit;
+  col *= 0.64 + 0.56 * lit;
   // Pigment pooling at the edge (watercolor), soft, never an outline.
   col *= 1.0 - 0.10 * smoothstep(0.62, 0.95, d);
   col *= pGrain(uv * 2.0 + s);

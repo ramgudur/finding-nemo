@@ -56,7 +56,7 @@ void main() {
   float d = length(uv) / rr;
   float shape = 1.0 - smoothstep(0.9, 1.0, d);
   // Pie-wedge notch cut to the centre (local +x), soft-edged.
-  float notch = smoothstep(vNotch * 0.55, vNotch, abs(a)) ;
+  float notch = smoothstep(vNotch * 0.6, vNotch, abs(a));
   shape *= mix(1.0, notch, smoothstep(0.02, 0.12, length(uv)));
 #endif
 

@@ -27,7 +27,7 @@ function makeBlades(aspect: number, mobile: boolean): Blade[] {
       speed: lerp(0.35, 0.85, r()),
       amp: lerp(0.05, 0.12, r()),
       tone: r(),
-      alpha: lerp(0.72, 0.95, r()),
+      alpha: lerp(0.85, 0.95, r()),
     });
   };
 

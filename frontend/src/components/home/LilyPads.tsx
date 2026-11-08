@@ -8,11 +8,12 @@ import { PAD_FRAG, PAD_VERT } from "./shaders/propsPad";
 
 // [x%, y%, diameter (% of viewport width), rotation (rad)]
 const PADS: [number, number, number, number][] = [
-  // top-left cluster (x 0-22%, y 5-25%), the first partly off-screen
-  [1, 9, 9, 2.4],
-  [11, 4, 7, -0.9],
-  [18, 14, 7.5, 0.7],
-  [7, 24, 8, -2.6],
+  // top-left cluster (x 0-22%, y 5-25%), kept clear of the header logo (x 0-14%, y 0-9%):
+  // pads sit below / right of it, partly off the top and left edges
+  [2, 22, 8, 2.4],
+  [16, 13, 7, -0.9],
+  [21, 4, 6.5, 0.7],
+  [11, 24, 6, -2.6],
   // beside the log
   [83, 27, 8, 1.9],
   // bottom-left
@@ -72,7 +73,8 @@ export default function LilyPads() {
       const [wx, wy] = pctToWorld(x, y, aspect);
       // The pad outline sits at ~0.9 of the quad's half-size.
       xf.set([wx, wy, rot, widthPctToWorld(dia, sizeAspect) / 2 / 0.9], i * 4);
-      meta.set([(i * 0.381 + 0.2) % 1, i * 1.7, 0.32 + 0.06 * ((i * 7) % 3), 0.35], i * 4);
+      // Notch half-angle ~8-10 deg: a thin wedge, ~16-20 deg in all.
+      meta.set([(i * 0.381 + 0.2) % 1, i * 1.7, 0.14 + 0.02 * ((i * 7) % 3), 0.35], i * 4);
     });
     return makeInstanced(baseGeo, PADS.length, { aXform: [4, xf], aMeta: [4, meta] });
   }, [aspect]);
