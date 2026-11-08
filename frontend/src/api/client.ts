@@ -5,6 +5,7 @@ import type {
   ClockControl,
   ClockState,
   CompileRequest,
+  CompileStatus,
   ErrorSeries,
   HotspotsResponse,
   Instruction,
@@ -22,6 +23,10 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The response's `detail` when it isn't a plain string (e.g. compile's 422 CompileFailure). */
+    readonly detail?: unknown,
+    /** Seconds from a Retry-After header, when the server sent one. */
+    readonly retryAfter?: number,
   ) {
     super(message);
   }
@@ -34,13 +39,23 @@ async function request<T>(method: "GET" | "POST", path: string, authorityKey?: s
   const r = await fetch(`/v1${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   if (!r.ok) {
     let detail = "";
+    let raw: unknown;
     try {
       const body = (await r.json()) as { detail?: unknown };
+      raw = body.detail;
       if (typeof body.detail === "string") detail = body.detail;
+      else if (body.detail && typeof (body.detail as { message?: unknown }).message === "string")
+        detail = (body.detail as { message: string }).message;
     } catch {
       // not JSON
     }
-    throw new ApiError(r.status, detail || `${r.status} ${r.statusText} for ${path}`);
+    const retry = Number(r.headers.get("Retry-After"));
+    throw new ApiError(
+      r.status,
+      detail || `${r.status} ${r.statusText} for ${path}`,
+      raw,
+      Number.isFinite(retry) && retry > 0 ? retry : undefined,
+    );
   }
   return (await r.json()) as T;
 }
@@ -53,6 +68,7 @@ export const api = {
   hotspots: (appId: string, key?: string) => get<HotspotsResponse>(`${app(appId)}/hotspots`, key),
   // builder (the console has no login; the authority key is issued at activation)
   compile: (appId: string, body: CompileRequest) => request<AppSpec>("POST", `${app(appId)}/compile`, undefined, body),
+  compileStatus: (appId: string) => get<CompileStatus>(`${app(appId)}/compile/status`),
   activate: (appId: string) => request<ActivateResponse>("POST", `${app(appId)}/activate`),
   suggestSource: (appId: string, body: SuggestSourceRequest) =>
     request<SourceSuggestion>("POST", `${app(appId)}/sources/suggest`, undefined, body),

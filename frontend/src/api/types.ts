@@ -437,6 +437,24 @@ export interface CompileRequest {
   destination_points?: DestinationPoint[];
 }
 
+/** GET /v1/apps/{app}/compile/status: public-safe progress (apps not active only; 404 otherwise).
+ * Counts and a step name only, never trace content (rule 8). */
+export interface CompileStatus {
+  app_id: string;
+  running: boolean;
+  steps: number;
+  /** A registered compiler tool name, or a fixed step kind ("output", "error", ...). */
+  last_action?: string | null;
+  started_at?: IsoDateTime | null;
+}
+
+/** `detail` of compile's 422 when the Compiler never finalized a spec. */
+export interface CompileFailure {
+  message: string;
+  errors: string[];
+  warnings: string[];
+}
+
 /** POST /v1/apps/{app}/activate. The keys are shown once. */
 export interface ActivateResponse {
   app_id: string;

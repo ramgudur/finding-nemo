@@ -205,6 +205,27 @@ class CompileRequest(Model):
     )
 
 
+class CompileStatus(Model):
+    """`GET /v1/apps/{app}/compile/status`: public-safe progress of a compile (apps not active only).
+    Counts and the name of the last step only; never trace content or tool arguments (rule 8)."""
+
+    app_id: str
+    running: bool
+    steps: int = 0
+    last_action: str | None = Field(
+        default=None, description="A registered compiler tool name or a fixed step kind (output, error, ...)."
+    )
+    started_at: UtcDatetime | None = None
+
+
+class CompileFailure(Model):
+    """`detail` of the 422 from `POST /v1/apps/{app}/compile` when the Compiler never finalized."""
+
+    message: str
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 SourceOptionType = Literal["post_api", "webhook", "rss", "json_api"]  # no HTML scraper (rule 10)
 
 

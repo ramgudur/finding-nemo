@@ -9,7 +9,9 @@ import type {
   ActivateResponse,
   AppSpec,
   BBox,
+  CompileFailure,
   CompileInput,
+  CompileStatus,
   ConnectorConfig,
   DestinationPoint,
   FieldType,
@@ -26,6 +28,27 @@ const SHAPES: InputShape[] = ["point", "track", "fixed_point", "field", "documen
 const FIELD_TYPES: FieldType[] = ["number", "integer", "string", "boolean"];
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const M_PER_DEG = (6_371_008.8 * Math.PI) / 180; // same Earth radius as engine/grid.py and GridSpec
+
+const STEP_LABELS: Record<string, string> = {
+  list_operators: "reading the operators",
+  validate_spec: "checking a proposal",
+  create_input: "adding an input",
+  create_connector: "setting up a source",
+  test_connector: "testing a source",
+  request_scout: "asking the Scout for a source",
+  finalize_app: "finalizing",
+  output: "finished",
+  error: "model error",
+  skipped: "skipped",
+  "gave up": "out of steps",
+};
+const stepLabel = (a: string) => STEP_LABELS[a] ?? a.replace(/_/g, " ");
+
+const isCompileFailure = (d: unknown): d is CompileFailure =>
+  typeof d === "object" &&
+  d !== null &&
+  Array.isArray((d as CompileFailure).errors) &&
+  Array.isArray((d as CompileFailure).warnings);
 
 /** Grid size in cells for a bbox at cell_m, computed like GridSpec.shape() so client and server agree. */
 function gridCells(b: BBox, cellM: number): [number, number] {
@@ -402,6 +425,9 @@ export function Builder() {
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState("");
+  const [compiling, setCompiling] = useState(false);
+  const [progress, setProgress] = useState<CompileStatus | null>(null);
+  const [failure, setFailure] = useState<CompileFailure | null>(null);
   const [spec, setSpec] = useState<AppSpec | null>(null);
   const [keys, setKeys] = useState<ActivateResponse | null>(null);
 
@@ -411,6 +437,22 @@ export function Builder() {
     const id = setInterval(() => setElapsed(Math.round((Date.now() - t0) / 1000)), 1000);
     return () => clearInterval(id);
   }, [busy]);
+
+  // While compiling, poll the public-safe progress route (step count and last step name only).
+  useEffect(() => {
+    if (!compiling) return;
+    let live = true;
+    const poll = () =>
+      api
+        .compileStatus(appId)
+        .then((s) => live && setProgress(s))
+        .catch(() => undefined); // a failed poll only hides the step count; the elapsed time still shows
+    const id = setInterval(poll, 1500);
+    return () => {
+      live = false;
+      clearInterval(id);
+    };
+  }, [compiling, appId]);
 
   const dims = bbox && cellM > 0 ? gridCells(bbox, cellM) : null;
   const problems = [
@@ -475,7 +517,10 @@ export function Builder() {
   const compile = async () => {
     if (!bbox) return;
     setBusy(true);
+    setCompiling(true);
+    setProgress(null);
     setError("");
+    setFailure(null);
     setSpec(null);
     try {
       const body = {
@@ -497,15 +542,19 @@ export function Builder() {
     } catch (e) {
       const why =
         e instanceof ApiError && e.status === 503
-          ? `The model budget is used up right now (${e.message}). Try again in a minute.`
+          ? `The model request budget is used up for the moment, so the Compiler skipped this run. Try again in ${
+              e.retryAfter ? `about ${e.retryAfter} s` : "a minute"
+            }.`
           : e instanceof ApiError && e.status === 409
             ? "This app is already active."
             : e instanceof ApiError && e.status === 422
-              ? `The Compiler couldn't produce a valid spec: ${e.message}`
+              ? `The Compiler couldn't produce a valid spec. ${e.message}`
               : String(e);
       setError(why);
+      if (e instanceof ApiError && e.status === 422 && isCompileFailure(e.detail)) setFailure(e.detail);
     } finally {
       setBusy(false);
+      setCompiling(false);
     }
   };
 
@@ -665,9 +714,42 @@ export function Builder() {
         <button type="button" disabled={busy || problems.length > 0} onClick={() => void compile()}>
           {spec ? "Compile again" : "Compile"}
         </button>
-        {busy && !spec && <span style={muted}>Compiling… {elapsed}s (a run can take tens of seconds)</span>}
+        {compiling && (
+          <span style={muted}>
+            Compiling… {elapsed}s
+            {progress && progress.steps > 0
+              ? ` · step ${progress.steps}${progress.last_action ? ` (${stepLabel(progress.last_action)})` : ""}`
+              : ""}{" "}
+            (a run can take tens of seconds)
+          </span>
+        )}
       </div>
       {error && <p style={{ color: "#b00020", margin: 0 }}>{error}</p>}
+      {failure && (failure.errors.length > 0 || failure.warnings.length > 0) && (
+        <div style={{ display: "grid", gap: 4 }}>
+          {failure.errors.length > 0 && (
+            <>
+              <span>Problems in the last proposal:</span>
+              <ul style={{ margin: 0 }}>
+                {failure.errors.map((x, j) => (
+                  <li key={j}>{x}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {failure.warnings.length > 0 && (
+            <>
+              <span style={muted}>Warnings:</span>
+              <ul style={{ ...muted, margin: 0 }}>
+                {failure.warnings.map((x, j) => (
+                  <li key={j}>{x}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          <span style={muted}>Adjust the intent or the inputs' meanings and compile again.</span>
+        </div>
+      )}
       {spec && (
         <section style={{ display: "grid", gap: 10 }}>
           <h2 style={{ margin: 0, fontSize: 18 }}>Review the proposed spec</h2>
