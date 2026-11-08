@@ -1,22 +1,34 @@
+import { type ReactNode, Suspense } from "react";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { MainLayout } from "./components/layout/MainLayout";
-import AppConsole from "./pages/AppConsole";
-import AppKeys from "./pages/AppKeys";
-import AppReview from "./pages/AppReview";
-import { EndUser } from "./pages/EndUser";
 import { Home } from "./pages/Home";
-import { PastProjects } from "./pages/PastProjects";
-import { AboutStep } from "./pages/builder/AboutStep";
-import { AreaStep } from "./pages/builder/AreaStep";
-import { BuilderLayout } from "./pages/builder/BuilderLayout";
-import { NewEntry } from "./pages/builder/NewEntry";
-import { ReviewStep } from "./pages/builder/ReviewStep";
-import { SourcesStep } from "./pages/builder/SourcesStep";
+import {
+  AboutStep,
+  AppConsole,
+  AppKeys,
+  AppReview,
+  AreaStep,
+  BuilderLayout,
+  EndUser,
+  NewEntry,
+  PastProjects,
+  ReviewStep,
+  SourcesStep,
+} from "./routes";
+
+/** Suspense per route element, so the header and builder chrome stay put while a page chunk loads. */
+function Page({ children }: { children: ReactNode }) {
+  return <Suspense fallback={null}>{children}</Suspense>;
+}
 
 function EndUserRoute() {
   // EndUser.tsx predates the router and takes its appId as a prop.
   const { appId } = useParams<{ appId: string }>();
-  return <EndUser appId={appId ?? ""} />;
+  return (
+    <Page>
+      <EndUser appId={appId ?? ""} />
+    </Page>
+  );
 }
 
 /** Old /architecture/:appId links (bookmarks, Past Projects records) now live at /apps/:appId. */
@@ -35,19 +47,19 @@ export function App() {
         <Route path="/" element={<Home />} />
 
         {/* The stepped builder: 1 About · 2 Area · 3 Sources · 4 Review & compile. */}
-        <Route path="/new" element={<BuilderLayout />}>
-          <Route index element={<NewEntry />} />
-          <Route path="about" element={<AboutStep />} />
-          <Route path="area" element={<AreaStep />} />
-          <Route path="sources" element={<SourcesStep />} />
-          <Route path="review" element={<ReviewStep />} />
+        <Route path="/new" element={<Page><BuilderLayout /></Page>}>
+          <Route index element={<Page><NewEntry /></Page>} />
+          <Route path="about" element={<Page><AboutStep /></Page>} />
+          <Route path="area" element={<Page><AreaStep /></Page>} />
+          <Route path="sources" element={<Page><SourcesStep /></Page>} />
+          <Route path="review" element={<Page><ReviewStep /></Page>} />
           <Route path="*" element={<Navigate to="/new" replace />} />
         </Route>
 
-        <Route path="/projects" element={<PastProjects />} />
-        <Route path="/apps/:appId/review" element={<AppReview />} />
-        <Route path="/apps/:appId/keys" element={<AppKeys />} />
-        <Route path="/apps/:appId" element={<AppConsole />} />
+        <Route path="/projects" element={<Page><PastProjects /></Page>} />
+        <Route path="/apps/:appId/review" element={<Page><AppReview /></Page>} />
+        <Route path="/apps/:appId/keys" element={<Page><AppKeys /></Page>} />
+        <Route path="/apps/:appId" element={<Page><AppConsole /></Page>} />
 
         {/* Old routes. */}
         <Route path="/sources" element={<Navigate to="/new" replace />} />
