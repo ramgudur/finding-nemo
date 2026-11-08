@@ -1,6 +1,6 @@
 // Step 3: the data the app listens to. The big input only ever describes ONE source; the real
-// /sources/suggest answers with ways to connect it (sent by the dev's app, or fetched by the platform).
-// Picking one adds it to the list below, where its id and extra fields can be edited.
+// /sources/suggest answers with one recommended way to connect it (others one click away). Adding it puts a
+// compact row in the list below, whose Options hold its id, extra fields and mappings.
 import { AnimatePresence } from "motion/react";
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -83,7 +83,7 @@ export function SourcesStep() {
       <StepIntro
         step={3}
         title="Data sources"
-        lead="Add the data your app listens to, one source at a time. Say in plain words what it is and what one item means; we suggest ways to connect it."
+        lead="Describe one thing your app listens to, in plain words."
       />
 
       <BigInput
@@ -93,9 +93,9 @@ export function SourcesStep() {
         value={text}
         onChange={setText}
         onSubmit={() => void suggest()}
-        submitHint="to find ways to connect it"
+        submitHint="to connect it"
         busy={suggesting}
-        busyText="looking for ways to connect it…"
+        busyText="finding the best way to connect it…"
         autoFocus={count === 0}
       />
 
@@ -114,45 +114,40 @@ export function SourcesStep() {
 
       {failure && <FailurePanel failure={failure} onClose={() => setFailure(null)} />}
 
-      <section aria-labelledby="added-h" className="flex flex-col gap-3">
-        <h2 id="added-h" className="bld-h2">
-          Your sources {count > 0 && <span className="font-normal text-ink">({count})</span>}
-        </h2>
-        {count === 0 ? (
-          <p className="bld-card-quiet px-4 py-4 text-sm text-ink">
-            Nothing yet. Describe a source above, then pick how it connects. Each source becomes one or more layers on
-            your map.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-3">
+      {count > 0 && (
+        <section aria-labelledby="added-h" className="flex flex-col gap-2.5">
+          <h2 id="added-h" className="bld-h2">
+            Your sources <span className="font-normal text-ink">({count})</span>
+          </h2>
+          <ul className="flex flex-col gap-2">
             <AnimatePresence initial={false} mode="popLayout">
               {draft.sources.map((src, i) => {
                 const key = keys[i] ?? String(i);
                 return (
-                <SourceRow
-                  key={key}
-                  source={src}
-                  duplicate={ids.indexOf(src.id) !== i}
-                  onRename={(id) => s.updateSource(i, { id })}
-                  onFields={(fields) => s.updateSource(i, { fields })}
-                  onWebhook={(webhook) => s.updateSource(i, { webhook })}
-                  onConnector={(connector) => s.updateSource(i, { connector })}
-                  onFieldsProblem={(p) =>
-                    setFieldProblems((cur) => {
-                      const next = { ...cur };
-                      if (p) next[key] = p;
-                      else delete next[key];
-                      return next;
-                    })
-                  }
-                  onRemove={() => remove(i)}
-                />
+                  <SourceRow
+                    key={key}
+                    source={src}
+                    duplicate={ids.indexOf(src.id) !== i}
+                    onRename={(id) => s.updateSource(i, { id })}
+                    onFields={(fields) => s.updateSource(i, { fields })}
+                    onWebhook={(webhook) => s.updateSource(i, { webhook })}
+                    onConnector={(connector) => s.updateSource(i, { connector })}
+                    onFieldsProblem={(p) =>
+                      setFieldProblems((cur) => {
+                        const next = { ...cur };
+                        if (p) next[key] = p;
+                        else delete next[key];
+                        return next;
+                      })
+                    }
+                    onRemove={() => remove(i)}
+                  />
                 );
               })}
             </AnimatePresence>
           </ul>
-        )}
-      </section>
+        </section>
+      )}
 
       {toast}
 

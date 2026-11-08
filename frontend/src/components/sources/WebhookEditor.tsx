@@ -157,10 +157,9 @@ export function WebhookEditor({ sourceId, mapping, fields, onChange, sample: sam
   return (
     <div className="bld-card-quiet flex flex-col gap-3 px-4 py-3.5">
       <p className="bld-hint">
-        {isList ? "Tell us where each item in the feed keeps its values." : "Tell us where each item in their JSON keeps its values."}{" "}
-        Use a dotted path; numbers pick from a list, so{" "}
-        <code className="rounded bg-white/70 px-1 text-[11px] text-slate">geometry.coordinates.1</code> is the second
-        coordinate (GeoJSON puts longitude first).
+        Where each item keeps its values, as a dotted path such as{" "}
+        <code className="rounded bg-white/70 px-1 text-[11px] text-slate">geometry.coordinates.1</code>{" "}
+        (GeoJSON lists longitude first).
       </p>
 
       <div className="flex flex-col gap-2.5">
