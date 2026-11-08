@@ -180,14 +180,13 @@ def test_police_override_shows_up_and_clears(run):
 
 
 def test_spoof_checks_separate_the_sim_spoofers(run):
-    """The spec's plausibility for 'panic' (people on foot) flags exactly the scripted spoofers."""
-    from app.engine.trust import SpoofParams, suspicious_users
+    """Each input's spec plausibility (panic: people on foot) flags exactly the scripted spoofers."""
+    from app.engine.trust import suspicious_users_by_input
 
     p = run["platform"]
-    pl = p.runtime.spec.inputs[0].plausibility
-    assert pl is not None and pl.max_speed_mps == 12
-    params = SpoofParams(max_speed_mps=pl.max_speed_mps)  # flag toggles map in once #45 lands
-    events = p.engine.source.events(p.app_id, "panic", T0 - 1, T0 + ca.DURATION)
-    flagged = {s.user_id for s in suspicious_users(events, params) if s.flags}
-    spoofers = set(run["scenario"].truth["spoof_users"])
-    assert flagged == spoofers
+    spec = p.runtime.spec
+    track_inputs = [i for i in spec.inputs if i.kind == "push" and i.shape in ("point", "track")]
+    events = {i.id: p.engine.source.events(p.app_id, i.id, T0 - 1, T0 + ca.DURATION) for i in track_inputs}
+    suspects = suspicious_users_by_input(events, {i.id: i.plausibility for i in track_inputs})
+    flagged = {s.user_id for s in suspects if s.flags}
+    assert flagged == set(run["scenario"].truth["spoof_users"])
