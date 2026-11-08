@@ -148,3 +148,44 @@ def test_flow_source_finds_the_threat_from_sim_events(sc):
     truth = FRAME.to_xy(*FRAME.to_latlon(*ca.threat_at(10.0)))
     err = math.dist(FRAME.to_xy(point["lat"], point["lon"]), truth)
     assert err < 30, err
+
+
+def test_input_map_and_spec_adaptation(sc):
+    from sim.common import adapt_posts, parse_input_map
+
+    m = parse_input_map("panic=sos, room_button=rooms")
+    posts, problems = adapt_posts(sc.posts, m)
+    assert not problems
+    assert {p.input_id for p in posts} == {"sos", "rooms", "police_marker"}
+
+    # a Builder-made app: panic declares no fields; police_marker is missing; room_button wants an extra required field
+    spec = {
+        "inputs": [
+            {"id": "sos", "kind": "push", "fields": []},
+            {
+                "id": "rooms",
+                "kind": "push",
+                "fields": [{"name": "room", "required": True}, {"name": "floor", "required": True}],
+            },
+        ]
+    }
+    _, problems = adapt_posts(sc.posts, m, spec)
+    assert any("no input 'police_marker'" in p for p in problems)
+
+    spec["inputs"].append({"id": "police_marker", "kind": "push", "fields": [{"name": "cleared", "required": False}]})
+    _, problems = adapt_posts(sc.posts, m, spec)
+    assert problems == ["input 'rooms' requires fields the sim doesn't send: ['floor'] (make them optional)"]
+
+    spec["inputs"][1]["fields"][1]["required"] = False
+    posts, problems = adapt_posts(sc.posts, m, spec)
+    assert not problems
+    sos = [p for p in posts if p.input_id == "sos"]
+    assert sos and all("press_id" not in p.body for p in sos)  # undeclared field dropped, not rejected by ingest
+    assert all("room" in p.body for p in posts if p.input_id == "rooms")
+
+
+def test_bad_input_map_is_an_error():
+    from sim.common import parse_input_map
+
+    with pytest.raises(ValueError):
+        parse_input_map("panic")

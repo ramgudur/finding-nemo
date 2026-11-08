@@ -183,3 +183,56 @@ def write_ground_truth(name: str, lines: Iterable[dict[str, Any]], out_dir: Path
         for line in lines:
             f.write(json.dumps(line) + "\n")
     return path
+
+
+# -- adapting to an app the dev built in the Builder -----------------------------------------
+
+
+def parse_input_map(text: str) -> dict[str, str]:
+    """`"panic=sos,room_button=rooms"` -> {"panic": "sos", "room_button": "rooms"} (sim id -> app input id)."""
+    out = {}
+    for part in filter(None, (p.strip() for p in (text or "").split(","))):
+        sim_id, _, app_id = part.partition("=")
+        if not sim_id or not app_id:
+            raise ValueError(f"--input-map entry {part!r} must look like sim_id=app_input_id")
+        out[sim_id.strip()] = app_id.strip()
+    return out
+
+
+def fetch_spec(api: str, app: str, authority_key: str) -> dict[str, Any]:
+    """The app's spec (authority-only): lets the sim check what the dev actually built."""
+    base = api.rstrip("/").replace("://localhost", "://127.0.0.1")
+    req = urllib.request.Request(f"{base}/v1/apps/{app}", headers={"X-Authority-Key": authority_key})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
+
+
+def adapt_posts(
+    posts: list[Post], input_map: dict[str, str], spec: dict[str, Any] | None = None
+) -> tuple[list[Post], list[str]]:
+    """Point the sim's posts at the app's input ids. With the app's spec: report inputs that are missing
+    or not push, and drop body fields the dev didn't declare (ingest would reject them). Returns
+    (posts, problems); any problem means the run would fail, so the caller should stop and show them."""
+    out = [Post(p.sim_t, input_map.get(p.input_id, p.input_id), dict(p.body)) for p in posts]
+    if spec is None:
+        return out, []
+    inputs = {i["id"]: i for i in spec.get("inputs", [])}
+    problems, used = [], sorted({p.input_id for p in out})
+    for iid in used:
+        inp = inputs.get(iid)
+        if inp is None:
+            problems.append(f"the app has no input {iid!r} (add it in the Builder, or use --input-map)")
+        elif inp.get("kind") != "push":
+            problems.append(f"input {iid!r} is {inp.get('kind')!r}; the sim posts events, so it must be push")
+    if problems:
+        return out, problems
+    base = {"user_id", "lat", "lon", "ts"}
+    for p in out:
+        declared = {f["name"] for f in inputs[p.input_id].get("fields", [])}
+        p.body = {k: v for k, v in p.body.items() if k in base or k in declared}
+    for iid in used:
+        missing = [f["name"] for f in inputs[iid].get("fields", []) if f.get("required", True)]
+        missing = [m for m in missing if not any(m in p.body for p in out if p.input_id == iid)]
+        if missing:
+            problems.append(f"input {iid!r} requires fields the sim doesn't send: {missing} (make them optional)")
+    return out, problems

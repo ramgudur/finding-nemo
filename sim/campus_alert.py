@@ -40,8 +40,11 @@ from sim.common import (
     Post,
     Poster,
     ServerClock,
+    adapt_posts,
+    fetch_spec,
     iso,
     load_spec,
+    parse_input_map,
     replay,
     replay_following,
     write_ground_truth,
@@ -267,6 +270,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--rss-port", type=int, default=8765, help="0 disables the scripted RSS feed")
     ap.add_argument("--dry-run", action="store_true", help="print events as JSONL and exit; no posting")
     ap.add_argument(
+        "--input-map",
+        default="",
+        help="post to the app's own input ids, e.g. panic=sos,room_button=rooms (default: same names)",
+    )
+    ap.add_argument(
+        "--authority-key",
+        default=os.environ.get("AUTHORITY_KEY", ""),
+        help="optional (or env AUTHORITY_KEY): check the Builder-made app's inputs first and drop undeclared fields",
+    )
+    ap.add_argument(
         "--follow-clock",
         action="store_true",
         help="pace by the server clock (GET /v1/debug/clock, DEMO_MODE) so console SimControls pause/speed the sim",
@@ -284,6 +297,23 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if not args.ingest_key:
         ap.error("--ingest-key (or env INGEST_KEY) is required; it is shown once at app activation")
+    try:
+        input_map = parse_input_map(args.input_map)
+    except ValueError as e:
+        ap.error(str(e))
+    spec = None
+    if args.authority_key:
+        try:
+            spec = fetch_spec(args.api, args.app, args.authority_key)
+        except Exception as e:  # noqa: BLE001 - report and stop: the run would fail anyway
+            print(f"stopping: cannot read app {args.app!r} with that authority key ({e})", file=sys.stderr)
+            return 2
+    sc.posts, problems = adapt_posts(sc.posts, input_map, spec)
+    if problems:
+        print("stopping: the app doesn't match what the sim posts:", file=sys.stderr)
+        for msg in problems:
+            print(f"  - {msg}", file=sys.stderr)
+        return 2
 
     gt = write_ground_truth(SPEC, ground_truth_lines(sc, t0, args.seed, args.speed))
     print(f"campus-alert sim: {len(sc.posts)} events over {args.duration:.0f}s at {args.speed}x; ground truth {gt}")
