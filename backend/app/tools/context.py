@@ -32,6 +32,7 @@ class TestedCandidate:
     passed: bool
     t: float
     baseline_weights: dict[str, float]
+    baseline_trust: dict[str, float]  # the engine's trust map the backtest replayed with
     weights: dict[str, float]  # final (renormalized) weights tested; == baseline for trust candidates
     trust_changes: dict[str, tuple[float, float]]  # user_id -> (before, after)
     methods_with_data: int

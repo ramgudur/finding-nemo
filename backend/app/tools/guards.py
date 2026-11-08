@@ -115,7 +115,21 @@ def check_candidate_for_apply(ctx: ToolContext, backtest_id: str) -> TestedCandi
     drift = sorted(k for k, v in cand.baseline_weights.items() if abs(live.get(k, float("nan")) - v) > 1e-9)
     if drift:
         raise GuardError(f"weights changed since backtest {backtest_id} ({', '.join(drift)}); rerun it")
+    # Trust drift: the backtest replayed operators with a trust map; if any user's trust moved since
+    # (or a trust candidate's starting value is no longer current), its evidence no longer holds.
+    live_trust = live_trust_map(ctx)
+    users = set(cand.baseline_trust) | set(live_trust)
+    moved = {u for u in users if abs(live_trust.get(u, 1.0) - cand.baseline_trust.get(u, 1.0)) > 1e-9}
+    moved |= {u for u, (before, _) in cand.trust_changes.items() if abs(current_trust(ctx, u)[0] - before) > 1e-9}
+    if moved:
+        shown = ", ".join(sorted(moved)[:5]) + (" ..." if len(moved) > 5 else "")
+        raise GuardError(f"trust changed since backtest {backtest_id} ({shown}); rerun it")
     return cand
+
+
+def live_trust_map(ctx: ToolContext) -> dict[str, float]:
+    """The trust map the tick (and so the backtest replay) uses for this app."""
+    return dict(ctx.engine.trust(ctx.app_id)) if ctx.engine.trust else {}
 
 
 def apply_weights(ctx: ToolContext, new: Mapping[str, float], *, reason: str, backtest_id: str | None) -> list[Change]:
