@@ -1,0 +1,324 @@
+"""Source of truth for the platform's contracts (Pydantic v2).
+
+When this file changes, update `frontend/src/api/types.ts`, `specs/*.json` and the
+"Core contracts" section of CLAUDE.md in the same commit. Changes need lead approval.
+
+Conventions: meters, seconds, UTC ISO-8601 datetimes. Coordinates are always named
+`lat`/`lon` fields; a bare pair (e.g. `Instruction.route`) is `[lat, lon]`.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+Lat = float
+Lon = float
+
+Visibility = Literal["public", "authority"]
+Tier = Literal["locked", "stiff", "flexible"]
+InputKind = Literal["push", "pull"]
+InputShape = Literal["point", "track", "fixed_point", "field", "document"]
+AppStatus = Literal["draft", "pending_confirmation", "active"]
+VerificationMethod = Literal["authority_confirmation", "predictive_check", "cross_input_agreement"]
+FieldType = Literal["number", "integer", "string", "boolean"]
+ConnectorType = Literal["rss", "json_api", "open_meteo"]  # html is stubbed: rejected here
+PoiLabelMode = Literal["auto", "on", "off"]
+PoiStatus = Literal["active", "retired"]
+AgentName = Literal["compiler", "scout", "critic", "poi_labeler", "message_guard"]
+ChangeKind = Literal["weight", "trust", "poi", "connector", "spec_confirm"]
+Actor = Literal["agent", "dev"]
+Device = Literal["cpu", "gpu"]
+
+SLUG = r"^[a-z0-9][a-z0-9_-]{0,63}$"
+
+
+class Model(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+# --- AppSpec ---------------------------------------------------------------------
+
+
+class BBox(Model):
+    min_lat: Lat = Field(ge=-90, le=90)
+    min_lon: Lon = Field(ge=-180, le=180)
+    max_lat: Lat = Field(ge=-90, le=90)
+    max_lon: Lon = Field(ge=-180, le=180)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> BBox:
+        if self.min_lat >= self.max_lat or self.min_lon >= self.max_lon:
+            raise ValueError("bbox min must be below max")
+        return self
+
+
+class GridSpec(Model):
+    cell_m: float = Field(gt=0)
+    bbox: BBox
+
+
+class InputField(Model):
+    """One dev-declared field an event for this input carries, besides user_id/lat/lon/ts."""
+
+    name: str = Field(pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+    type: FieldType
+    required: bool = True
+    description: str = ""
+
+
+class OperatorConfig(BaseModel):
+    """One operator applied to an input. Extra keys are the operator's own params,
+    validated by the params model in `engine/operators/registry.py`."""
+
+    model_config = ConfigDict(extra="allow")
+
+    op: str
+    weight: float = Field(ge=0)
+    noise_floor: float | None = Field(default=None, gt=0)
+    layer_id: str = Field(default="", description="Defaults to '<input_id>.<op>'.")
+
+
+class ConnectorConfig(Model):
+    """Pull-input connector. Config only: never code."""
+
+    type: ConnectorType
+    url: str | None = None
+    poll_s: float = Field(default=300, gt=0)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class InputSpec(Model):
+    id: str = Field(pattern=SLUG)
+    kind: InputKind
+    shape: InputShape
+    tier: Tier
+    visibility: Visibility = "authority"
+    meaning: str = Field(description="The dev's words, verbatim.")
+    fields: list[InputField] = Field(default_factory=list)
+    connector: ConnectorConfig | None = None
+    operators: list[OperatorConfig] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _defaults_and_shape(self) -> InputSpec:
+        if self.kind == "push" and self.connector is not None:
+            raise ValueError(f"push input {self.id!r} must not have a connector")
+        for o in self.operators:
+            if not o.layer_id:
+                o.layer_id = f"{self.id}.{o.op}"
+        names = [f.name for f in self.fields]
+        if len(names) != len(set(names)):
+            raise ValueError(f"input {self.id!r} has duplicate field names")
+        return self
+
+
+class VerificationSpec(Model):
+    method: VerificationMethod
+    priority: int = Field(ge=1, description="1 is the highest priority.")
+
+
+class OutputLayer(Model):
+    id: str = Field(description="A layer_id from inputs[].operators[], or 'score'.")
+    visibility: Visibility = "authority"
+
+
+class PoiLabel(Model):
+    label: str
+    sensitive: bool = False
+    destination: bool = False
+
+    @model_validator(mode="after")
+    def _not_both(self) -> PoiLabel:
+        if self.sensitive and self.destination:
+            raise ValueError(f"label {self.label!r} cannot be both sensitive and a destination")
+        return self
+
+
+class PoiLabelConfig(Model):
+    mode: PoiLabelMode = "auto"
+    label_set: list[PoiLabel] = Field(default_factory=list)
+    min_confidence: float = Field(default=0.6, ge=0, le=1)
+
+
+class Outputs(Model):
+    layers: list[OutputLayer] = Field(default_factory=list)
+    poi_labels: PoiLabelConfig = Field(default_factory=PoiLabelConfig)
+
+
+class DestinationPoint(Model):
+    lat: Lat = Field(ge=-90, le=90)
+    lon: Lon = Field(ge=-180, le=180)
+    label: str
+
+
+class RoutingSpec(Model):
+    enabled: bool = False
+    destination_points: list[DestinationPoint] = Field(default_factory=list)
+    impassable_score: float = Field(default=0.8, gt=0, le=1)
+    alpha: float = Field(default=4.0, ge=0)
+    fallback_text: str = "No safe route found. Stay where you are and follow official instructions."
+    rephrase: bool = False
+
+
+class AppSpec(Model):
+    app_id: str = Field(pattern=SLUG)
+    intent: str
+    status: AppStatus = "draft"
+    grid: GridSpec
+    inputs: list[InputSpec] = Field(default_factory=list)
+    verification: list[VerificationSpec] = Field(default_factory=list)
+    outputs: Outputs = Field(default_factory=Outputs)
+    routing: RoutingSpec = Field(default_factory=RoutingSpec)
+
+    def layer_ids(self) -> list[str]:
+        return [o.layer_id for i in self.inputs for o in i.operators]
+
+    @model_validator(mode="after")
+    def _references(self) -> AppSpec:
+        ids = [i.id for i in self.inputs]
+        if len(ids) != len(set(ids)):
+            raise ValueError("input ids must be unique")
+        layers = self.layer_ids()
+        if len(layers) != len(set(layers)):
+            raise ValueError("layer ids must be unique")
+        known = set(layers) | {"score"}
+        for out in self.outputs.layers:
+            if out.id not in known:
+                raise ValueError(f"outputs.layers references unknown layer {out.id!r}")
+        methods = [v.method for v in self.verification]
+        if len(methods) != len(set(methods)):
+            raise ValueError("verification methods must be unique")
+        labels = [p.label for p in self.outputs.poi_labels.label_set]
+        if len(labels) != len(set(labels)):
+            raise ValueError("POI labels must be unique")
+        return self
+
+
+# --- Ingest ----------------------------------------------------------------------
+
+
+class Event(BaseModel):
+    """Push event body for `POST /v1/apps/{app}/inputs/{input}/events` (header `X-Ingest-Key`).
+    Extra keys are the input's declared `fields`, validated against the AppSpec at ingest."""
+
+    model_config = ConfigDict(extra="allow")
+
+    user_id: str | None = None
+    lat: Lat = Field(ge=-90, le=90)
+    lon: Lon = Field(ge=-180, le=180)
+    ts: datetime
+
+
+# --- Engine outputs --------------------------------------------------------------
+
+
+class Candidate(Model):
+    id: str
+    lat: Lat
+    lon: Lon
+    radius_m: float = Field(ge=0)
+    source: str = Field(description="Name of the candidate generator.")
+    stats: dict[str, float] = Field(default_factory=dict)
+    contributing_layers: list[str] = Field(default_factory=list)
+    persisted_ticks: int = Field(default=0, ge=0)
+
+
+class Evidence(Model):
+    kind: str = Field(description="e.g. 'osm_feature', 'layer_stats', 'weather', 'time_pattern'.")
+    text: str
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class POI(Model):
+    id: str
+    candidate_id: str
+    lat: Lat
+    lon: Lon
+    radius_m: float = Field(ge=0)
+    label: str
+    confidence: float = Field(ge=0, le=1)
+    evidence: list[Evidence] = Field(default_factory=list)
+    visibility: Visibility = "authority"
+    status: PoiStatus = "active"
+    created_at: datetime
+    updated_at: datetime
+
+
+class Backtest(Model):
+    id: str
+    kind: Literal["single", "batch"]
+    candidates_tested: int = Field(ge=0)
+    candidates_valid: int = Field(ge=0)
+    train_scores: dict[VerificationMethod, float] = Field(default_factory=dict)
+    holdout_scores: dict[VerificationMethod, float] = Field(default_factory=dict)
+    passed: bool
+    device: Device
+    elapsed_ms: float = Field(ge=0)
+    t: datetime
+
+
+class ToolCall(Model):
+    name: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    ok: bool = True
+    result_summary: str = ""
+
+
+class TraceEntry(Model):
+    t: datetime
+    app_id: str
+    agent: AgentName
+    model: str | None = None
+    saw: str = ""
+    hypothesis: str = ""
+    tested: str = ""
+    result: str = ""
+    action: str = ""
+    why: str = ""
+    tool_calls: list[ToolCall] = Field(default_factory=list)
+    skipped_reason: str | None = None
+
+
+class Change(Model):
+    id: str
+    app_id: str
+    kind: ChangeKind
+    target: str = Field(description="What changed, e.g. a layer_id, user_id, POI id or connector id.")
+    before: Any = None
+    after: Any = None
+    reason: str
+    backtest_id: str | None = None
+    actor: Actor
+    t: datetime
+
+
+# --- End-user instructions -------------------------------------------------------
+
+
+class InstructionRequest(Model):
+    """Body of `POST /v1/apps/{app}/instruction`: the caller's own position only."""
+
+    lat: Lat = Field(ge=-90, le=90)
+    lon: Lon = Field(ge=-180, le=180)
+
+
+class GuardCheck(Model):
+    name: str
+    passed: bool
+    detail: str = ""
+
+
+class GuardResult(Model):
+    passed: bool
+    checks: list[GuardCheck] = Field(default_factory=list)
+
+
+class Instruction(Model):
+    text: str = Field(max_length=360)
+    destination: DestinationPoint | None = Field(default=None, description="None on fallback.")
+    route: list[tuple[Lat, Lon]] = Field(default_factory=list, description="[lat, lon] pairs.")
+    distance_m: float = Field(default=0, ge=0)
+    computed_at: datetime
+    guard: GuardResult
