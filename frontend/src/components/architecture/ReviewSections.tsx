@@ -679,6 +679,11 @@ export function VisibilityLabelsSection({ d }: { d: SpecDraft }) {
             ))}
           </div>
           <p className="text-[12px] text-ink">The combined score can be public only when every layer in it is public.</p>
+          {draft.routing?.enabled && (
+            <p className="text-[12px] text-ink">
+              End users only see high-risk areas on their map if <code className="font-mono">score</code> is public.
+            </p>
+          )}
           <div className="space-y-1.5 pt-2">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <label htmlFor="rv-hot" className="bld-label">
