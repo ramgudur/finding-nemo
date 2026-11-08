@@ -100,3 +100,31 @@ def test_unknown_app_closes_the_socket(setup):
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/v1/apps/nope/stream") as ws:
             ws.receive_json()
+
+
+def test_malformed_json_gets_an_error_frame_and_stays_open(setup):
+    client, keys = setup
+    with client.websocket_connect("/v1/apps/test-app/stream") as ws:
+        ws.send_text("not json at all")
+        err = ws.receive_json()
+        tick = ws.receive_json()  # socket stays open: the tick still arrives
+    assert err == {"type": "error", "reason": "malformed frame"}
+    assert tick["type"] == "tick"
+
+
+def test_unknown_frame_type_gets_an_error_frame(setup):
+    client, keys = setup
+    with client.websocket_connect("/v1/apps/test-app/stream") as ws:
+        ws.send_json({"type": "subscribe", "foo": "bar"})
+        err = ws.receive_json()
+        ws.receive_json()  # the tick frame
+    assert err == {"type": "error", "reason": "malformed frame"}
+
+
+def test_error_frame_never_echoes_the_bad_content(setup):
+    client, keys = setup
+    with client.websocket_connect("/v1/apps/test-app/stream") as ws:
+        ws.send_text("super-secret-garbage")
+        err = ws.receive_json()
+        ws.receive_json()
+    assert "super-secret-garbage" not in str(err)

@@ -2,10 +2,12 @@
 
 First-frame auth: the client's first inbound frame may be `{type: "auth", key}`; the
 reply is always `{type: "auth_ok", authority: bool}` (`false` for a bad key — the socket
-stays public-only, never closed). The key is never echoed back or logged. After that,
-every new engine tick sends `{type: "tick", t, map: MapResponse, hotspots:
-HotspotsResponse}`, filtered exactly like REST (`api/outputs.py`'s builders, which use
-`core/access.py`).
+stays public-only, never closed). The key is never echoed back or logged. Any other
+inbound frame -- unparseable JSON, a non-object, or an unrecognized `type` -- gets
+`{type: "error", reason: "malformed frame"}` (a fixed reason; never echoes the frame's
+content) and the socket stays open with its current visibility. After that, every new
+engine tick sends `{type: "tick", t, map: MapResponse, hotspots: HotspotsResponse}`,
+filtered exactly like REST (`api/outputs.py`'s builders, which use `core/access.py`).
 
 There's no push path from the tick loop to a socket (it runs in a worker thread via
 `asyncio.to_thread`), so this polls `engine.latest(app)` on a short interval instead and
@@ -17,6 +19,7 @@ cross-thread handoff.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -46,13 +49,22 @@ async def stream(websocket: WebSocket, app: str) -> None:
     try:
         while True:
             try:
-                msg = await asyncio.wait_for(websocket.receive_json(), timeout=_POLL_S)
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=_POLL_S)
             except TimeoutError:
-                msg = None
-            if isinstance(msg, dict) and msg.get("type") == "auth":
-                key = msg.get("key")
-                authority = bool(key) and db.check_authority_key(app, key)
-                await websocket.send_json({"type": "auth_ok", "authority": authority})
+                raw = None
+
+            if raw is not None:
+                try:
+                    msg = json.loads(raw)
+                    if not isinstance(msg, dict) or msg.get("type") != "auth":
+                        raise ValueError("not an auth frame")
+                    key = msg.get("key")
+                    authority = bool(key) and db.check_authority_key(app, key)
+                    await websocket.send_json({"type": "auth_ok", "authority": authority})
+                except WebSocketDisconnect:
+                    raise
+                except Exception:  # noqa: BLE001 - any malformed/unknown frame, not just JSON errors
+                    await websocket.send_json({"type": "error", "reason": "malformed frame"})
 
             result = engine.latest(app)
             if result is not None and result.t != last_t:
