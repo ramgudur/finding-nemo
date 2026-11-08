@@ -399,7 +399,7 @@ def tick_app(
         rt.cache.push(now, normalized, ov)
 
     hotspots = find_hotspots(rt, score, normalized, w, override_layers=override_layers)
-    drafts, cand_errors = candidates.generate(extras, {li.layer_id: li.op for li in rt.layers}, grid)
+    drafts, cand_errors = candidates.generate(extras, {li.layer_id: li.op for li in rt.layers}, grid, hotspots=hotspots)
     errors.extend(cand_errors)
     cands = rt.candidate_tracker.update(drafts, grid)
     result = TickResult(

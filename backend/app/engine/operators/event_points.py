@@ -24,6 +24,8 @@ from .base import (
     trust_weights,
 )
 
+MAX_DOC_EXTRAS = 200  # located documents passed on to candidate generation
+
 
 class EventPointsParams(OperatorParams):
     noise_floor: float = Field(default=2.0, gt=0)
@@ -71,4 +73,8 @@ def event_points(
     counts = np.zeros(grid.shape)
     np.add.at(counts, (row[m], col[m]), w[m])
     layer = gaussian_smooth(counts, params.sigma_m / grid.cell_m)
-    return OperatorResult(layer=layer, extras={"n_docs": int(m.sum())})
+    # located documents for the event_clusters candidate generator (heaviest first, capped)
+    idx = np.flatnonzero(m)
+    idx = idx[np.argsort(-w[idx], kind="stable")][:MAX_DOC_EXTRAS]
+    docs = [{"lat": float(ev.lat[i]), "lon": float(ev.lon[i]), "w": float(w[i])} for i in idx]
+    return OperatorResult(layer=layer, extras={"n_docs": int(m.sum()), "docs": docs})
