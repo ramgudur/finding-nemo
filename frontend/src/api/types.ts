@@ -450,3 +450,14 @@ export interface ActivateResponse {
   ingest_key: string;
   authority_key: string;
 }
+
+// --- Public operator catalogue (api/catalog.py) ---
+
+/** One entry of GET /v1/operators: platform data only (names/descriptions/params schema), no app data. */
+export interface OperatorInfo {
+  name: string;
+  description: string;
+  shapes: InputShape[];
+  role: "layer" | "override";
+  params: Record<string, unknown>;
+}

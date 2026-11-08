@@ -1,35 +1,37 @@
-import { useEffect, useState } from "react";
-import { AppPage } from "./pages/AppPage";
-import { Builder } from "./pages/Builder";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
+import { MainLayout } from "./components/layout/MainLayout";
+import { Architecture } from "./pages/Architecture";
 import { EndUser } from "./pages/EndUser";
+import { Home } from "./pages/Home";
+import { PastProjects } from "./pages/PastProjects";
+import { Sources } from "./pages/Sources";
 
-// Minimal path routing (no router dependency):
-//   /                  -> Builder
-//   /apps/:appId       -> AppPage (dev console, authority view)
-//   /apps/:appId/go    -> EndUser (public instructions only)
-function route(path: string) {
-  const m = path.match(/^\/apps\/([^/]+)(\/go)?\/?$/);
-  if (!m?.[1]) return <Builder />;
-  const appId = decodeURIComponent(m[1]);
-  return m[2] ? <EndUser appId={appId} /> : <AppPage appId={appId} />;
+function EndUserRoute() {
+  // EndUser.tsx predates the router and takes its appId as a prop.
+  const { appId } = useParams<{ appId: string }>();
+  return <EndUser appId={appId ?? ""} />;
 }
 
 export function App() {
-  const [health, setHealth] = useState("checking");
-
-  useEffect(() => {
-    fetch("/v1/health")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((b: { status: string }) => setHealth(b.status))
-      .catch(() => setHealth("backend unreachable"));
-  }, []);
-
   return (
-    <>
-      <header style={{ padding: "8px 16px", borderBottom: "1px solid #ddd", fontFamily: "system-ui" }}>
-        Geo heat-map platform · API: {health}
-      </header>
-      <main style={{ padding: 16, fontFamily: "system-ui" }}>{route(window.location.pathname)}</main>
-    </>
+    <Routes>
+      {/* No MainLayout: EndUser is public-only, phone-first, and keeps its own chrome. */}
+      <Route path="/apps/:appId/go" element={<EndUserRoute />} />
+
+      <Route element={<MainLayout />}>
+        <Route path="/" element={<Home />} />
+        <Route path="/sources" element={<Sources />} />
+        <Route path="/architecture" element={<Architecture />} />
+        <Route path="/architecture/:appId" element={<Architecture />} />
+        <Route path="/projects" element={<PastProjects />} />
+        <Route path="/apps/:appId" element={<LegacyAppRedirect />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
   );
+}
+
+function LegacyAppRedirect() {
+  const { appId } = useParams<{ appId: string }>();
+  return <Navigate to={`/architecture/${encodeURIComponent(appId ?? "")}`} replace />;
 }

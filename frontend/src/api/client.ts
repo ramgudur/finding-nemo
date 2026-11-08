@@ -6,11 +6,14 @@ import type {
   ClockState,
   CompileRequest,
   ErrorSeries,
+  Event,
   HotspotsResponse,
   Instruction,
   InstructionRequest,
   MapResponse,
+  OperatorInfo,
   PinRequest,
+  POI,
   SourceSuggestion,
   SpecEditResponse,
   SuggestSourceRequest,
@@ -70,6 +73,19 @@ const app = (appId: string) => `/apps/${encodeURIComponent(appId)}`;
 export const api = {
   map: (appId: string, key?: string) => get<MapResponse>(`${app(appId)}/map?format=geojson`, key),
   hotspots: (appId: string, key?: string) => get<HotspotsResponse>(`${app(appId)}/hotspots`, key),
+  pois: (appId: string, key?: string) => get<POI[]>(`${app(appId)}/pois`, key),
+  // authority only, max limit 5000
+  raw: (appId: string, inputId: string, key: string, opts?: { since?: string; limit?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.since) params.set("since", opts.since);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    return get<Event[]>(`${app(appId)}/inputs/${encodeURIComponent(inputId)}/raw${qs ? `?${qs}` : ""}`, key);
+  },
+  // authority only: the full spec, for rehydrating the Architecture page on a direct/bookmarked visit
+  getApp: (appId: string, key: string) => get<AppSpec>(`${app(appId)}`, key),
+  // public platform catalogue (not app data): what the Compiler can pick from
+  operators: () => get<OperatorInfo[]>("/operators"),
   // builder (the console has no login; the authority key is issued at activation)
   compile: (appId: string, body: CompileRequest) => request<AppSpec>("POST", `${app(appId)}/compile`, undefined, body),
   // edit a pending spec before confirming it; 422 carries every error in ApiError.details

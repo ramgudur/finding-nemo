@@ -34,3 +34,47 @@ export function forgetKey(appId: string): void {
   write(() => sessionStorage, appId, null);
   write(() => localStorage, appId, null);
 }
+
+// --- Past Projects: a client-side-only record of apps built in this browser. There is no backend
+// "list all apps" endpoint, so this is the entire mechanism -- not a cache of something fetchable. ---
+
+export interface ProjectRecord {
+  appId: string;
+  intent: string;
+  status: "proposed" | "active";
+  updatedAt: string; // ISO
+}
+
+const PROJECTS_KEY = "past-projects";
+
+function readProjects(): ProjectRecord[] {
+  try {
+    const raw = localStorage.getItem(PROJECTS_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as ProjectRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeProjects(records: ProjectRecord[]): void {
+  try {
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(records));
+  } catch {
+    // storage unavailable (private mode): the record just doesn't persist
+  }
+}
+
+export function recordProject(record: ProjectRecord): void {
+  const rest = readProjects().filter((p) => p.appId !== record.appId);
+  writeProjects([record, ...rest]);
+}
+
+export function listProjects(): ProjectRecord[] {
+  return readProjects().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export function removeProject(appId: string): void {
+  writeProjects(readProjects().filter((p) => p.appId !== appId));
+}
