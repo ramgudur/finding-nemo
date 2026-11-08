@@ -37,6 +37,11 @@ class Tool:
     args: type[BaseModel]
     handler: Callable[[ToolContext, Any], dict[str, Any]]
     agents: frozenset[str]  # agent names allowed to call it; "dev" marks a dev-console action
+    # True if a successful call changes app state (spec, connectors, weights, trust, POIs, label
+    # proposals, source reliability). Read-only tools, backtests (a record, not a change),
+    # annotate and request_scout (trace entries only) stay False. `agents/loop.py` derives a run's
+    # closing trace from these, so the trace never takes the model's word that something changed.
+    changes_state: bool = False
 
 
 TOOLS: dict[str, Tool] = {
@@ -107,6 +112,7 @@ TOOLS: dict[str, Tool] = {
             st.ApplyChangesArgs,
             st.apply_changes,
             frozenset({"critic"}),
+            changes_state=True,
         ),
         Tool(
             "set_user_trust",
@@ -115,6 +121,7 @@ TOOLS: dict[str, Tool] = {
             st.SetUserTrustArgs,
             st.set_user_trust,
             frozenset({"critic"}),
+            changes_state=True,
         ),
         Tool(
             "pin_weight",
@@ -122,6 +129,7 @@ TOOLS: dict[str, Tool] = {
             st.PinWeightArgs,
             st.pin_weight,
             frozenset({"dev"}),
+            changes_state=True,
         ),
         Tool(
             "list_operators",
@@ -144,6 +152,7 @@ TOOLS: dict[str, Tool] = {
             ct.CreateInputArgs,
             ct.create_input,
             frozenset({"compiler"}),
+            changes_state=True,
         ),
         Tool(
             "create_connector",
@@ -151,6 +160,7 @@ TOOLS: dict[str, Tool] = {
             ct.CreateConnectorArgs,
             ct.create_connector,
             frozenset({"compiler", "scout"}),
+            changes_state=True,
         ),
         Tool(
             "test_connector",
@@ -173,6 +183,7 @@ TOOLS: dict[str, Tool] = {
             ct.FinalizeAppArgs,
             ct.finalize_app,
             frozenset({"compiler"}),
+            changes_state=True,
         ),
         Tool(
             "get_poi_candidates",
@@ -226,6 +237,7 @@ TOOLS: dict[str, Tool] = {
             pt.CreatePoiArgs,
             pt.create_poi,
             frozenset({"poi_labeler"}),
+            changes_state=True,
         ),
         Tool(
             "update_poi",
@@ -233,6 +245,7 @@ TOOLS: dict[str, Tool] = {
             pt.UpdatePoiArgs,
             pt.update_poi,
             frozenset({"poi_labeler"}),
+            changes_state=True,
         ),
         Tool(
             "retire_poi",
@@ -240,6 +253,7 @@ TOOLS: dict[str, Tool] = {
             pt.RetirePoiArgs,
             pt.retire_poi,
             frozenset({"poi_labeler"}),
+            changes_state=True,
         ),
         Tool(
             "propose_label",
@@ -249,6 +263,7 @@ TOOLS: dict[str, Tool] = {
             pt.ProposeLabelArgs,
             pt.propose_label,
             frozenset({"poi_labeler"}),
+            changes_state=True,
         ),
         Tool(
             "accept_label_proposal",
@@ -256,6 +271,7 @@ TOOLS: dict[str, Tool] = {
             pt.ProposalDecisionArgs,
             pt.accept_label_proposal,
             frozenset({"dev"}),
+            changes_state=True,
         ),
         Tool(
             "dismiss_label_proposal",
@@ -263,6 +279,7 @@ TOOLS: dict[str, Tool] = {
             pt.DismissProposalArgs,
             pt.dismiss_label_proposal,
             frozenset({"dev"}),
+            changes_state=True,
         ),
         Tool(
             "web_search",
@@ -300,6 +317,7 @@ TOOLS: dict[str, Tool] = {
             cn.SourceReliabilityArgs,
             cn.set_source_reliability,
             frozenset({"scout"}),
+            changes_state=True,
         ),
     )
 }
@@ -314,6 +332,12 @@ def tool_schemas(agent: str) -> list[dict[str, Any]]:
         for t in TOOLS.values()
         if agent in t.agents
     ]
+
+
+def changes_state(name: str) -> bool:
+    """Whether a successful call to tool `name` changes app state (unknown names: False)."""
+    tool = TOOLS.get(name)
+    return tool is not None and tool.changes_state
 
 
 def call_tool(ctx: ToolContext, name: str, args: dict[str, Any] | None) -> dict[str, Any]:
