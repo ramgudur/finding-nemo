@@ -97,7 +97,7 @@ export function BigInput({
               <button
                 type="button"
                 onClick={onSubmit}
-                className="flex items-center gap-1.5 rounded-full px-2 py-0.5 transition-colors duration-150 hover:bg-white/50"
+                className="tap flex items-center gap-1.5 rounded-full px-2 py-0.5 transition-colors duration-150 hover:bg-white/50"
               >
                 <kbd className="flex items-center gap-1 rounded-md border border-inkSoft/40 bg-white/50 px-1.5 py-px font-mono text-[11px]">
                   Enter <CornerDownLeft size={11} />

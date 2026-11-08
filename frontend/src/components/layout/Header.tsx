@@ -53,7 +53,7 @@ export function Header() {
     >
       <Link
         to="/"
-        className="pointer-events-auto relative inline-flex flex-col font-display text-[26px] font-medium leading-none text-slate transition-opacity hover:opacity-80 sm:text-[28px]"
+        className="hit pointer-events-auto relative inline-flex flex-col font-display text-[26px] font-medium leading-none text-slate transition-opacity hover:opacity-80 sm:text-[28px]"
         aria-label="finding nemo, go home"
       >
         <span>
@@ -67,7 +67,7 @@ export function Header() {
         />
         <button
           type="button"
-          className="flex h-10 w-10 items-center justify-center rounded-full border border-white/70 bg-white/55 text-slate shadow-[0_4px_14px_-6px_rgba(47,88,114,0.35)] backdrop-blur-[2px] transition hover:bg-white/70"
+          className="tap flex h-10 w-10 items-center justify-center rounded-full border border-white/70 bg-white/55 text-slate shadow-[0_4px_14px_-6px_rgba(47,88,114,0.35)] backdrop-blur-[2px] transition hover:bg-white/70"
           aria-label="profile"
         >
           <User size={18} strokeWidth={2.1} />

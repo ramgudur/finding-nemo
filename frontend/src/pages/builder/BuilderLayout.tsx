@@ -61,15 +61,15 @@ export function BuilderLayout() {
       />
       <div className="relative mx-auto flex max-w-3xl flex-col gap-6 px-4 pb-[calc(10rem+env(safe-area-inset-bottom))] pt-24 sm:px-6 sm:pt-28">
         {step && (
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 sm:flex-wrap sm:gap-3">
             <Stepper current={step} complete={complete} />
             {!draftIsEmpty(draft) && (
               <button
                 type="button"
                 onClick={startOver}
-                className="ml-auto flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold text-ink transition-colors duration-150 hover:bg-white/50 hover:text-slate"
+                className="tap ml-auto flex items-center justify-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold text-ink transition-colors duration-150 hover:bg-white/50 hover:text-slate max-sm:px-0"
               >
-                <RotateCcw size={13} aria-hidden /> Start over
+                <RotateCcw size={13} aria-hidden /> <span className="max-sm:sr-only">Start over</span>
               </button>
             )}
           </div>

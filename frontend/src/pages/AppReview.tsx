@@ -228,8 +228,8 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
         </aside>
       </div>
 
-      <div className="sticky bottom-4 z-20 flex flex-col gap-3 rounded-2xl bg-cream/95 p-3 shadow-[0_10px_32px_-12px_rgba(53,89,107,0.45)] backdrop-blur-sm sm:flex-row sm:items-center sm:px-4">
-        <p className="flex min-w-0 flex-1 items-start gap-2 text-[13px] text-slate">
+      <div className="sticky bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-20 flex flex-col gap-2 rounded-2xl bg-cream/95 p-3 sm:bottom-4 sm:gap-3 shadow-[0_10px_32px_-12px_rgba(53,89,107,0.45)] backdrop-blur-sm sm:flex-row sm:items-center sm:px-4">
+        <p className="flex min-w-0 flex-1 items-start gap-2 text-[12.5px] text-slate sm:text-[13px]">
           <Lock aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-mutedTeal" />
           <span aria-live="polite">
             {d.dirty ? (
@@ -245,12 +245,18 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
             )}
           </span>
         </p>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <button type="button" disabled={!d.dirty || d.saving} onClick={d.discard} className={ghostBtn}>
-            <Undo2 aria-hidden className="h-3.5 w-3.5" /> Discard
+        <div className="flex items-center justify-end gap-2 sm:flex-wrap">
+          <button type="button" disabled={!d.dirty || d.saving} onClick={d.discard} title="Discard edits" className={`${ghostBtn} max-sm:px-0`}>
+            <Undo2 aria-hidden className="h-3.5 w-3.5" /> <span className="max-sm:sr-only">Discard</span>
           </button>
           <button type="button" disabled={!d.dirty || d.saving} onClick={() => void d.save()} className={secondaryBtn}>
-            {d.saving ? "Saving…" : "Save edits"}
+            {d.saving ? (
+              "Saving…"
+            ) : (
+              <>
+                Save<span className="max-sm:hidden"> edits</span>
+              </>
+            )}
           </button>
           <button
             type="button"
@@ -260,7 +266,7 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
               setActivateError(null);
               dialog.current?.showModal();
             }}
-            className={primaryBtn}
+            className={`${primaryBtn} max-sm:flex-1 max-sm:px-3`}
           >
             <ShieldCheck aria-hidden className="h-4 w-4" /> Confirm &amp; activate
           </button>

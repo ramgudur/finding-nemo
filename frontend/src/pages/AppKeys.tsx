@@ -100,7 +100,7 @@ function ShellTabs({ shell, onChange }: { shell: Shell; onChange: (s: Shell) => 
             aria-selected={on}
             tabIndex={on ? 0 : -1}
             onClick={() => onChange(id)}
-            className={`rounded-full px-3 py-1 text-[12.5px] font-semibold transition-colors duration-150 ${
+            className={`tap rounded-full px-3 py-1 text-[12.5px] font-semibold transition-colors duration-150 ${
               on ? "bg-cream text-slate shadow-sm ring-1 ring-paleWater" : "text-ink hover:text-slate"
             }`}
           >

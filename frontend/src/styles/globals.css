@@ -152,3 +152,24 @@
   to { opacity: 1; }
 }
 .step-in { animation: step-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* ---------------------------------------------------------------------------------------------
+   Touch targets on phones (< 640 px). `.tap` grows a primary control to 44 x 44; `.hit` keeps a small
+   inline control's look and widens only its hit area to 44 x 44 (the element must be positioned:
+   add `relative` unless it is already absolute). Neither changes anything at sm and up.
+   --------------------------------------------------------------------------------------------- */
+@media (max-width: 639.98px) {
+  .tap { min-height: 44px; min-width: 44px; }
+  .pill-btn { min-height: 44px; }
+  .hit::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+  /* 16 px form text on phones, so iOS doesn't zoom the page when a field takes focus. */
+  .phone-16 { font-size: 16px; }
+}

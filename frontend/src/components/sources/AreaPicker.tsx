@@ -178,7 +178,7 @@ export function AreaPicker(props: Props) {
                   placeholder="Label, e.g. the name of the place"
                   value={p.label}
                   onChange={(e) => onUpdatePoint(k, { label: e.target.value })}
-                  className={`min-w-0 flex-1 rounded-xl border bg-white/55 px-3 py-1.5 text-sm text-slate placeholder:text-inkSoft focus:bg-white/85 ${
+                  className={`phone-16 min-w-0 flex-1 rounded-xl border bg-white/55 px-3 py-1.5 text-sm max-sm:min-h-11 text-slate placeholder:text-inkSoft focus:bg-white/85 ${
                     p.label.trim() ? "border-white/70" : "border-danger/50"
                   }`}
                 />
@@ -190,7 +190,7 @@ export function AreaPicker(props: Props) {
                   type="button"
                   onClick={() => onRemovePoint(k)}
                   aria-label={`Remove destination ${p.label || k + 1}`}
-                  className="rounded-full p-1.5 text-ink transition-colors duration-150 hover:bg-white/60"
+                  className="tap flex items-center justify-center rounded-full p-1.5 text-ink transition-colors duration-150 hover:bg-white/60"
                 >
                   <X size={14} aria-hidden />
                 </button>
@@ -206,7 +206,7 @@ export function AreaPicker(props: Props) {
           onClick={() => setAdvanced((a) => !a)}
           aria-expanded={showAdvanced}
           aria-controls="area-advanced"
-          className="flex items-center gap-1.5 self-start rounded-full px-2 py-1 text-sm font-semibold text-ink transition-colors duration-150 hover:bg-white/45 hover:text-slate"
+          className="tap flex items-center gap-1.5 self-start rounded-full px-2 py-1 text-left text-sm font-semibold text-ink transition-colors duration-150 hover:bg-white/45 hover:text-slate"
         >
           <ChevronDown
             size={16}
@@ -230,7 +230,7 @@ export function AreaPicker(props: Props) {
                   min={1}
                   value={Number.isFinite(cellM) ? cellM : ""}
                   onChange={(e) => onCellM(Number(e.target.value))}
-                  className="w-24 rounded-xl border border-white/70 bg-white/55 px-2.5 py-1 font-mono text-sm text-slate focus:bg-white/85"
+                  className="phone-16 w-24 rounded-xl border border-white/70 bg-white/55 px-2.5 py-1 font-mono text-sm max-sm:min-h-11 text-slate focus:bg-white/85"
                 />
                 <span className="text-ink">metres</span>
               </label>

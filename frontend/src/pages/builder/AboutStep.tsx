@@ -90,7 +90,7 @@ export function AboutStep() {
             <button
               type="button"
               onClick={() => setEditingId(true)}
-              className="group flex items-center gap-1 rounded-md px-1 font-mono text-slate underline decoration-inkSoft/50 underline-offset-[3px] transition-colors duration-150 hover:bg-white/50"
+              className="hit group relative flex items-center gap-1 rounded-md px-1 font-mono text-slate underline decoration-inkSoft/50 underline-offset-[3px] transition-colors duration-150 hover:bg-white/50"
             >
               {draft.appId || "set from the name"}
               <Pencil size={11} className="text-ink" aria-hidden />
