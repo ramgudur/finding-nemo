@@ -125,5 +125,5 @@ def get_raw(
         raise HTTPException(status_code=401, detail="authority key required")
     if not any(i.id == input_id for i in spec.inputs):
         raise HTTPException(status_code=404, detail="input not found")
-    events = db.list_events(app, input_id=input_id, since=since.timestamp() if since is not None else None)
-    return events[-limit:]
+    since_s = since.timestamp() if since is not None else None
+    return db.list_events(app, input_id=input_id, since=since_s, limit=limit)  # most recent `limit`, in SQL

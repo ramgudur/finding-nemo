@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from fastapi import Header, Request
 
 from app.agents.llm import LlmRouter
+from app.api.compile_gate import CompileGate
+from app.api.instruction_trace import InstructionTraceDedup
 from app.core.db import Db
 from app.engine.tick import TickEngine
 
@@ -31,6 +33,14 @@ def get_llm(request: Request) -> LlmRouter:
 
 def get_compiler_cache(request: Request) -> CompilerCache:
     return request.app.state.compiler_cache
+
+
+def get_compile_gate(request: Request) -> CompileGate:
+    return request.app.state.compile_gate
+
+
+def get_instruction_trace_dedup(request: Request) -> InstructionTraceDedup:
+    return request.app.state.instruction_trace_dedup
 
 
 def authority_key_header(x_authority_key: str | None = Header(default=None, alias="X-Authority-Key")) -> str | None:

@@ -110,6 +110,21 @@ def test_insert_and_list_events_filters_by_input_and_since(db):
     assert [e.user_id for e in since] == ["u2"]
 
 
+def test_list_events_limit_returns_the_most_recent_in_ascending_order(db):
+    # inserted out of ts order, so the limit must come from ts, not insertion order
+    for i in (3, 0, 4, 1, 2):
+        ev = Event(user_id=f"u{i}", lat=1.0, lon=2.0, ts=t(f"2026-01-01T00:0{i}:00Z"))
+        db.insert_event("some-app", "pings", ev, received_at=float(i))
+    db.insert_event("some-app", "other", Event(lat=1.0, lon=2.0, ts=t("2026-01-01T00:09:00Z")), received_at=9.0)
+
+    assert [e.user_id for e in db.list_events("some-app", "pings", limit=2)] == ["u3", "u4"]
+    assert [e.user_id for e in db.list_events("some-app", "pings", limit=10)] == ["u0", "u1", "u2", "u3", "u4"]
+    since = db.list_events("some-app", "pings", since=t("2026-01-01T00:02:00Z").timestamp(), limit=5)
+    assert [e.user_id for e in since] == ["u3", "u4"]
+    assert db.list_events("some-app", "pings", limit=0) == []
+    assert len(db.list_events("some-app", "pings")) == 5  # no limit: unchanged
+
+
 # -- connectors ---------------------------------------------------------------------
 
 
