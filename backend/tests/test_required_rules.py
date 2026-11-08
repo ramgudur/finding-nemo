@@ -160,11 +160,6 @@ def _move(ctx, layer, to):
     return _call(ctx(), "apply_changes", backtest_id=r["result"]["backtest_id"], reason="holdout improved")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="creation-time weight is never written to weights_history, so stiff_reference falls back to the "
-    "first applied value and two stiff steps can drift past +-10%/h (#191)",
-)
 def test_stiff_cap_is_per_hour_across_applied_steps_not_per_step(env, authority_decides):
     """tiers.py checks the hour window on hand-built history; this checks the tools feed it the
     real applied history, so two small stiff steps can't add up past +-10% in an hour."""

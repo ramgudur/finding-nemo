@@ -65,14 +65,29 @@ def pinned_layers(ctx: ToolContext) -> set[str]:
     return {k for k, v in pinned.items() if v}
 
 
+def created_weights(ctx: ToolContext) -> dict[str, float]:
+    """layer_id -> weight set at creation (the confirmed spec's value; applied changes never edit it)."""
+    return {o.layer_id: float(o.weight) for inp in ctx.spec.inputs for o in inp.operators}
+
+
 def weight_slots(ctx: ToolContext) -> list[tiers.WeightSlot]:
     rt = ctx.runtime
     tier_of = layer_tiers(ctx)
+    created = created_weights(ctx)
     pins = pinned_layers(ctx)
     slots = []
     for layer_id, w in rt.weights.items():
         history = [(r.t, r.weight) for r in ctx.db.weight_history_since(ctx.app_id, layer_id, 0.0)]
-        slots.append(tiers.WeightSlot(layer_id, tier_of[layer_id], w, pinned=layer_id in pins, history=history))
+        slots.append(
+            tiers.WeightSlot(
+                layer_id,
+                tier_of[layer_id],
+                w,
+                pinned=layer_id in pins,
+                history=history,
+                created_weight=created.get(layer_id),
+            )
+        )
     return slots
 
 
