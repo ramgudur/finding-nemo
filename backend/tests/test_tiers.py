@@ -3,7 +3,6 @@ import pytest
 
 from app.engine.tiers import (
     FLEX_MIN_REF,
-    Tier,
     WeightSlot,
     bounds,
     check_tier_change,
@@ -19,11 +18,11 @@ NOW = 10_000.0
 
 def make_slots(**overrides):
     slots = {
-        "auth": WeightSlot("auth", Tier.LOCKED, 1.0),
-        "news": WeightSlot("news", Tier.STIFF, 0.5),
-        "crowd_a": WeightSlot("crowd_a", Tier.FLEXIBLE, 0.4),
-        "crowd_b": WeightSlot("crowd_b", Tier.FLEXIBLE, 0.4),
-        "crowd_c": WeightSlot("crowd_c", Tier.FLEXIBLE, 0.2),
+        "auth": WeightSlot("auth", "locked", 1.0),
+        "news": WeightSlot("news", "stiff", 0.5),
+        "crowd_a": WeightSlot("crowd_a", "flexible", 0.4),
+        "crowd_b": WeightSlot("crowd_b", "flexible", 0.4),
+        "crowd_c": WeightSlot("crowd_c", "flexible", 0.2),
     }
     slots.update(overrides)
     return list(slots.values())
@@ -62,13 +61,13 @@ def test_cold_start_rejects_flexible_with_reason():
 def test_locked_and_pinned_rejected():
     res = check(make_slots(), {"auth": 0.9})
     assert not res.ok and any("locked" in r for r in res.reasons)
-    slots = make_slots(crowd_a=WeightSlot("crowd_a", Tier.FLEXIBLE, 0.4, pinned=True))
+    slots = make_slots(crowd_a=WeightSlot("crowd_a", "flexible", 0.4, pinned=True))
     res = check(slots, {"crowd_a": 0.42})
     assert not res.ok and any("pinned" in r for r in res.reasons)
 
 
 def test_pinned_flexible_does_not_move_on_renormalization():
-    slots = make_slots(crowd_a=WeightSlot("crowd_a", Tier.FLEXIBLE, 0.4, pinned=True))
+    slots = make_slots(crowd_a=WeightSlot("crowd_a", "flexible", 0.4, pinned=True))
     res = check(slots, {"crowd_b": 0.45})
     assert res.ok, res.reasons
     assert res.weights["crowd_a"] == 0.4
@@ -84,7 +83,7 @@ def test_stiff_needs_evidence_and_hourly_cap():
 
     # The +/-10% is per hour vs. the weight an hour ago, not per step.
     hist = [(NOW - 7200, 0.5), (NOW - 1800, 0.54)]
-    stiff = WeightSlot("news", Tier.STIFF, 0.54, history=hist)
+    stiff = WeightSlot("news", "stiff", 0.54, history=hist)
     assert stiff_reference(stiff, NOW) == 0.5
     slots = make_slots(news=stiff)
     assert not check(slots, {"news": 0.58}, authority_evidence=True).ok  # +16% in the hour
@@ -95,8 +94,8 @@ def test_stiff_needs_evidence_and_hourly_cap():
 
 def test_zero_flexible_weight_can_still_move():
     slots = make_slots(
-        crowd_b=WeightSlot("crowd_b", Tier.FLEXIBLE, 0.6),
-        crowd_c=WeightSlot("crowd_c", Tier.FLEXIBLE, 0.0),
+        crowd_b=WeightSlot("crowd_b", "flexible", 0.6),
+        crowd_c=WeightSlot("crowd_c", "flexible", 0.0),
     )
     res = check(slots, {"crowd_c": FLEX_MIN_REF * 0.25})
     assert res.ok, res.reasons
