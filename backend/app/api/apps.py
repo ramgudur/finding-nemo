@@ -45,7 +45,7 @@ from app.core.models import (
     ValidateResult,
 )
 from app.engine.tick import TickEngine
-from app.tools.compiler_tools import _spec_errors, _spec_warnings
+from app.tools.compiler_tools import _spec_errors, _spec_warnings, destination_point_errors
 from app.tools.context import ToolContext
 
 router = APIRouter(prefix="/v1/apps", tags=["apps"])
@@ -156,6 +156,9 @@ def create_app(spec: AppSpec, db: Db = Depends(get_db)) -> AppSpec:
         raise HTTPException(status_code=409, detail=f"app {spec.app_id!r} already exists")
     if spec.status == "active":
         raise HTTPException(status_code=422, detail="a new app cannot be created already active")
+    outside = destination_point_errors(spec.grid.bbox, spec.routing.destination_points)
+    if outside:
+        raise HTTPException(status_code=422, detail=outside)
     spec = connector_fields.declare_spec(spec)  # a connector's own fields are declared (#259)
     db.upsert_app(spec, t=clock_mod.now())
     return spec
@@ -330,6 +333,10 @@ async def compile_app(
     existing = db.get_app(app)
     if existing is not None and existing.status == "active":
         raise HTTPException(status_code=409, detail="app is already active")
+
+    outside = destination_point_errors(body.grid.bbox, body.destination_points)
+    if outside:  # before any model call (#266)
+        raise HTTPException(status_code=422, detail=outside)
 
     # A connector's own fields (an RSS document's doc_id/confidence, a JSON source's readings) are
     # declared on its input before the Compiler sees it, so finalize_app pins them with the dev's (#259).

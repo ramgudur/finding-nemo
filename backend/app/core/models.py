@@ -542,6 +542,9 @@ class GuardResult(Model):
     checks: list[GuardCheck] = Field(default_factory=list)
 
 
+InstructionMode = Literal["route", "escape", "nearest_safe", "fallback"]
+
+
 class Instruction(Model):
     text: str = Field(max_length=360)
     destination: DestinationPoint | None = Field(default=None, description="None on fallback.")
@@ -549,6 +552,13 @@ class Instruction(Model):
     distance_m: float = Field(default=0, ge=0)
     computed_at: UtcDatetime
     guard: GuardResult
+    mode: InstructionMode | None = Field(
+        default=None,
+        description="route: to a destination; escape: the route starts by leaving the blocked area the caller "
+        "is in; nearest_safe: no destination within a reasonable distance, so to the nearest cell clear of "
+        "danger; fallback: nothing reachable (fallback_text).",
+    )
+    walk_minutes: int | None = Field(default=None, ge=0, description="distance_m at about 1.3 m/s walking pace.")
 
 
 # --- Outputs (GET /map?format=geojson, GET /hotspots) ----------------------------
@@ -668,6 +678,31 @@ class SimulateResult(Model):
     accepted: int = Field(ge=0)
     rejected: int = Field(ge=0)
     user_id_prefix: str
+
+
+# --- Public app info and smarter routing (#266, BE1) ----------------------------------
+# `Instruction.mode` / `Instruction.walk_minutes` (above) are part of the same change.
+
+
+class PublicSource(Model):
+    """One source as the public sees it: an input with a public output layer (label = its meaning,
+    cut to 80 chars), or a count of the private ones of one kind ("N private sources")."""
+
+    kind: InputKind
+    label: str
+
+
+class PublicAppInfo(Model):
+    """`GET /v1/apps/{app}/public` (no key): what the end-user page may show about an app (rule 8)."""
+
+    app_id: str
+    title: str = Field(description="From app_id: hyphens/underscores become spaces, words title-cased.")
+    intent: str
+    status: AppStatus
+    routing_enabled: bool
+    bbox: BBox
+    last_update: UtcDatetime | None = Field(default=None, description="Time of the app's last engine tick.")
+    sources: list[PublicSource] = Field(default_factory=list)
 
 
 # --- Source status (GET /v1/apps/{app}/sources/status, #267, BE2) ---------------------

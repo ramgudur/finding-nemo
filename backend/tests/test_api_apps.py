@@ -196,7 +196,7 @@ def test_compile_second_call_with_same_intent_and_inputs_is_a_cache_hit():
 
 
 def test_compile_copies_the_devs_destination_points():
-    points = [{"lat": 0.002, "lon": 0.003, "label": "Library"}]
+    points = [{"lat": 32.7795, "lon": -96.7600, "label": "Library"}]  # inside the fixture spec's area
     app = _app_with_llm("compiler_campus_alert")
     with TestClient(app) as client:
         r = client.post("/v1/apps/campus-alert/compile", json={**_compile_request(), "destination_points": points})

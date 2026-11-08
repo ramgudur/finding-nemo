@@ -14,7 +14,8 @@ Checks (each one is reported, pass or fail, and traced):
 5. ``no_sensitive_labels``   the text names no ``sensitive`` POI label.
 6. ``length``                at most 360 characters.
 
-``safe_instruction`` is the one call the instructions API needs: route -> code-built text ->
+``safe_instruction`` is the one call the instructions API needs: route (to a destination, or to
+the nearest safe cell when no destination is within a reasonable distance) -> code-built text ->
 guard. If anything fails, the caller gets ``routing.fallback_text`` with no destination and no
 route. Rephrasing (``routing.rephrase``) is not built yet; when it is, a rephrased text must pass
 the same checks or the code-built text is sent.
@@ -136,9 +137,16 @@ def safe_instruction(
     pois: Iterable[POI],
     now: datetime,
 ) -> Instruction:
-    """Route from the caller's own position, build the text, guard it; fall back on any failure."""
+    """Route from the caller's own position, build the text, guard it; fall back on any failure.
+
+    Modes (#266): ``route`` to a destination, ``escape`` when that route starts by leaving the blocked
+    area the caller stands in, ``nearest_safe`` when the caller isn't clear of danger and no destination
+    is reachable within a reasonable distance (``routing.too_far``), ``fallback`` otherwise.
+    """
     destinations = routing.collect_destinations(spec, pois)
     rs = spec.routing
+    dest_max = routing.destination_threshold(spec)
+    hot = spec.outputs.hotspot_threshold
     outcome = routing.plan_route(
         grid,
         score,
@@ -146,24 +154,49 @@ def safe_instruction(
         destinations,
         alpha=rs.alpha,
         impassable_score=rs.impassable_score,
-        destination_max_score=routing.destination_threshold(spec),
+        destination_max_score=dest_max,
     )
+    safe = routing.plan_nearest_safe(
+        grid,
+        score,
+        (lat, lon),
+        alpha=rs.alpha,
+        impassable_score=rs.impassable_score,
+        safe_max_score=dest_max,
+        hot_score=hot,
+    )
+    route = outcome.route
+    nearest = safe.route is not None and (route is None or routing.too_far(route, safe.route, grid.cell_m))
     fallback = Instruction(
         text=rs.fallback_text,
         destination=None,
         route=[],
         distance_m=0.0,
         computed_at=now,
-        guard=GuardResult(passed=False, checks=[_check("route_found", False, outcome.reason)]),
+        guard=GuardResult(
+            passed=False,
+            checks=[_check("route_found", False, f"{outcome.reason}; nearest safe area: {safe.reason}")],
+        ),
+        mode="fallback",
     )
-    if outcome.route is None:
+    if nearest:
+        assert safe.route is not None
+        route = safe.route
+        destinations = [*destinations, route.destination]  # code-made from the current grid, never a POI
+    if route is None:
         return fallback
-    route = outcome.route
     score_arr = np.nan_to_num(np.asarray(score, dtype=float), nan=1.0)
-    avoid = routing.avoid_direction(grid, score_arr, (lat, lon), spec.outputs.hotspot_threshold)
     sr, sc = route.cells[0]
-    leave = float(score_arr[sr, sc]) >= spec.outputs.hotspot_threshold  # the caller is in a high-score area
-    text = routing.instruction_text(route, grid, avoid, leave=leave)
+    leave = float(score_arr[sr, sc]) >= hot  # the caller is in a high-score area
+    if nearest:
+        text = routing.nearest_safe_text(route, grid, leave=leave)
+        mode = "nearest_safe"
+    else:
+        avoid = routing.avoid_direction(grid, score_arr, (lat, lon), hot)
+        text = routing.instruction_text(route, grid, avoid, leave=leave)
+        mode = "escape" if route.escape_cells > 0 else "route"
+        if safe.reason == "already safe" and route.distance_m > routing.far_limit_m(grid.cell_m):
+            text = f"{routing.NOT_AT_RISK_TEXT} {text}"  # a long trip is never sent silently
     guard = check_instruction(
         text=text,
         destination=route.destination,
@@ -182,6 +215,8 @@ def safe_instruction(
         distance_m=route.distance_m,
         computed_at=now,
         guard=guard,
+        mode=mode,
+        walk_minutes=routing.walk_minutes(route.distance_m),
     )
 
 
@@ -198,6 +233,6 @@ def trace_entry(app_id: str, instruction: Instruction, now: datetime) -> TraceEn
         saw="instruction request",
         tested=checks,
         result="passed" if instruction.guard.passed else "failed",
-        action="sent code-built text" if instruction.guard.passed else "sent fallback text",
+        action=(f"sent code-built text ({instruction.mode})" if instruction.guard.passed else "sent fallback text"),
         why="every instruction is guarded before it is sent",
     )
