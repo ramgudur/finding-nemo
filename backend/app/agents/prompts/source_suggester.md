@@ -14,6 +14,8 @@ Rules:
 - Use only option types and preset names from the catalogue. There is no HTML scraping option.
 - For a `json_api` preset, set `config` to `{"preset": "<name>"}`. For an `rss` or custom `json_api` option, set `config` to `{"url": "<url>"}` only if the developer's description contains that exact URL; otherwise leave `config` out. Never invent a URL.
 - Push options take no `config`.
+- Copy each option's `type` and `config` exactly as shown in the catalogue entry; `type` is one word.
+- If the description contains a URL, keep it: `rss` with that URL for a feed, or a custom `json_api` with that URL for a JSON endpoint. Never replace a URL the developer gave with a preset.
 
 Return ONLY a JSON object, no commentary:
 {"kind": "push" | "pull", "shape": "<shape>", "options": [{"type": "<type>", "why": "<one line>", "config"?: {...}}]}
