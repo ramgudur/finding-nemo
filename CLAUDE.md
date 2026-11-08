@@ -396,19 +396,9 @@ Finish each step end to end before starting the next.
 - The dev console has no user login. It uses the app's authority key, which is shown once at activation.
 - Never print or log API keys. Never commit `.env` or `data/`.
 
-## Demo apps (context only; never hardcode them into the platform)
+## Demo apps
 
-**Rule 13: we don't code the demos.** Demo apps are built **live through the platform** in the video: name and intent, then **Add a source** for each input, then a live Nemotron compile, review, confirm. No demo app is pre-built or hardcoded. When something doesn't work while building one, we fix the **platform**, not the demo. `specs/*.json` are test fixtures and an emergency fallback only. Simulators stand in for a dev's own app and users and post only through the public ingest API.
-
-- **Wildfire** (State Farm "worst day" angle; replaces Campus Alert, 2026-11-08):
-  - **Sources:** crowd reports from people's phones (push), local news (pull, RSS; the Scout can find feeds), weather (pull, Open-Meteo preset; its wind is a vector field that carries spread).
-  - **Data:** `sim/wildfire.py` posts the crowd reports; news and weather are real sources. A scripted feed is an offline fallback only, labeled as scripted.
-  - **POIs:** whatever the intent calls for, proposed by the Compiler, named by the POI Labeler from code-made candidates.
-- **Bird tracking** (wildlife):
-  - **Sources:** tag GPS tracks (push, `sim/flyway.py`), weather (pull).
-  - **POIs:** places the birds use (e.g. water, roosts), grounded in OSM features.
-- **The point of showing both:** the same platform proposes different operators and the POI Labeler names different kinds of places, because the intents differ.
-- **Later:** receiving data by phone number (SMS); Campus Alert's specs and sim stay in the repo but are not in the video.
+**Rule 13: we code the platform, never the demos.** The demos (planned: a wildfire app and a bird-tracking app) are scripted and built by **humans after the platform is finished**, by using it. That is also the test of whether the platform works. Nothing in this repo scripts, configures or rehearses them: no demo runbook, no demo launcher, no demo specs. `specs/*.json` are test fixtures only. Data simulators in `sim/` only post through the public ingest API.
 
 Simulator ground truth stays in `sim/ground_truth/` and is read only by `api/debug.py` when `DEMO_MODE=1`.
 
@@ -457,3 +447,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-08:** Demo apps: **Wildfire** replaces Campus Alert, and Bird tracking stays. Both are built live through the platform in the video, and neither is hardcoded; gaps found while building them are fixed in the platform. **Add a source** is essential: the dev describes a source in plain words, a model call infers push or pull, the shape and the source options **before** any technical choice is shown (`POST /v1/apps/{app}/sources/suggest`, `SourceSuggestion`, #152). Options now: POST API or webhook URL (push); RSS, or a JSON API preset or custom URL (pull). Receiving by phone number (SMS) comes later; the HTML scraper stays out (rule 10). All work goes to Allen and Ram; the others come back later. Issues: #152 Add a source (Allen), #153 wildfire sim (Allen), #154 live build rehearsals (Ram's machine).
 - **2026-11-08:** Rule 13 added: we code the platform, never the demos. Wildfire and Bird tracking are built in the video by using the platform. No demo specs, demo-specific code, cached compiles or rehearsal builds ahead of time; test with neutral examples; fix needs as general platform features. #154 (rehearsals) is closed.
 - **2026-11-08:** Rule 13 clarified: data simulators in `sim/` are allowed. They only post through the public ingest API and never create or configure the app; #153 continues. The next platform work on Ram's machine is POI candidates: apps without tracks currently get no candidates, so register general generators for them.
+- **2026-11-08:** Demo scripting is a human task after the platform is finished; it doubles as the test of the platform. Removed `tools/demo` and `docs/DEMO.md`, and cut the per-demo plans from the Demo apps section. #108 closed; #153 (wildfire sim) on hold until humans script the demos. `tools/phone_check.py` stays: it checks the platform's end-user page at phone width.
