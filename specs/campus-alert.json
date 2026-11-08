@@ -25,7 +25,8 @@
       "operators": [
         { "op": "flow_source", "weight": 0.6, "polarity": "source", "window_s": 20 },
         { "op": "density", "weight": 0.4, "half_life_s": 60, "sigma_m": 15 }
-      ]
+      ],
+      "plausibility": { "max_speed_mps": 12, "flag_constant_speed": true, "flag_straight_line": true }
     },
     {
       "id": "room_button",
