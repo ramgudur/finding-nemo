@@ -133,3 +133,43 @@ def test_endless_tool_calls_gives_up_at_max_iterations():
     traces = ctx.db.list_trace("test-app")
     assert traces[-1].action == "gave up"
     assert "5 iterations" in traces[-1].why
+
+
+def test_a_slow_tool_does_not_block_the_event_loop(monkeypatch):
+    """Tools may block on network or CPU; they run in a worker thread so the server's other coroutines
+    (requests, WebSocket streams, tick scheduling) keep running meanwhile."""
+    import time
+
+    from app.agents import loop as loop_mod
+
+    def slow_call_tool(ctx, name, args):
+        time.sleep(0.4)  # e.g. an external lookup that is slow to answer
+        return {"ok": True, "result": "done"}
+
+    monkeypatch.setattr(loop_mod, "call_tool", slow_call_tool)
+    script = {
+        "scenario": "s",
+        "description": "d",
+        "steps": [
+            {"response": {"tool_calls": [{"id": "call_1", "name": "annotate", "arguments": {"text": "x"}}]}},
+            {"response": {"content": "finished"}},
+        ],
+    }
+
+    async def scenario():
+        ticks = 0
+
+        async def heartbeat():
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.02)
+                ticks += 1
+
+        hb = asyncio.create_task(heartbeat())
+        out = await run_agent(_ctx(), agent="critic", model_field="critic", system="s", task="t", llm=_router(script))
+        hb.cancel()
+        return out, ticks
+
+    out, ticks = asyncio.run(scenario())
+    assert out == "finished"
+    assert ticks >= 10  # about 20 beats in 0.4 s; zero if the tool blocked the loop
