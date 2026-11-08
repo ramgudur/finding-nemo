@@ -3,7 +3,7 @@
 Timeline (sim seconds):
   t0     threat appears; panic presses start GPS streams (runners flee, hiders stay put)
   0-30   hiders form groups inside rooms
-  60     classroom alert button near the threat
+  60     room alert button near the threat
   100    spoof burst: coordinated fake escape tracks + exact-duplicate stationary accounts
   150    police marker at the threat's position
   180    scripted news article appears in the RSS feed the connector polls
@@ -126,7 +126,7 @@ def build(seed: int = 7, duration: float = DURATION) -> Scenario:
         lat, lon = ll(rx, ry)
         groups.append({"room": room, "lat": lat, "lon": lon, "users": members})
 
-    # Classroom alert button.
+    # Room alert button.
     t_btn, room, (bx, by) = ROOM_BUTTON
     lat, lon = ll(bx, by)
     posts.append(Post(t_btn, "room_button", {"lat": lat, "lon": lon, "room": room}))
@@ -170,8 +170,8 @@ def build(seed: int = 7, duration: float = DURATION) -> Scenario:
     news_lat, news_lon = ll(nx, ny)
     news = {
         "sim_t": NEWS_T,
-        "title": "[SCRIPTED DEMO] Police respond to reported threat at campus classroom building",
-        "description": "Officers are on scene at the classroom building. Avoid the area; follow official instructions.",
+        "title": "[SCRIPTED DEMO] Police respond to reported threat at exhibition hall",
+        "description": "Officers are on scene at the exhibition hall. Avoid the area; follow official instructions.",
         "lat": news_lat,
         "lon": news_lon,
     }
@@ -215,7 +215,7 @@ def rss_xml(sc: Scenario, t0: float, sim_now: float) -> str:
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<rss version="2.0" xmlns:georss="http://www.georss.org/georss"><channel>'
-        "<title>Campus local news (scripted demo feed)</title><link>http://localhost/</link>"
+        "<title>Local news (scripted demo feed)</title><link>http://localhost/</link>"
         f"<description>Scripted for the Campus Alert demo.</description>{items}</channel></rss>"
     )
 

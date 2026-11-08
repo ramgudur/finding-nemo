@@ -1,14 +1,14 @@
 {
   "app_id": "campus-alert",
-  "intent": "During a campus emergency, find where the danger is from panic-button phones, classroom alert buttons, police markers and local news, and tell people who are able to leave the safest way out.",
+  "intent": "During an emergency on a large site, find where the danger is from panic-button phones, room alert buttons, police markers and local news, and tell people who are able to leave the safest way out.",
   "status": "draft",
   "grid": {
     "cell_m": 5,
     "bbox": {
-      "min_lat": 32.984,
-      "min_lon": -96.7525,
-      "max_lat": 32.987593,
-      "max_lon": -96.748216
+      "min_lat": 32.777703,
+      "min_lon": -96.762137,
+      "max_lat": 32.781296,
+      "max_lon": -96.757863
     }
   },
   "inputs": [
@@ -33,12 +33,13 @@
       "shape": "fixed_point",
       "tier": "locked",
       "visibility": "authority",
-      "meaning": "A teacher pressed the alert button in their classroom: danger is confirmed at or near this room.",
+      "meaning": "Staff pressed the alert button in their room: danger is confirmed at or near this room. The alert stays until it is cleared.",
       "fields": [
-        { "name": "room", "type": "string", "required": true, "description": "Room identifier." }
+        { "name": "room", "type": "string", "required": true, "description": "Room identifier." },
+        { "name": "cleared", "type": "boolean", "required": false, "description": "True clears an earlier alert from this room." }
       ],
       "operators": [
-        { "op": "density", "weight": 0.5, "noise_floor": 1.0, "half_life_s": 300, "sigma_m": 20 }
+        { "op": "override", "weight": 0, "radius_m": 12 }
       ]
     },
     {
@@ -61,7 +62,7 @@
       "shape": "document",
       "tier": "stiff",
       "visibility": "authority",
-      "meaning": "Local news reports about incidents on or near campus.",
+      "meaning": "Local news reports about incidents on or near the site.",
       "connector": {
         "type": "rss",
         "url": "http://localhost:8765/campus-news.xml",
@@ -83,7 +84,6 @@
       { "id": "score", "visibility": "authority" },
       { "id": "panic.flow_source", "visibility": "authority" },
       { "id": "panic.density", "visibility": "authority" },
-      { "id": "room_button.density", "visibility": "authority" },
       { "id": "local_news.event_points", "visibility": "authority" }
     ],
     "poi_labels": {
@@ -100,9 +100,9 @@
   "routing": {
     "enabled": true,
     "destination_points": [
-      { "lat": 32.984359, "lon": -96.752072, "label": "South-west gathering point" },
-      { "lat": 32.987234, "lon": -96.748645, "label": "North-east gathering point" },
-      { "lat": 32.986964, "lon": -96.752179, "label": "North-west gathering point" }
+      { "lat": 32.778062, "lon": -96.76171, "label": "South-west gathering point" },
+      { "lat": 32.779976, "lon": -96.758237, "label": "East gathering point" },
+      { "lat": 32.780667, "lon": -96.761816, "label": "North-west gathering point" }
     ],
     "impassable_score": 0.7,
     "alpha": 6.0,
