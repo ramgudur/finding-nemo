@@ -17,7 +17,7 @@ export function HeatmapStats({ items }: { items: StatItem[] }) {
         <div key={s.label} className={`min-w-0 ${s.wide ? "col-span-2" : ""}`} title={s.title}>
           <dt className="uppercase tracking-[0.08em] text-inkSoft">{s.label}</dt>
           <dd
-            className={`mt-0.5 truncate ${
+            className={`mt-0.5 break-words ${
               s.tone === "warm" ? "text-[#C46F52]" : s.tone === "muted" ? "text-inkSoft" : "text-slate"
             }`}
           >

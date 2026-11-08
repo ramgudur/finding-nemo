@@ -2,6 +2,7 @@
 // Rule 8: what is drawn is exactly what the server returned for this key; without a key that is
 // public layers and public hotspots only. `spec` is null in the public view (the spec is authority-only),
 // so the geometry then comes from the MapResponse itself.
+import { useMemo } from "react";
 import type { AppSpec, GeoJsonBBox, MapResponse } from "../../api/types";
 import type { LiveAppData } from "../../hooks/useLiveAppData";
 import { Map } from "../Map/Map";
@@ -31,7 +32,14 @@ export function shownLayer(map: MapResponse | null, selectedLayerId: string | nu
 }
 
 export default function HeatmapPanel({ spec, live, selectedLayerId, className }: HeatmapPanelProps) {
-  const { map, hotspots } = live;
+  const { map, hotspots, pois } = live;
+  // Destination labels come from the spec (authority view); without it no pin is marked as a destination.
+  const labelSet = spec?.outputs?.poi_labels?.label_set;
+  const destinationLabels = useMemo(
+    () => (labelSet ? new Set(labelSet.filter((l) => l.destination).map((l) => l.label)) : null),
+    [labelSet],
+  );
+  const poiCount = pois ? pois.filter((p) => p.status === "active").length : null;
   const ids = map ? Object.keys(map.layers) : [];
   const shown = shownLayer(map, selectedLayerId);
   const selectedHidden = selectedLayerId !== null && map !== null && !ids.includes(selectedLayerId);
@@ -70,7 +78,7 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className }:
 
       <div className="relative">
         {bbox ? (
-          <Map bbox={bbox} layers={map?.layers ?? {}} visible={shown ? [shown] : []} hotspots={hotspots?.hotspots ?? []} cellM={cellM ?? undefined} height={480} />
+          <Map bbox={bbox} layers={map?.layers ?? {}} visible={shown ? [shown] : []} hotspots={hotspots?.hotspots ?? []} pois={pois ?? []} destinationLabels={destinationLabels} cellM={cellM ?? undefined} height={480} />
         ) : (
           <div aria-hidden className="h-[480px] rounded-2xl bg-mist/70 motion-safe:animate-pulse" />
         )}
@@ -117,6 +125,11 @@ export default function HeatmapPanel({ spec, live, selectedLayerId, className }:
             title: maxScore === null ? "The score layer isn't visible with the current key" : undefined,
           },
           { label: "hotspots", value: hsCount === null ? "…" : String(hsCount), tone: hsCount ? "warm" : "default" },
+          {
+            label: "POIs",
+            value: poiCount === null ? "…" : String(poiCount),
+            title: live.authority ? undefined : "Public POIs only; unlock the authority view to see the rest",
+          },
           {
             label: "cell",
             value: shape && cellM ? `${cellM} m · ${shape.rows} x ${shape.cols}` : "…",

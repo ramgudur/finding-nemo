@@ -4,21 +4,33 @@
 import { Bug, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
-import { api } from "../../api/client";
+import { ApiError, api } from "../../api/client";
 import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
 import { DemoTools } from "../DemoTools/DemoTools";
 
+// DEMO_MODE doesn't change while the backend runs, so a 404 is remembered for the page session and
+// /debug/clock is never asked again (no repeated 404s on every console visit). Network errors aren't
+// remembered: the next mount asks again.
+let demoModeKnown: boolean | null = null;
+
 export default function DebugDrawer({ appId, authorityKey, active }: { appId: string; authorityKey: string | null; active: boolean }) {
   const reduced = usePrefersReducedMotion();
-  const [demo, setDemo] = useState(false);
+  const [demo, setDemo] = useState(demoModeKnown === true);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    if (demoModeKnown !== null) return;
     let alive = true;
     api
       .debugClock()
-      .then(() => alive && setDemo(true))
-      .catch(() => alive && setDemo(false));
+      .then(() => {
+        demoModeKnown = true;
+        if (alive) setDemo(true);
+      })
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 404) demoModeKnown = false;
+        if (alive) setDemo(false);
+      });
     return () => {
       alive = false;
     };

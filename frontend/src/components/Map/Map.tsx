@@ -1,6 +1,6 @@
 import L from "leaflet";
 import { useEffect, useRef } from "react";
-import type { CellCollection, GeoJsonBBox, Hotspot } from "../../api/types";
+import type { CellCollection, GeoJsonBBox, Hotspot, POI } from "../../api/types";
 import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
 import { bboxToBounds, gridShape, heatColor, heatOpacity, lineStride, toLatLng } from "./geo";
 import "./map.css";
@@ -11,6 +11,10 @@ interface Props {
   /** Layer ids to draw, in order (later ones on top). Ids absent from `layers` are skipped. */
   visible: string[];
   hotspots: Hotspot[];
+  /** POIs as the server returned them for this key (already filtered per item, rule 8). */
+  pois?: POI[];
+  /** Labels the spec marks as routing destinations (null when the spec isn't visible). */
+  destinationLabels?: ReadonlySet<string> | null;
   /** Grid cell size; when given, subtle grid lines are drawn over the bbox. */
   cellM?: number;
   height?: number | string;
@@ -22,6 +26,58 @@ const GLOW_FROM = 0.6;
 const FADE_MS = 700;
 const MAX_GRID_LINES = 64; // per axis; larger grids draw every k-th boundary
 const MAX_STAGGER_MS = 650;
+const MAX_EVIDENCE = 3;
+const EVIDENCE_CHARS = 140;
+
+const clip = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
+
+/** Built with textContent only: labels and evidence are agent text and never go through innerHTML. */
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+function poiIcon(p: POI, destination: boolean): L.DivIcon {
+  const root = el("div", `hm-poi${destination ? " hm-poi--dest" : ""}`);
+  root.appendChild(el("span", "hm-poi-dot"));
+  const chip = el("span", "hm-poi-chip");
+  chip.appendChild(el("span", "hm-poi-label", clip(p.label, 28)));
+  chip.appendChild(el("span", "hm-poi-conf", p.confidence.toFixed(2)));
+  if (destination) chip.appendChild(el("span", "hm-poi-badge hm-poi-badge--dest", "destination"));
+  if (p.visibility === "authority") chip.appendChild(el("span", "hm-poi-badge", "authority only"));
+  root.appendChild(chip);
+  return L.divIcon({ html: root, className: "hm-poi-icon", iconSize: [0, 0], iconAnchor: [0, 0] });
+}
+
+function poiPopup(p: POI, destination: boolean): HTMLElement {
+  const root = el("div", "hm-poi-pop");
+  const head = el("div", "hm-poi-pop-head");
+  head.appendChild(el("strong", "", p.label));
+  head.appendChild(el("span", "hm-poi-conf", `confidence ${p.confidence.toFixed(2)}`));
+  root.appendChild(head);
+  const meta = [
+    destination ? "routing destination" : null,
+    p.visibility === "authority" ? "authority only" : "public",
+    `r ${Math.round(p.radius_m)} m`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  root.appendChild(el("div", "hm-poi-pop-meta", meta));
+  if (p.evidence.length) {
+    const ul = el("ul", "hm-poi-pop-ev");
+    for (const e of p.evidence.slice(0, MAX_EVIDENCE)) {
+      const li = el("li", "");
+      li.appendChild(el("span", "hm-poi-pop-kind", e.kind));
+      li.appendChild(document.createTextNode(` ${clip(e.text, EVIDENCE_CHARS)}`));
+      ul.appendChild(li);
+    }
+    if (p.evidence.length > MAX_EVIDENCE) ul.appendChild(el("li", "hm-poi-pop-more", `+${p.evidence.length - MAX_EVIDENCE} more`));
+    root.appendChild(ul);
+  } else root.appendChild(el("div", "hm-poi-pop-meta", "No evidence recorded."));
+  return root;
+}
 
 interface CellEntry {
   poly: L.Polygon;
@@ -44,13 +100,14 @@ function paint(el: Element | undefined, v: number, opacity: number, delayMs = 0)
  * Plain Leaflet inside React: one map instance; cells are long-lived paths keyed by layer/row/col and
  * restyled in place each tick, so values ease between frames instead of flashing.
  */
-export function Map({ bbox, layers, visible, hotspots, cellM, height = "min(70vh, 560px)", className }: Props) {
+export function Map({ bbox, layers, visible, hotspots, pois, destinationLabels, cellM, height = "min(70vh, 560px)", className }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const renderers = useRef<{ cells: L.Renderer; glow: L.Renderer } | null>(null);
   const cells = useRef(new globalThis.Map<string, CellEntry>());
   const gridGroup = useRef<L.LayerGroup | null>(null);
   const hotspotGroup = useRef<L.LayerGroup | null>(null);
+  const poiGroup = useRef<L.LayerGroup | null>(null);
   const fittedFor = useRef("");
   const reduced = usePrefersReducedMotion();
   const reducedRef = useRef(reduced);
@@ -77,6 +134,7 @@ export function Map({ bbox, layers, visible, hotspots, cellM, height = "min(70vh
     pane("hm-glow", 380);
     pane("hm-cells", 400);
     pane("hm-hotspots", 450).style.pointerEvents = "auto";
+    pane("hm-pois", 620).style.pointerEvents = "auto";
 
     renderers.current = {
       cells: L.svg({ pane: "hm-cells", padding: 0.5 }),
@@ -84,6 +142,7 @@ export function Map({ bbox, layers, visible, hotspots, cellM, height = "min(70vh
     };
     gridGroup.current = L.layerGroup().addTo(m);
     hotspotGroup.current = L.layerGroup().addTo(m);
+    poiGroup.current = L.layerGroup().addTo(m);
     map.current = m;
     const cellMap = cells.current;
     return () => {
@@ -262,6 +321,36 @@ export function Map({ bbox, layers, visible, hotspots, cellM, height = "min(70vh
         .addTo(g);
     }
   }, [hotspots]);
+
+  // POIs: a pin plus its label chip; the popup shows the evidence briefly. Few, and refreshed every
+  // ~10 s, so they are simply redrawn.
+  useEffect(() => {
+    const g = poiGroup.current;
+    if (!g) return;
+    g.clearLayers();
+    for (const p of pois ?? []) {
+      if (p.status !== "active") continue;
+      const dest = destinationLabels?.has(p.label) ?? false;
+      L.circle(toLatLng(p.lat, p.lon), {
+        pane: "hm-pois",
+        radius: p.radius_m,
+        color: dest ? "#3B6895" : "#35596B",
+        weight: 1,
+        opacity: 0.5,
+        fillOpacity: 0.04,
+        interactive: false,
+      }).addTo(g);
+      L.marker(toLatLng(p.lat, p.lon), {
+        pane: "hm-pois",
+        icon: poiIcon(p, dest),
+        keyboard: true,
+        title: `${p.label} (${p.confidence.toFixed(2)})`,
+        riseOnHover: true,
+      })
+        .bindPopup(poiPopup(p, dest), { className: "hm-popup", maxWidth: 280 })
+        .addTo(g);
+    }
+  }, [pois, destinationLabels]);
 
   return (
     <div

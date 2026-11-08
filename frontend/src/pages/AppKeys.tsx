@@ -2,7 +2,7 @@
 // (from this tab's ActivateResponse; the platform can't show them again), then how to send the first
 // event to each push input and what each pull input polls. Never echoes or logs a key elsewhere.
 import { ArrowRight, KeyRound, Link2, Send, TriangleAlert } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { loadKey, saveKey } from "../api/authorityKey";
 import { api } from "../api/client";
@@ -16,22 +16,100 @@ function sampleValue(type: FieldType): unknown {
   return type === "number" ? 1.0 : type === "integer" ? 1 : type === "boolean" ? true : "example";
 }
 
-function curlFor(origin: string, spec: AppSpec, input: InputSpec, ingestKey: string): string {
+/** Where the examples send events: VITE_API_BASE when the frontend is built for a separate API host,
+ * else this page's origin (the dev server, or a reverse proxy, forwards /v1 to the backend). */
+const API_BASE_ENV = ((import.meta.env.VITE_API_BASE as string | undefined) ?? "").trim().replace(/\/+$/, "");
+/** Where end users open the /go page (a public host or tunnel); else this page's origin. */
+const PUBLIC_BASE_ENV = ((import.meta.env.VITE_PUBLIC_BASE as string | undefined) ?? "").trim().replace(/\/+$/, "");
+
+type Shell = "bash" | "powershell";
+const SHELLS: Array<{ id: Shell; label: string }> = [
+  { id: "bash", label: "bash / zsh" },
+  { id: "powershell", label: "PowerShell" },
+];
+
+function sampleBody(spec: AppSpec, input: InputSpec): Record<string, unknown> {
   const b = spec.grid.bbox;
   const body: Record<string, unknown> = {
     user_id: "device-1",
     lat: Number(((b.min_lat + b.max_lat) / 2).toFixed(6)),
     lon: Number(((b.min_lon + b.max_lon) / 2).toFixed(6)),
-    ts: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
   };
   for (const f of input.fields ?? []) body[f.name] = sampleValue(f.type);
-  const url = `${origin}/v1/apps/${encodeURIComponent(spec.app_id)}/inputs/${encodeURIComponent(input.id)}/events`;
+  return body;
+}
+
+const TS_TOKEN = "__TS_NOW__";
+
+/** bash: the body is single-quoted, and ts is spliced in from `date -u` when the command runs. */
+function curlBash(url: string, body: Record<string, unknown>, ingestKey: string): string {
+  const json = JSON.stringify({ ...body, ts: TS_TOKEN })
+    .replace(/'/g, `'\\''`)
+    .replace(`"${TS_TOKEN}"`, `"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"`);
   return [
     `curl -X POST "${url}" \\`,
     `  -H "Content-Type: application/json" \\`,
     `  -H "X-Ingest-Key: ${ingestKey}" \\`,
-    `  -d '${JSON.stringify(body)}'`,
+    `  -d '${json}'`,
   ].join("\n");
+}
+
+const psStr = (v: string) => `'${v.replace(/'/g, "''")}'`;
+const psVal = (v: unknown) =>
+  typeof v === "boolean" ? (v ? "$true" : "$false") : typeof v === "number" ? String(v) : psStr(String(v));
+
+/** PowerShell (5.1 and 7): a hashtable through ConvertTo-Json, ts taken from the clock when it runs. */
+function irmPowerShell(url: string, body: Record<string, unknown>, ingestKey: string): string {
+  const lines = Object.entries(body).map(([k, v]) => `  ${psStr(k)} = ${psVal(v)}`);
+  lines.push(`  'ts' = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')`);
+  return [
+    `$body = @{`,
+    ...lines,
+    `} | ConvertTo-Json`,
+    `Invoke-RestMethod -Method Post -Uri ${psStr(url)} \``,
+    `  -ContentType 'application/json' \``,
+    `  -Headers @{ 'X-Ingest-Key' = ${psStr(ingestKey)} } \``,
+    `  -Body $body`,
+  ].join("\n");
+}
+
+function exampleFor(shell: Shell, base: string, spec: AppSpec, input: InputSpec, ingestKey: string): string {
+  const url = `${base}/v1/apps/${encodeURIComponent(spec.app_id)}/inputs/${encodeURIComponent(input.id)}/events`;
+  const body = sampleBody(spec, input);
+  return shell === "bash" ? curlBash(url, body, ingestKey) : irmPowerShell(url, body, ingestKey);
+}
+
+function ShellTabs({ shell, onChange }: { shell: Shell; onChange: (s: Shell) => void }) {
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const next = shell === "bash" ? "powershell" : "bash";
+    onChange(next);
+    document.getElementById(`shell-tab-${next}`)?.focus();
+  };
+  return (
+    <div role="tablist" aria-label="Example shell" onKeyDown={onKey} className="inline-flex gap-1 rounded-full bg-white/60 p-1">
+      {SHELLS.map(({ id, label }) => {
+        const on = shell === id;
+        return (
+          <button
+            key={id}
+            id={`shell-tab-${id}`}
+            role="tab"
+            type="button"
+            aria-selected={on}
+            tabIndex={on ? 0 : -1}
+            onClick={() => onChange(id)}
+            className={`rounded-full px-3 py-1 text-[12.5px] font-semibold transition-colors duration-150 ${
+              on ? "bg-cream text-slate shadow-sm ring-1 ring-paleWater" : "text-ink hover:text-slate"
+            }`}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function KeyField({ label, hint, value }: { label: string; hint: string; value: string }) {
@@ -88,11 +166,16 @@ export default function AppKeys() {
     };
   }, [appId, authorityKey, spec]);
 
+  const [shell, setShell] = useState<Shell>(() => (/Windows/i.test(navigator.userAgent) ? "powershell" : "bash"));
   const origin = window.location.origin;
+  const apiBase = API_BASE_ENV || origin;
   const consoleHref = `/apps/${encodeURIComponent(appId)}`;
   const push = (spec?.inputs ?? []).filter((i) => i.kind === "push");
   const pull = (spec?.inputs ?? []).filter((i) => i.kind === "pull");
-  const publicLink = spec?.routing?.enabled ? `${origin}/apps/${encodeURIComponent(appId)}/go` : null;
+  // Always shown (it doesn't need the spec, which is fetched with the key); the /go page handles routing-off.
+  const publicBase = PUBLIC_BASE_ENV || origin;
+  const publicLink = `${publicBase}/apps/${encodeURIComponent(appId)}/go`;
+  const localPublic = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(publicBase);
   const ingestKey = activation?.ingest_key ?? INGEST_PLACEHOLDER;
 
   const openConsole = () => {
@@ -165,7 +248,14 @@ export default function AppKeys() {
               Send your first event
             </h2>
             <p className="max-w-[70ch] text-[14px] text-ink">
-              Each push input has its own endpoint. The example posts one event at the centre of your grid; swap in real values.
+              Each push input has its own endpoint. The example posts one event at the centre of your grid, stamped with the time you run it; swap in real values.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <ShellTabs shell={shell} onChange={setShell} />
+            <p className="font-mono text-[12px] text-ink">
+              API base <span className="break-all text-slate">{apiBase}</span>
+              {!API_BASE_ENV && import.meta.env.DEV && " · this dev server proxies /v1 to the backend"}
             </p>
           </div>
           {push.map((i) => (
@@ -179,7 +269,10 @@ export default function AppKeys() {
               <p className="break-all font-mono text-[12.5px] text-slate">
                 POST /v1/apps/{appId}/inputs/{i.id}/events
               </p>
-              <CodeBlock code={curlFor(origin, spec, i, ingestKey)} label={`curl example for ${i.id}`} />
+              <CodeBlock
+                code={exampleFor(shell, apiBase, spec, i, ingestKey)}
+                label={`${shell === "bash" ? "curl" : "PowerShell"} example for ${i.id}`}
+              />
               {i.webhook && (
                 <div className="space-y-1">
                   <p className="text-[13px] text-slate">
@@ -188,9 +281,9 @@ export default function AppKeys() {
                   </p>
                   <div className="flex items-center gap-2">
                     <code className="min-w-0 flex-1 break-all rounded-lg bg-white/70 px-2.5 py-1.5 font-mono text-[12.5px] text-slate">
-                      {origin}/v1/apps/{appId}/webhooks/{i.id}
+                      {apiBase}/v1/apps/{appId}/webhooks/{i.id}
                     </code>
-                    <CopyButton value={`${origin}/v1/apps/${encodeURIComponent(appId)}/webhooks/${encodeURIComponent(i.id)}`} />
+                    <CopyButton value={`${apiBase}/v1/apps/${encodeURIComponent(appId)}/webhooks/${encodeURIComponent(i.id)}`} />
                   </div>
                   <p className="font-mono text-[12px] text-ink">
                     lat ← {i.webhook.lat} · lon ← {i.webhook.lon}
@@ -232,21 +325,33 @@ export default function AppKeys() {
         </section>
       )}
 
-      {publicLink && (
-        <section aria-labelledby="k-public" className="space-y-2 rounded-2xl bg-white/45 p-4">
-          <div className="flex items-center gap-2">
-            <Link2 aria-hidden className="h-4 w-4 text-mutedTeal" />
-            <h2 id="k-public" className="text-[15px] font-bold text-slate">
-              Public end-user link
-            </h2>
-          </div>
-          <p className="text-[13.5px] text-ink">Share it with end users: they get route instructions only, never your data.</p>
-          <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 break-all rounded-lg bg-white/70 px-2.5 py-1.5 font-mono text-[12.5px] text-slate">{publicLink}</code>
-            <CopyButton value={publicLink} />
-          </div>
-        </section>
-      )}
+      <section aria-labelledby="k-public" className="space-y-2 rounded-2xl bg-white/45 p-4">
+        <div className="flex items-center gap-2">
+          <Link2 aria-hidden className="h-4 w-4 text-mutedTeal" />
+          <h2 id="k-public" className="text-[15px] font-bold text-slate">
+            Public end-user link
+          </h2>
+        </div>
+        <p className="max-w-[70ch] text-[13.5px] text-ink">
+          Share it with end users: they get route instructions only, never your data. If routing is off for this app, the page says so.
+        </p>
+        <div className="flex items-center gap-2">
+          <a
+            href={publicLink}
+            target="_blank"
+            rel="noreferrer"
+            className="min-w-0 flex-1 break-all rounded-lg bg-white/70 px-2.5 py-1.5 font-mono text-[12.5px] text-slate underline decoration-mutedTeal/50 underline-offset-2 transition-colors hover:decoration-slate"
+          >
+            {publicLink}
+          </a>
+          <CopyButton value={publicLink} />
+        </div>
+        {localPublic && (
+          <p className="max-w-[70ch] text-[12.5px] text-ink">
+            Share it via your public host or a tunnel (e.g. cloudflared): a localhost link only works on this computer. Set VITE_PUBLIC_BASE to put the public address here.
+          </p>
+        )}
+      </section>
 
       {activation && (
         <div className="flex flex-wrap items-center justify-end gap-3 pt-2">

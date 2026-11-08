@@ -2,7 +2,7 @@
 // it (PUT /spec), then confirm it (POST /activate, the only dev confirmation; rule 4). An app that is
 // already live redirects to its console. Spec source: this tab's compile, else this browser's
 // snapshot, confirmed against the server (GET /apps/{app} answers keyless while the app is proposed).
-import { Lock, ShieldCheck, Undo2 } from "lucide-react";
+import { Check, Lock, ShieldCheck, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { dropSpecSnapshot, listProjects, loadSpecSnapshot, recordProject, saveKey, saveSpecSnapshot } from "../api/authorityKey";
@@ -231,9 +231,13 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
       <div className="sticky bottom-4 z-20 flex flex-col gap-3 rounded-2xl bg-cream/95 p-3 shadow-[0_10px_32px_-12px_rgba(53,89,107,0.45)] backdrop-blur-sm sm:flex-row sm:items-center sm:px-4">
         <p className="flex min-w-0 flex-1 items-start gap-2 text-[13px] text-slate">
           <Lock aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-mutedTeal" />
-          <span>
+          <span aria-live="polite">
             {d.dirty ? (
               <span className="font-semibold">Unsaved edits. Save or discard them before you confirm.</span>
+            ) : d.justSaved ? (
+              <span className="inline-flex items-center gap-1.5 font-semibold">
+                <Check aria-hidden className="h-3.5 w-3.5 text-mutedTeal" /> Saved. Your edits are in the proposed spec.
+              </span>
             ) : (
               <>
                 <span className="font-semibold">Confirming locks:</span> {summary}.
