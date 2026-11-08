@@ -33,34 +33,57 @@ MAX_ITERATIONS = 8
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "compiler.md").read_text(encoding="utf-8")
 
 
-def _cache_key(intent: str, inputs: list[dict[str, Any]]) -> str:
-    payload = json.dumps({"intent": intent, "inputs": inputs}, sort_keys=True, default=str)
+def _cache_key(intent: str, inputs: list[dict[str, Any]], destinations: list[dict[str, Any]] | None = None) -> str:
+    given = {"intent": intent, "inputs": inputs, "destinations": destinations or []}
+    payload = json.dumps(given, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
 @dataclass
 class CompilerCache:
-    """In-process cache of compiled specs, keyed by `(intent, inputs)`. Not persisted:
+    """In-process cache of compiled specs, keyed by `(intent, inputs, destinations)`. Not persisted:
     a restart simply recompiles, same as a first-ever request (safe default)."""
 
     _by_key: dict[str, AppSpec] = field(default_factory=dict)
 
-    def get(self, intent: str, inputs: list[dict[str, Any]]) -> AppSpec | None:
-        return self._by_key.get(_cache_key(intent, inputs))
+    def get(
+        self, intent: str, inputs: list[dict[str, Any]], destinations: list[dict[str, Any]] | None = None
+    ) -> AppSpec | None:
+        return self._by_key.get(_cache_key(intent, inputs, destinations))
 
-    def put(self, intent: str, inputs: list[dict[str, Any]], spec: AppSpec) -> None:
-        self._by_key[_cache_key(intent, inputs)] = spec
+    def put(
+        self,
+        intent: str,
+        inputs: list[dict[str, Any]],
+        spec: AppSpec,
+        destinations: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self._by_key[_cache_key(intent, inputs, destinations)] = spec
 
 
 COMPILER_CACHE = CompilerCache()
 
 
-def _task_prompt(app_id: str, intent: str, grid: dict[str, Any], inputs: list[dict[str, Any]]) -> str:
-    given = {"app_id": app_id, "intent": intent, "grid": grid, "inputs": inputs}
+def _task_prompt(
+    app_id: str,
+    intent: str,
+    grid: dict[str, Any],
+    inputs: list[dict[str, Any]],
+    destinations: list[dict[str, Any]] | None = None,
+) -> str:
+    given: dict[str, Any] = {"app_id": app_id, "intent": intent, "grid": grid, "inputs": inputs}
+    note = ""
+    if destinations:
+        given["destination_points"] = destinations
+        note = (
+            "\nThe dev picked the destination_points above on the map. They are copied into "
+            "routing.destination_points as given (you can't add, move or drop them), so they "
+            "count as destinations when you decide on routing."
+        )
     return (
         "Compile this into a complete proposed AppSpec, exactly as given below plus your "
         "own choices of tier, operators, plausibility, verification, outputs and routing "
-        f"for the inputs:\n{json.dumps(given, indent=2)}"
+        f"for the inputs:\n{json.dumps(given, indent=2)}{note}"
     )
 
 
@@ -71,14 +94,20 @@ async def run_compiler(
     intent: str,
     grid: dict[str, Any],
     inputs: list[dict[str, Any]],
+    destination_points: list[dict[str, Any]] | None = None,
     llm: LlmRouter | None = None,
     cache: CompilerCache | None = None,
 ) -> AppSpec | None:
     """Compile `app_id` from `intent` and `inputs`. Returns the proposed spec (already
     saved as `pending_confirmation`), or `None` if the run was skipped, rate-limited, or
-    never reached a valid `finalize_app` call."""
+    never reached a valid `finalize_app` call.
+
+    `destination_points` are the dev's own words, like `meaning`: `finalize_app` writes them
+    into `routing.destination_points` verbatim, whatever the model proposed."""
     cache = COMPILER_CACHE if cache is None else cache
-    cached = cache.get(intent, inputs)
+    destinations = list(destination_points or [])
+    ctx.extra["dev_destination_points"] = destinations
+    cached = cache.get(intent, inputs, destinations)
     if cached is not None:
         # Through finalize_app (not a direct db.upsert_app), so a cache hit gets the same
         # guards as a fresh compile -- in particular, it can't silently demote an already
@@ -102,7 +131,7 @@ async def run_compiler(
         agent="compiler",
         model_field="compiler",
         system=SYSTEM_PROMPT,
-        task=_task_prompt(app_id, intent, grid, inputs),
+        task=_task_prompt(app_id, intent, grid, inputs, destinations),
         llm=llm,
         max_iterations=MAX_ITERATIONS,
         enable_thinking=True,
@@ -110,5 +139,5 @@ async def run_compiler(
     spec = ctx.db.get_app(app_id)
     if spec is None or spec.status != "pending_confirmation":
         return None
-    cache.put(intent, inputs, spec)
+    cache.put(intent, inputs, spec, destinations)
     return spec

@@ -189,6 +189,10 @@ class CompileRequest(Model):
     intent: str
     grid: GridSpec
     inputs: list[CompileInput] = Field(default_factory=list)
+    destination_points: list[DestinationPoint] = Field(
+        default_factory=list,
+        description="Fixed destinations the dev picked on the map. Copied verbatim into routing.destination_points.",
+    )
 
 
 class VerificationSpec(Model):

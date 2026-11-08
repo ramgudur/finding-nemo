@@ -1,7 +1,7 @@
 // App builder: describe the app and its inputs -> the Compiler proposes a spec -> review -> confirm.
 // Confirming activates the app and shows its keys once. Domain-neutral copy: the dev's words go in the form.
 import L from "leaflet";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { saveKey } from "../api/authorityKey";
 import { ApiError, api } from "../api/client";
 import { MAX_GRID_CELLS } from "../api/types";
@@ -10,6 +10,7 @@ import type {
   AppSpec,
   BBox,
   CompileInput,
+  DestinationPoint,
   FieldType,
   InputField,
   InputKind,
@@ -70,10 +71,23 @@ function warnings(spec: AppSpec): string[] {
 const box = { border: "1px solid #ddd", borderRadius: 6, padding: "10px 12px" } as const;
 const muted = { color: "#666" } as const;
 
-function AreaPicker({ bbox, onChange }: { bbox: BBox | null; onChange: (b: BBox) => void }) {
+const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
+
+function AreaPicker({
+  bbox,
+  onChange,
+  points,
+  onPick,
+}: {
+  bbox: BBox | null;
+  onChange: (b: BBox) => void;
+  points: DestinationPoint[];
+  onPick: ((lat: number, lon: number) => void) | null; // set while the dev is placing destinations
+}) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const rect = useRef<L.Rectangle | null>(null);
+  const marks = useRef<L.LayerGroup | null>(null);
 
   useEffect(() => {
     if (!el.current) return;
@@ -83,6 +97,7 @@ function AreaPicker({ bbox, onChange }: { bbox: BBox | null; onChange: (b: BBox)
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(m);
     map.current = m;
+    marks.current = L.layerGroup().addTo(m);
     return () => {
       m.remove();
       map.current = null;
@@ -104,10 +119,33 @@ function AreaPicker({ bbox, onChange }: { bbox: BBox | null; onChange: (b: BBox)
       : null;
   }, [bbox]);
 
+  useEffect(() => {
+    const g = marks.current;
+    if (!g) return;
+    g.clearLayers();
+    for (const p of points) {
+      L.circleMarker([p.lat, p.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#1a7f37", fillOpacity: 1 })
+        .bindTooltip(p.label || "(no label yet)", { permanent: true, direction: "right" })
+        .addTo(g);
+    }
+  }, [points]);
+
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !onPick) return;
+    const click = (e: L.LeafletMouseEvent) => onPick(round6(e.latlng.lat), round6(e.latlng.lng));
+    m.on("click", click);
+    m.getContainer().style.cursor = "crosshair";
+    return () => {
+      m.off("click", click);
+      m.getContainer().style.cursor = "";
+    };
+  }, [onPick]);
+
   const useView = () => {
     const b = map.current?.getBounds();
     if (!b) return;
-    const r = (v: number) => Math.round(v * 1e6) / 1e6;
+    const r = round6;
     onChange({ min_lat: r(b.getSouth()), min_lon: r(b.getWest()), max_lat: r(b.getNorth()), max_lon: r(b.getEast()) });
   };
 
@@ -217,6 +255,8 @@ export function Builder() {
   const [cellM, setCellM] = useState(25);
   const [bbox, setBbox] = useState<BBox | null>(null);
   const [inputs, setInputs] = useState<Draft[]>([emptyInput()]);
+  const [points, setPoints] = useState<DestinationPoint[]>([]);
+  const [placing, setPlacing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState("");
@@ -240,10 +280,18 @@ export function Builder() {
       dims[0] * dims[1] > MAX_GRID_CELLS &&
       `The grid would be ${dims[0]} x ${dims[1]} cells; the limit is ${MAX_GRID_CELLS.toLocaleString()}. Use a smaller area or bigger cells.`,
     inputs.some((i) => !SLUG.test(i.id) || !i.meaning.trim()) && "Every input needs an id and a meaning.",
+    points.some((p) => !p.label.trim()) && "Every destination needs a label.",
+    bbox &&
+      points.some((p) => p.lat < bbox.min_lat || p.lat > bbox.max_lat || p.lon < bbox.min_lon || p.lon > bbox.max_lon) &&
+      "Every destination must be inside the area.",
   ].filter(Boolean) as string[];
 
   const setInput = (k: number, patch: Partial<Draft>) =>
     setInputs((xs) => xs.map((x, j) => (j === k ? { ...x, ...patch } : x)));
+
+  const addPoint = useCallback((lat: number, lon: number) => setPoints((xs) => [...xs, { lat, lon, label: "" }]), []);
+  const setPoint = (k: number, patch: Partial<DestinationPoint>) =>
+    setPoints((xs) => xs.map((x, j) => (j === k ? { ...x, ...patch } : x)));
 
   const compile = async () => {
     if (!bbox) return;
@@ -257,6 +305,7 @@ export function Builder() {
         inputs: inputs.map(
           (i): CompileInput => ({ id: i.id, kind: i.kind, shape: i.shape, meaning: i.meaning.trim(), fields: parseFields(i.fields) }),
         ),
+        destination_points: points.map((p) => ({ ...p, label: p.label.trim() })),
       };
       setSpec(await api.compile(appId, body));
     } catch (e) {
@@ -329,12 +378,37 @@ export function Builder() {
       </label>
       <fieldset style={box}>
         <legend>Area</legend>
-        <AreaPicker bbox={bbox} onChange={setBbox} />
+        <AreaPicker bbox={bbox} onChange={setBbox} points={points} onPick={placing ? addPoint : null} />
         <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
           Cell size (m)
           <input type="number" min={1} value={cellM} onChange={(e) => setCellM(Number(e.target.value))} style={{ width: 90 }} />
           {dims && <span style={muted}>{`grid ${dims[0]} x ${dims[1]} cells`}</span>}
         </label>
+      </fieldset>
+      <fieldset style={{ ...box, display: "grid", gap: 8 }}>
+        <legend>Fixed destinations (optional)</legend>
+        <span style={muted}>
+          Places users can be routed to, used exactly as you place them. Leave empty if the app doesn't give directions
+          or the destinations come from labelled places.
+        </span>
+        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input type="checkbox" checked={placing} onChange={(e) => setPlacing(e.target.checked)} />
+          Click the map above to add a destination
+        </label>
+        {points.map((p, k) => (
+          <div key={k} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              aria-label="destination label"
+              placeholder="label, e.g. the name of the place"
+              value={p.label}
+              onChange={(e) => setPoint(k, { label: e.target.value })}
+            />
+            <span style={muted}>{`${p.lat}, ${p.lon}`}</span>
+            <button type="button" onClick={() => setPoints((xs) => xs.filter((_, j) => j !== k))}>
+              Remove
+            </button>
+          </div>
+        ))}
       </fieldset>
       <fieldset style={{ ...box, display: "grid", gap: 10 }}>
         <legend>Inputs</legend>
