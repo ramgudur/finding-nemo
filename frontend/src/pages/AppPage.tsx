@@ -34,11 +34,12 @@ export function AppPage({ appId }: { appId: string }) {
     setBbox(m.bbox);
     setLayers(m.layers);
     setHotspots(h.hotspots);
-    // keep the dev's toggles, minus layers no longer returned (e.g. after the key is removed)
+    // first data picks a default; after that the dev's toggles stand (the map skips absent layers)
     setVisible((v) => {
+      if (v !== null) return v;
       const ids = Object.keys(m.layers);
-      if (v === null) return ids.includes("score") ? ["score"] : ids.slice(0, 1);
-      return v.filter((id) => ids.includes(id));
+      if (ids.length === 0) return null;
+      return ids.includes("score") ? ["score"] : ids.slice(0, 1);
     });
     setUpdated(new Date(m.t).toLocaleTimeString());
     setError("");
