@@ -70,9 +70,10 @@ def scenario(
     return rows
 
 
-def operator_estimate(rows, estimator="consensus"):
+def operator_estimate(rows, estimator="consensus", source_speed_mps=0.0):
     ev = events_from_xy(GRID, rows)
-    res = flow_source(ev, FlowSourceParams(window_s=WINDOW_S, estimator=estimator), None, FixedClock(NOW), GRID)
+    params = FlowSourceParams(window_s=WINDOW_S, estimator=estimator, source_speed_mps=source_speed_mps)
+    res = flow_source(ev, params, None, FixedClock(NOW), GRID)
     pt = res.extras["point"]
     if pt is None:
         return None, None
@@ -93,7 +94,7 @@ def evaluate(seeds, estimator="consensus", **kw):
     for s in seeds:
         rows = scenario(seed=s, **kw)
         p_ref = reference_estimate(rows)
-        p_op, unc = operator_estimate(rows, estimator)
+        p_op, unc = operator_estimate(rows, estimator, kw.get("source_speed", 0.0))
         ref_err.append(np.inf if p_ref is None else float(np.linalg.norm(p_ref - truth)))
         e = np.inf if p_op is None else float(np.linalg.norm(p_op - truth))
         op_err.append(e)

@@ -175,3 +175,15 @@ def test_consensus_parallel_and_empty():
     assert flow_source(events_from_xy(GRID, rows), params, None, FixedClock(20.0), GRID).extras["point"] is None
     empty = flow_source(events_from_xy(GRID, []), params, None, FixedClock(0.0), GRID)
     assert empty.extras["point"] is None and not empty.layer.any()
+
+
+def test_source_speed_widens_uncertainty_only_when_set():
+    ev = flee_scenario(GRID, origin=ORIGIN, seed=3)
+    static = _run(ev)
+    moving = _run(ev, FULL_WINDOW.model_copy(update={"source_speed_mps": 2.0}))
+    assert moving.extras["point"] == static.extras["point"]  # the point itself is unchanged
+    # information age here is the whole window (tracks start at t=0, now=60 s): ~2 m/s x 60 s
+    assert moving.extras["uncertainty_m"] == pytest.approx(
+        np.hypot(static.extras["uncertainty_m"], 2.0 * 60.0), rel=1e-6
+    )
+    assert FlowSourceParams().source_speed_mps == 0.0
