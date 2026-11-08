@@ -25,8 +25,9 @@ from typing import Any
 
 from app.agents.llm import LlmRouter
 from app.agents.loop import run_agent
-from app.core.models import AppSpec
+from app.core.models import AppSpec, TraceEntry
 from app.tools.context import ToolContext
+from app.tools.registry import call_tool
 
 MAX_ITERATIONS = 8
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "compiler.md").read_text(encoding="utf-8")
@@ -79,13 +80,22 @@ async def run_compiler(
     cache = COMPILER_CACHE if cache is None else cache
     cached = cache.get(intent, inputs)
     if cached is not None:
-        # model_copy(update=...) doesn't validate/coerce the update, so round-trip through
-        # model_validate to turn the raw `grid` dict into a real GridSpec.
-        spec = AppSpec.model_validate(
-            {**cached.model_dump(mode="json"), "app_id": app_id, "grid": grid, "status": "pending_confirmation"}
+        # Through finalize_app (not a direct db.upsert_app), so a cache hit gets the same
+        # guards as a fresh compile -- in particular, it can't silently demote an already
+        # active app back to pending_confirmation (rule 4: locked stays locked).
+        spec_dict = {**cached.model_dump(mode="json"), "app_id": app_id, "grid": grid}
+        result = call_tool(ctx, "finalize_app", {"spec": spec_dict})
+        ctx.db.add_trace(
+            TraceEntry(
+                t=ctx.now_dt(),
+                app_id=app_id,
+                agent="compiler",
+                action="output" if result["ok"] else "error",
+                why="cache hit, no LLM",
+                result=str(result["result"] if result["ok"] else result["error"])[:500],
+            )
         )
-        ctx.db.upsert_app(spec, t=ctx.now())
-        return spec
+        return ctx.db.get_app(app_id) if result["ok"] else None
 
     await run_agent(
         ctx,

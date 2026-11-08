@@ -61,6 +61,25 @@ def test_second_compile_with_the_same_intent_and_inputs_hits_the_cache():
     assert second.grid.cell_m == GRID["cell_m"]
 
 
+def test_a_cache_hit_never_demotes_an_already_active_app():
+    cache = CompilerCache()
+    ctx1 = _ctx("campus-alert")
+    first = _run(ctx1, _router("compiler_campus_alert"), cache=cache)
+    assert first is not None
+
+    # the app was since confirmed and activated
+    active = ctx1.db.get_app("campus-alert").model_copy(update={"status": "active"})
+    ctx1.db.upsert_app(active, t=ctx1.now())
+
+    router2 = _router("compiler_campus_alert")
+    result = _run(ctx1, router2, cache=cache)  # same ctx/app_id, same intent+inputs: a cache hit
+    assert result is None  # rejected, not silently applied
+    assert ctx1.db.get_app("campus-alert").status == "active"  # untouched
+    assert router2._provider("nvidia").client.calls == []  # still served from cache, not the LLM
+    traces = [t for t in ctx1.db.list_trace("campus-alert") if t.why == "cache hit, no LLM"]
+    assert traces and traces[-1].action == "error"
+
+
 def test_a_different_intent_is_not_served_from_the_same_cache_entry():
     cache = CompilerCache()
     ctx1 = _ctx("campus-alert")
