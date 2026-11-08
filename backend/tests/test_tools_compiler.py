@@ -653,6 +653,38 @@ def test_finalize_app_refuses_an_unsafe_dev_connector_url(ctx, monkeypatch):
     assert ctx.db.get_app("draft-app").status == "draft"
 
 
+# -- #222: the dev's chosen webhook mapping (CompileInput.webhook) is copied verbatim ----
+
+
+def test_finalize_app_copies_the_devs_webhook_mapping_over_the_models(ctx):
+    dev = {
+        "items_path": "items",
+        "lat": "lat",
+        "lon": "lon",
+        "ts": None,
+        "ts_format": "iso",
+        "user_id": None,
+        "fields": {},
+    }
+    ctx.extra["dev_webhooks"] = {"pings": dev}
+    spec = _good_spec_dict()
+    spec["inputs"][0]["webhook"] = {"items_path": "x", "lat": "a", "lon": "b"}  # the model's own guess
+    r = _call(ctx, "finalize_app", {"spec": spec})
+    assert r["ok"] is True, r
+    pings = next(i for i in ctx.db.get_app("draft-app").inputs if i.id == "pings")
+    assert pings.webhook.model_dump(mode="json") == dev
+    (change,) = ctx.db.list_changes("draft-app", kind="webhook")
+    assert change.actor == "dev" and change.target == "pings" and change.after == dev
+
+
+def test_finalize_app_adds_the_devs_webhook_mapping_when_the_model_left_it_out(ctx):
+    ctx.extra["dev_webhooks"] = {"pings": {"items_path": "", "lat": "lat", "lon": "lon"}}
+    r = _call(ctx, "finalize_app", {"spec": _good_spec_dict()})
+    assert r["ok"] is True, r
+    pings = next(i for i in ctx.db.get_app("draft-app").inputs if i.id == "pings")
+    assert pings.webhook.lat == "lat" and pings.webhook.lon == "lon"
+
+
 # -- the dev's declarations are pinned at finalize (#164) -----------------------------------------
 
 
