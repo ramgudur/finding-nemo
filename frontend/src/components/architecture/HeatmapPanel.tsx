@@ -179,7 +179,7 @@ export default function HeatmapPanel({
             previewLine={previewLine}
             tint={tint}
             flash={learning?.flash ?? null}
-            distrusted={learning?.distrusted ?? []}
+            distrusted={[] /* muted reporters simply drop out of the heat; dots for each were clutter */}
             agentMarks={!!learning}
             newPoiIds={learning?.newPoiIds}
             serverNow={map?.t ?? null}

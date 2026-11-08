@@ -149,7 +149,15 @@ def parse(text: str, config: dict[str, Any], now: float, bbox: BBox | None = Non
             continue
         seen.add(did)
         out.events.append(
-            {"user_id": src, "lat": lat, "lon": lon, "ts": ts, "text": body, "confidence": conf, "doc_id": did}
+            {
+                "user_id": src,
+                "lat": lat,
+                "lon": lon,
+                "ts": ts,
+                "text": body,
+                "confidence": conf,
+                "doc_id": f"{did}-{int(now // 60)}",
+            }  # fresh each poll minute
         )
     return out
 

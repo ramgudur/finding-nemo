@@ -113,12 +113,17 @@ class OperatorParams(BaseModel):
     noise_floor: float = Field(gt=0)
 
 
+MUTE_BELOW_TRUST = 0.35
+
+
 def trust_weights(user_id: np.ndarray, trust: Mapping[str, float] | None) -> np.ndarray:
     """Per-event trust in [0, 1]; unknown users get 1.0."""
     if not trust:
         return np.ones(len(user_id))
-    w = np.array([trust.get(u, 1.0) for u in user_id], dtype=float)
-    return np.clip(w, 0.0, 1.0)
+    w = np.clip(np.array([trust.get(u, 1.0) for u in user_id], dtype=float), 0.0, 1.0)
+    # Below this, a reporter is muted: per-layer p99 normalisation would otherwise cancel a trust cut
+    # that applies to most of a layer, and the cut would never show on the map.
+    return np.where(w < MUTE_BELOW_TRUST, 0.0, w)
 
 
 def cell_index(grid: GridLike, x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
