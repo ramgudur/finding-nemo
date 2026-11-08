@@ -2,8 +2,9 @@
 
 The server never looks a position up by user id, so this can't be used to find anyone else. Routing,
 the code-built text and every guard check live in `tools/message_guard.py`; on any failure the caller
-gets the spec's `fallback_text`. Each request writes one authority-only TraceEntry with the checks,
-never the caller's position or the text.
+gets the spec's `fallback_text`. A request writes an authority-only TraceEntry with the checks only when
+its outcome (passed, destination label, failing checks) changed for that app and grid cell of the caller's
+position (`api/instruction_trace.py`, #169), since pages recompute every tick. Never the position or text.
 """
 
 from __future__ import annotations
@@ -12,7 +13,8 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
-from app.api.deps import get_db, get_engine
+from app.api.deps import get_db, get_engine, get_instruction_trace_dedup
+from app.api.instruction_trace import InstructionTraceDedup
 from app.core import clock as clock_mod
 from app.core.db import Db
 from app.core.models import Instruction, InstructionRequest
@@ -29,6 +31,7 @@ def post_instruction(
     response: Response,
     db: Db = Depends(get_db),
     engine: TickEngine = Depends(get_engine),
+    dedup: InstructionTraceDedup = Depends(get_instruction_trace_dedup),
 ) -> Instruction:
     rt = engine.apps.get(app)
     if rt is None:
@@ -48,6 +51,9 @@ def post_instruction(
         pois=db.list_pois(app, status="active"),
         now=now,
     )
-    db.add_trace(message_guard.trace_entry(app, ins, now))
+    row, col, inside = rt.grid.cell_of(body.lat, body.lon)
+    key = (app, int(row), int(col)) if bool(inside) else (app, None)
+    if dedup.should_trace(key, ins):
+        db.add_trace(message_guard.trace_entry(app, ins, now))
     response.headers["Cache-Control"] = "no-store"
     return ins

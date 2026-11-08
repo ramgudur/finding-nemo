@@ -1,0 +1,35 @@
+{
+ "_meta": {
+  "recorded": "live, Nominatim jsonv2, #219",
+  "q": "Bundesplatz",
+  "viewbox_bbox": [
+   7.437,
+   46.941,
+   7.458,
+   46.955
+  ]
+ },
+ "results": [
+  {
+   "place_id": 92236511,
+   "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "way",
+   "osm_id": 285012116,
+   "lat": "46.9470085",
+   "lon": "7.4441612",
+   "category": "place",
+   "type": "square",
+   "place_rank": 25,
+   "importance": 0.3202715765630289,
+   "addresstype": "square",
+   "name": "Bundesplatz",
+   "display_name": "Bundesplatz, Gelbes Quartier, Stadtteil I, Bern, Verwaltungskreis Bern-Mittelland, Verwaltungsregion Bern-Mittelland, Bern/Berne, Schweiz / Suisse / Svizzera / Svizra",
+   "boundingbox": [
+    "46.9466570",
+    "46.9473908",
+    "7.4435308",
+    "7.4447915"
+   ]
+  }
+ ]
+}

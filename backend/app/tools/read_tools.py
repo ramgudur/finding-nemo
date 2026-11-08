@@ -191,7 +191,8 @@ def get_suspicious_users(ctx: ToolContext, args: WindowArgs) -> dict[str, Any]:
     by_input = _window_events(ctx, args.window_s)
     events = _concat(list(by_input.values()))
     plaus = {inp.id: inp.plausibility for inp in ctx.spec.inputs}
-    suspects = trust_mod.suspicious_users_by_input(by_input, plaus)  # each input's own limits
+    shapes = {inp.id: inp.shape for inp in ctx.spec.inputs}  # shape checks only on track inputs
+    suspects = trust_mod.suspicious_users_by_input(by_input, plaus, shape_by_input=shapes)  # each input's own limits
     out = trust_mod.summarize(suspects)
     for s in out["top"]:
         s["trust"] = _r(guards.current_trust(ctx, s["user_id"])[0], 3)

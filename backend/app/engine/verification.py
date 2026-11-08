@@ -10,7 +10,10 @@ Events are passed as cells (`CellEvents`), so nothing here depends on the grid's
   layer, how early and how close that layer's peak was.
 - predictive_check (leave-one-input-out): for each input with new events in (t, t + horizon],
   rebuild the score at t WITHOUT that input's layers and count the share of its new events
-  that land in the top `top_frac` of cells. Average across inputs. An input can't predict itself.
+  that land in the top `top_frac` of cells (its hit rate). An input can't predict itself. The
+  value is the hit rates averaged with each input's share of the weights (#211), so moving weight
+  toward inputs the others corroborate scores higher even with two inputs, where each hit rate
+  alone can't depend on the weights. Equal input weights give the plain mean.
 - cross_input_agreement: Spearman rank correlation between per-input layers (each input's
   unweighted layer sum) of DIFFERENT inputs, over cells where either is above `agreement_eps`,
   averaged with pair weights Wᵢ·Wⱼ (Wᵢ = sum of input i's layer weights). Has data only when
@@ -140,8 +143,28 @@ def predictive_check(window: CacheWindow, weights: np.ndarray, ctx: Verification
             acc[1] += len(new)
     if not per_input:
         return MethodScore(None, False, {"reason": "no input has new events after a cached tick"})
-    shares = {inp: h / n for inp, (h, n) in per_input.items()}
-    return MethodScore(float(np.mean(list(shares.values()))), True, {"per_input": shares})
+    rates = {inp: h / n for inp, (h, n) in per_input.items()}
+    inputs = list(rates)
+    share = _input_shares(w, ctx.layer_inputs, inputs)
+    value = float(np.dot(share, [rates[i] for i in inputs]))
+    return MethodScore(
+        value, True, {"per_input": rates, "weight_share": dict(zip(inputs, share.tolist(), strict=True))}
+    )
+
+
+def _input_shares(w: np.ndarray, layer_inputs: Sequence[str], inputs: Sequence[str]) -> np.ndarray:
+    """Each input's share of the weights, over `inputs`; [len(inputs)] for w [L], [K, len] for [K, L].
+    An input without weighted layers (e.g. an authority override input) gets the mean weight of the
+    inputs that have some, so it counts like a typical input. All-zero weights give equal shares."""
+    w = np.asarray(w, dtype=float)
+    per = np.stack([_input_weight(w, layer_inputs, i) for i in inputs], axis=-1)  # [..., n]
+    has = np.array([any(li == i for li in layer_inputs) for i in inputs])
+    if has.any() and not has.all():
+        fill = per[..., has].mean(axis=-1, keepdims=True)
+        per = np.where(has, per, fill)
+    total = per.sum(axis=-1, keepdims=True)
+    equal = np.full_like(per, 1.0 / len(inputs))
+    return np.where(total > 0, per / np.where(total > 0, total, 1.0), equal)
 
 
 # -- authority_confirmation -----------------------------------------------------
@@ -315,8 +338,10 @@ def _predictive_batch(window: CacheWindow, w: Any, ctx: VerificationContext, xp:
             totals[inp] = totals.get(inp, 0) + len(new)
     if not totals:
         return np.full(k_count, np.nan)
-    shares = xp.stack([hits[i] / totals[i] for i in totals])
-    return _to_numpy(shares.mean(axis=0), xp)
+    inputs = list(totals)
+    rates = np.stack([_to_numpy(hits[i], xp) / totals[i] for i in inputs], axis=-1)  # [K, n]
+    share = _input_shares(_to_numpy(w, xp), ctx.layer_inputs, inputs)  # [K, n]
+    return (rates * share).sum(axis=-1)
 
 
 def _authority_batch(window: CacheWindow, w: Any, ctx: VerificationContext, xp: Any) -> np.ndarray:

@@ -151,7 +151,7 @@ def test_create_poi_guards(env):
     r = call(ctx(), "create_poi", candidate_id="made-up", label="gathering spot", confidence=0.9)
     assert not r["ok"] and "code-made candidates" in r["error"]
     r = call(ctx(), "create_poi", candidate_id="c1", label="new kind of place", confidence=0.9)
-    assert not r["ok"] and "annotate" in r["error"]
+    assert not r["ok"] and "propose_label" in r["error"]
     r = call(ctx(), "create_poi", candidate_id="c1", label="gathering spot", confidence=0.3)
     assert not r["ok"] and "min_confidence" in r["error"]
     assert call(ctx(), "create_poi", candidate_id="c1", label="gathering spot", confidence=0.9)["ok"]
@@ -255,3 +255,31 @@ def test_non_destination_label_follows_layer_rule(env):
     ctx = build(make_spec(public_layers=["pings.density"]))
     r = call(ctx(), "create_poi", candidate_id="c1", label="busy area", confidence=0.8)
     assert r["result"]["visibility"] == "public"
+
+
+def test_overpass_failure_is_cached_briefly_per_place():
+    """#169: a failed Overpass lookup (e.g. a timeout) is not retried for FAILURE_TTL_S at the same
+    rounded place, so the Labeler doesn't spend another ~8 s step on it; other places still fetch."""
+    from app.tools import geo_tools
+
+    now = [100.0]
+    calls = []
+
+    def flaky(query):
+        calls.append(query)
+        if len(calls) == 1:
+            raise TimeoutError("read timed out")
+        return {"elements": []}
+
+    c = geo_tools.OverpassClient(fetch=flaky, min_interval_s=0, failure_ttl_s=60, monotonic=lambda: now[0])
+    with pytest.raises(TimeoutError):
+        c.features_near(45.0, 10.0, 50)
+    with pytest.raises(geo_tools.OverpassUnavailable, match="not retried"):
+        c.features_near(45.00001, 10.00001, 50)  # same rounded key
+    assert len(calls) == 1
+    assert c.features_near(45.01, 10.0, 50) == []  # another place is unaffected
+    now[0] += 61
+    assert c.features_near(45.0, 10.0, 50) == []  # expired: tried again, and success is cached
+    assert len(calls) == 3
+    assert geo_tools.FETCH_TIMEOUT_S <= 8.0
+    assert f"[timeout:{int(geo_tools.FETCH_TIMEOUT_S) - 1}]" in calls[-1]

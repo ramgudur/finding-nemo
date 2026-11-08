@@ -239,3 +239,19 @@ def test_plausibility_from_the_spec_model():
     )
     p = SpoofParams.from_plausibility(inp.plausibility)
     assert p.max_speed_mps == 30.0 and p.flag_constant_speed and not p.flag_straight_line
+
+
+def test_shape_checks_only_run_on_track_inputs():
+    rows = [("walker", float(t), 50 + 1.4 * t, 300.0) for t in range(0, 601, 60)]  # steady, straight reports
+    ev = events_from_xy(GRID, rows)
+    plaus = {"reports": {"max_speed_mps": 3.0, "flag_constant_speed": True, "flag_straight_line": True}}
+    as_track = suspicious_users_by_input({"reports": ev}, plaus, shape_by_input={"reports": "track"})
+    assert {"constant_speed", "straight_track"} <= set(as_track[0].flags)
+    as_points = suspicious_users_by_input({"reports": ev}, plaus, shape_by_input={"reports": "point"})
+    assert as_points == []  # separate point reports may line up honestly
+    # impossible speed still applies to point reports
+    hop = events_from_xy(GRID, [("tp", 0.0, 50.0, 50.0), ("tp", 5.0, 900.0, 900.0)])
+    flagged = suspicious_users_by_input({"reports": hop}, plaus, shape_by_input={"reports": "point"})
+    assert flagged and "impossible_speed" in flagged[0].flags
+    # unknown shape: unchanged behaviour
+    assert suspicious_users_by_input({"reports": ev}, plaus)[0].flags == as_track[0].flags

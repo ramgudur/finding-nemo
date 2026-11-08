@@ -20,14 +20,19 @@ from app.api import catalog as catalog_api
 from app.api import debug as debug_api
 from app.api import ingest as ingest_api
 from app.api import instructions as instructions_api
+from app.api import labels as labels_api
 from app.api import outputs as outputs_api
+from app.api import scout as scout_api
 from app.api import trace as trace_api
 from app.api import webhooks as webhooks_api
 from app.api import ws as ws_api
+from app.api.compile_gate import CompileGate
+from app.api.instruction_trace import InstructionTraceDedup
 from app.connectors.engine import ConnectorEngine, make_extract_locator
 from app.core.config import get_settings
 from app.core.db import Db
 from app.engine.operators.base import Events
+from app.engine.retention import RetentionRunner
 from app.engine.tick import TickEngine, empty_events
 from app.tools.geo_tools import geocode_place
 
@@ -60,6 +65,8 @@ def create_app(
     poi_labeler_scheduler: PoiLabelerScheduler | None = None,
     connector_engine: ConnectorEngine | None = None,
     scout_runner: ScoutRunner | None = None,
+    compile_gate: CompileGate | None = None,
+    retention_runner: RetentionRunner | None = None,
     autostart_engine: bool = True,
 ) -> FastAPI:
     db = db if db is not None else Db(get_settings().sqlite_path)
@@ -81,6 +88,15 @@ def create_app(
         else ConnectorEngine(db, locate=make_extract_locator(article_extractor(db, engine, llm=llm), geocode_place))
     )
     scout_runner = scout_runner if scout_runner is not None else ScoutRunner(db, engine, llm=llm)
+    if retention_runner is None:
+        settings = get_settings()
+        retention_runner = RetentionRunner(
+            db,
+            engine,
+            interval_s=settings.retention_interval_s,
+            event_floor_s=settings.event_retention_s,
+            trace_keep=settings.trace_keep_per_app,
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -96,10 +112,18 @@ def create_app(
             poi_labeler_scheduler.start()
             connector_engine.start()
             scout_runner.start()
+            retention_runner.start()  # data retention (#213): a background pass, never in the tick
         yield
         if autostart_engine:
             # Reverse order; one loop failing to stop must not leave the others running.
-            for loop_ in (scout_runner, connector_engine, poi_labeler_scheduler, critic_scheduler, engine):
+            for loop_ in (
+                retention_runner,
+                scout_runner,
+                connector_engine,
+                poi_labeler_scheduler,
+                critic_scheduler,
+                engine,
+            ):
                 try:
                     await loop_.stop()
                 except Exception:  # noqa: BLE001
@@ -114,13 +138,21 @@ def create_app(
     fastapi_app.state.poi_labeler_scheduler = poi_labeler_scheduler
     fastapi_app.state.connector_engine = connector_engine
     fastapi_app.state.scout_runner = scout_runner
+    # Per-app compile cooldown (#169): one in flight, COMPILE_MIN_GAP_S apart (optional, default 10 s).
+    fastapi_app.state.compile_gate = (
+        compile_gate if compile_gate is not None else CompileGate(get_settings().compile_min_gap_s)
+    )
+    fastapi_app.state.instruction_trace_dedup = InstructionTraceDedup()  # per app instance (#169)
+    fastapi_app.state.retention_runner = retention_runner
     fastapi_app.include_router(apps_api.router)
     fastapi_app.include_router(ingest_api.router)
     fastapi_app.include_router(outputs_api.router)
     fastapi_app.include_router(ws_api.router)
     fastapi_app.include_router(instructions_api.router)  # public end-user instructions
     fastapi_app.include_router(trace_api.router)  # authority-only console reads + dev pin
-    fastapi_app.include_router(webhooks_api.router)  # 501 stub (CLAUDE.md Scope)
+    fastapi_app.include_router(scout_api.router)  # dev-requested Scout runs (authority only)
+    fastapi_app.include_router(labels_api.router)  # authority-only label proposals (accept/dismiss)
+    fastapi_app.include_router(webhooks_api.router)  # real webhook receiver (#222)
     fastapi_app.include_router(catalog_api.router)  # public operator catalogue
     if get_settings().demo_mode:  # /v1/debug/* exists only in demo mode; it alone reads sim ground truth (rule 9)
         debug_api.install(fastapi_app, engine)

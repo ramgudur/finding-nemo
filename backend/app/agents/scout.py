@@ -2,8 +2,10 @@
 
 Runs **on request only** (CLAUDE.md agents table): the Compiler's `request_scout` tool writes a
 TraceEntry (agent=compiler, action=request_scout, saw=<input_id>, why=<instructions>), and
-`ScoutRunner` picks up requests that no later Scout run has handled. A dev action can call
-`run_scout` directly. Connectors it creates keep polling on their own (connectors/engine.py).
+`ScoutRunner` picks up requests that no later Scout run has handled. A dev request
+(`POST /v1/apps/{app}/scout`) goes through `ScoutRunner.enqueue`, which writes the same kind of
+trace entry (agent=scout, action=requested), so both reach the Scout by one path.
+Connectors it creates keep polling on their own (connectors/engine.py).
 
 `extract_article` is the per-article step: EXTRACT_MODEL with reasoning off turns one document
 into an `ArticleExtract` (relevant? where? how confident?), validated against the Pydantic model
@@ -16,10 +18,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from app.agents import budget
 from app.agents.llm import LlmRouter, RateLimited
 from app.agents.loop import _repair, run_agent
 from app.core.db import Db
@@ -31,6 +36,8 @@ log = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 8
 MAX_ARTICLE_CHARS = 4000  # the extractor sees one document, truncated
+MAX_REQUEST_CHARS = 500  # a dev's plain-text Scout request (trace is authority-only; still capped)
+DEV_REQUEST_ACTION = "requested"
 
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "scout.md").read_text(encoding="utf-8")
 
@@ -134,8 +141,21 @@ async def run_scout(
     return result if isinstance(result, str) else None
 
 
+def _is_request(e: TraceEntry) -> bool:
+    return (e.agent == "compiler" and e.action == "request_scout") or (
+        e.agent == "scout" and e.action == DEV_REQUEST_ACTION
+    )
+
+
+def request_instructions(e: TraceEntry) -> str:
+    """The Scout's instructions from a request entry: the Compiler's `why`, or a dev request's
+    text (kept in `hypothesis`; its `why` is the fixed "dev request")."""
+    return e.hypothesis if e.agent == "scout" else e.why
+
+
 def pending_requests(db: Db, app_id: str) -> list[TraceEntry]:
-    """request_scout entries newer than the last Scout run that handled the same input."""
+    """Scout requests (Compiler `request_scout` or dev `requested`) newer than the last Scout run
+    that handled the same input."""
     trace = db.list_trace(app_id)
     handled: dict[str, float] = {}
     for e in trace:
@@ -143,7 +163,7 @@ def pending_requests(db: Db, app_id: str) -> list[TraceEntry]:
             handled[e.saw] = max(handled.get(e.saw, 0.0), e.t.timestamp())
     latest: dict[str, TraceEntry] = {}
     for e in trace:
-        if e.agent == "compiler" and e.action == "request_scout" and e.t.timestamp() > handled.get(e.saw, -1.0):
+        if _is_request(e) and e.t.timestamp() > handled.get(e.saw, -1.0):
             latest[e.saw] = e  # one run per input covers every pending request for it
     return list(latest.values())
 
@@ -160,12 +180,40 @@ class ScoutRunner:
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
 
+    def enqueue(self, app_id: str, input_id: str, request: str) -> str:
+        """Queue a dev request for one input; returns a job id. Writes the request as a trace entry
+        (the same queue `request_scout` uses), so it never blocks: the run loop picks it up, and an
+        empty rate budget becomes the Scout's usual skipped trace."""
+        job_id = uuid.uuid4().hex
+        self.db.add_trace(
+            TraceEntry(
+                t=datetime.fromtimestamp(self.engine.clock.now(), UTC),
+                app_id=app_id,
+                agent="scout",
+                action=DEV_REQUEST_ACTION,
+                saw=input_id,
+                hypothesis=request[:MAX_REQUEST_CHARS],
+                result=f"job {job_id}",
+                why="dev request",
+            )
+        )
+        return job_id
+
     async def check_once(self) -> None:
         for app_id in list(self.engine.apps):
             for req in pending_requests(self.db, app_id):
                 ctx = ToolContext(app_id=app_id, db=self.db, engine=self.engine, agent="scout", clock=self.engine.clock)
+                # #221: a request is a triggered run; admission is checked before starting so a
+                # doomed run never begins. Still writes the usual skipped trace (rule 2) and
+                # leaves the request unhandled, so it runs on a later poll -- same shared bucket,
+                # so every other pending request would fail admission too right now; stop here.
+                if not self.llm.admit("scout", budget.EST_CALLS["scout"], "triggered"):
+                    _trace(
+                        ctx, action="skipped", saw=req.saw, skipped_reason="rate budget", why="deferred before starting"
+                    )
+                    return
                 try:
-                    await run_scout(ctx, req.saw, req.why, self.llm)
+                    await run_scout(ctx, req.saw, request_instructions(req), self.llm)
                 except Exception:  # noqa: BLE001 - one request must not stop the others
                     log.exception("scout run failed for app %s input %s", app_id, req.saw)
 

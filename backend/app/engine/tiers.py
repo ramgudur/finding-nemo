@@ -41,6 +41,7 @@ FLEX_MAX_REL_PER_STEP = 0.25
 # A flexible weight at (or near) 0 could otherwise never move. Its +/-25% step is
 # measured against at least this value.
 FLEX_MIN_REF = 0.02
+FLEX_MIN_FRAC_OF_CREATED = 0.10  # #211: a flexible weight never drops below 10% of its creation-time value
 MIN_METHODS_WITH_DATA = 2
 # Float slack so a candidate exactly on a bound (after renormalization) still passes.
 _EPS = 1e-9
@@ -52,7 +53,9 @@ class WeightSlot:
 
     ``tier`` and ``flexible_total``-relevant values are fixed at creation. ``history``
     is ``[(t, weight), ...]`` of applied values (any order), used for the stiff
-    one-hour window; it may be empty.
+    one-hour window; it may be empty. ``created_weight`` is the weight set at creation
+    (the confirmed spec's value): the stiff window measures from it until an applied
+    change is a full window old, since ``history`` only holds values after changes.
     """
 
     layer_id: str
@@ -60,6 +63,7 @@ class WeightSlot:
     weight: float
     pinned: bool = False
     history: Sequence[tuple[float, float]] = field(default_factory=tuple)
+    created_weight: float | None = None
 
 
 @dataclass
@@ -92,13 +96,17 @@ def flexible_total(slots: Iterable[WeightSlot]) -> float:
 def stiff_reference(slot: WeightSlot, now: float, window_s: float = STIFF_WINDOW_S) -> float:
     """Weight as of ``now - window_s``: the latest history entry at or before that time.
 
-    Falls back to the earliest known value (or the current weight) when history
-    doesn't reach back a full window, so a new stiff weight can't drift faster.
+    When history doesn't reach back a full window, the weight then was the one set at
+    creation (``created_weight``), so the window measures from it: 0.50 -> 0.54 -> 0.58
+    inside one hour is +16%, not two small steps. Without a ``created_weight`` it falls
+    back to the earliest known value (or the current weight).
     """
     cutoff = now - window_s
     before = [(t, w) for t, w in slot.history if t <= cutoff]
     if before:
         return float(max(before, key=lambda p: p[0])[1])
+    if slot.created_weight is not None:
+        return float(slot.created_weight)
     if slot.history:
         return float(min(slot.history, key=lambda p: p[0])[1])
     return float(slot.weight)
@@ -147,7 +155,13 @@ def slot_bounds(
             ),
         )
     step = FLEX_MAX_REL_PER_STEP * max(w, FLEX_MIN_REF)
-    return max(0.0, w - step), w + step, None
+    lo = max(0.0, w - step)
+    if slot.created_weight is not None:
+        # weighted predictive_check rewards the most-corroborated input; the floor keeps every
+        # flexible input in play so the Critic can't tune one away (lead decision, #211)
+        lo = max(lo, FLEX_MIN_FRAC_OF_CREATED * float(slot.created_weight))
+    # never above the current weight: one already under the floor may stay or rise, not fall
+    return min(lo, w), w + step, None
 
 
 def renormalize(weights: Mapping[str, float], slots: Sequence[WeightSlot], total: float) -> dict[str, float]:

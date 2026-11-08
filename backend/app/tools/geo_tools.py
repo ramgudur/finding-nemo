@@ -1,6 +1,10 @@
 """External geo lookups for agent tools: OpenStreetMap features near a point (Overpass).
 
 - Cached by rounded (lat, lon, radius): repeated questions about the same place cost nothing.
+- Fails fast: about 8 s at most per request (connect + read), and a failed lookup is remembered for
+  ``FAILURE_TTL_S`` per rounded key, so an agent asking again right away gets the error at once.
+  After ``HOST_FAILS_TO_OPEN`` failures in a row the whole service is skipped for ``FAILURE_TTL_S``
+  (the public instance has outages: every new place would otherwise wait out its own timeout).
 - Rate-limited to one request per ``MIN_INTERVAL_S`` (Overpass fair use). This is about an
   external service, so it uses wall time (``time.monotonic``), not the platform Clock.
 - Sends a real User-Agent from settings (``NOMINATIM_USER_AGENT``); never an email of its own.
@@ -20,6 +24,10 @@ OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 MIN_INTERVAL_S = 1.0
 MAX_RADIUS_M = 500.0
 MAX_FEATURES = 15
+FETCH_TIMEOUT_S = 8.0  # connect + read budget per request; Overpass's own [timeout:] is set just under it
+CONNECT_TIMEOUT_S = 3.0
+FAILURE_TTL_S = 60.0
+HOST_FAILS_TO_OPEN = 2  # consecutive failures (any place) before the whole service is skipped for a while
 # Tag keys worth reporting; values are passed through as data, the platform assigns them no meaning.
 SUMMARY_KEYS = (
     "name",
@@ -46,16 +54,34 @@ def _http_fetch(query: str) -> dict[str, Any]:
     from app.core.config import get_settings
 
     ua = get_settings().nominatim_user_agent or "geo-heatmap-platform"
-    resp = httpx.post(OVERPASS_URL, data={"data": query}, headers={"User-Agent": ua}, timeout=20.0)
+    # httpx timeouts apply per phase, so split the budget: connect + read stays within FETCH_TIMEOUT_S.
+    timeout = httpx.Timeout(FETCH_TIMEOUT_S - CONNECT_TIMEOUT_S, connect=CONNECT_TIMEOUT_S)
+    resp = httpx.post(OVERPASS_URL, data={"data": query}, headers={"User-Agent": ua}, timeout=timeout)
     resp.raise_for_status()
     return resp.json()
 
 
+class OverpassUnavailable(RuntimeError):
+    """A recent lookup for this place failed; not retried until the failure expires."""
+
+
 class OverpassClient:
-    def __init__(self, fetch: Fetcher | None = None, min_interval_s: float = MIN_INTERVAL_S) -> None:
+    def __init__(
+        self,
+        fetch: Fetcher | None = None,
+        min_interval_s: float = MIN_INTERVAL_S,
+        failure_ttl_s: float = FAILURE_TTL_S,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._fetch = fetch or _http_fetch
         self._min_interval = min_interval_s
+        self._failure_ttl = failure_ttl_s
+        self._monotonic = monotonic
         self._cache: dict[tuple[float, float, int], list[dict[str, Any]]] = {}
+        self._failed: dict[tuple[float, float, int], tuple[float, str]] = {}  # key -> (expires, error)
+        self._host_fails = 0  # consecutive failures, any place
+        self._host_open_until = -math.inf
+        self._host_error = ""
         self._last = -math.inf
         self._lock = threading.Lock()
         self.requests = 0  # real fetches made (for tests and the trace)
@@ -66,20 +92,43 @@ class OverpassClient:
         with self._lock:
             if key in self._cache:
                 return self._cache[key]
-            wait = self._min_interval - (time.monotonic() - self._last)
+            failed = self._failed.get(key)
+            if failed is not None:
+                expires, err = failed
+                left = expires - self._monotonic()
+                if left > 0:
+                    raise OverpassUnavailable(
+                        f"OpenStreetMap lookup failed here recently ({err}); not retried for another {left:.0f} s"
+                    )
+                del self._failed[key]
+            left = self._host_open_until - self._monotonic()
+            if left > 0:
+                raise OverpassUnavailable(
+                    f"OpenStreetMap service failing ({self._host_error}); not retried for another {left:.0f} s"
+                )
+            wait = self._min_interval - (self._monotonic() - self._last)
             if wait > 0:
                 time.sleep(wait)
             query = (
-                f'[out:json][timeout:15];(nwr(around:{radius},{lat:.6f},{lon:.6f})[~"^(name|'
+                f'[out:json][timeout:{int(FETCH_TIMEOUT_S) - 1}];(nwr(around:{radius},{lat:.6f},{lon:.6f})[~"^(name|'
                 + "|".join(SUMMARY_KEYS[1:])
                 + ')$"~"."];);out center 60;'
             )
             try:
                 raw = self._fetch(query)
+                feats = summarize(raw, lat, lon)
+            except Exception as e:
+                err = f"{type(e).__name__}: {e}"[:200]
+                self._failed[key] = (self._monotonic() + self._failure_ttl, err)
+                self._host_fails += 1
+                if self._host_fails >= HOST_FAILS_TO_OPEN:
+                    self._host_open_until = self._monotonic() + self._failure_ttl
+                    self._host_error = f"{self._host_fails} failures in a row, last {err}"
+                raise
             finally:
-                self._last = time.monotonic()
+                self._last = self._monotonic()
                 self.requests += 1
-            feats = summarize(raw, lat, lon)
+            self._host_fails = 0
             self._cache[key] = feats
             return feats
 
@@ -114,6 +163,28 @@ OVERPASS = OverpassClient()
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 MAX_PLACE_CHARS = 200
+NOMINATIM_LIMIT = 5
+# A business whose name merely contains the place ("<brand> <city>" shop) is not that place.
+COMMERCIAL_CATEGORIES = frozenset({"shop", "office", "craft"})
+
+
+def _norm_name(text: str) -> str:
+    return " ".join(str(text).split()).casefold()
+
+
+def best_match(results: list[dict[str, Any]], place: str) -> dict[str, Any] | None:
+    """The result whose name is the place asked for; else the first non-commercial result; else None.
+    A bounded search returns anything in the area whose text matches, e.g. a shop named after a
+    city far away, so the first result alone is not trusted."""
+    head = _norm_name(place.split(",")[0])
+    for r in results:
+        if _norm_name(r.get("name", "")) == head:
+            return r
+    for r in results:
+        if r.get("category") not in COMMERCIAL_CATEGORIES:
+            return r
+    return None
+
 
 Searcher = Callable[[dict[str, str]], list[dict[str, Any]]]  # query params -> parsed JSON results
 
@@ -157,7 +228,7 @@ class NominatimClient:
             params = {
                 "q": place,
                 "format": "jsonv2",
-                "limit": "1",
+                "limit": str(NOMINATIM_LIMIT),
                 "bounded": "1",
                 "viewbox": f"{min_lon},{max_lat},{max_lon},{min_lat}",
             }
@@ -167,8 +238,8 @@ class NominatimClient:
                 self._last = time.monotonic()
                 self.requests += 1
             hit = None
-            if results:
-                r = results[0]
+            r = best_match(results or [], place)
+            if r is not None:
                 hit = {
                     "lat": float(r["lat"]),
                     "lon": float(r["lon"]),

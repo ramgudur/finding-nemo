@@ -92,6 +92,23 @@ def test_stiff_needs_evidence_and_hourly_cap():
     assert check(slots, {"news": 0.58}, authority_evidence=True, now=NOW + 1800).ok
 
 
+def test_stiff_window_measures_from_the_creation_weight_before_history_reaches_back():
+    """#191: history holds only applied values, so in the first hour after the first change
+    the reference is the weight set at creation, not that first applied value."""
+    hist = [(NOW - 600, 0.54)]  # 0.50 at creation, then +8% ten minutes ago
+    stiff = WeightSlot("news", "stiff", 0.54, history=hist, created_weight=0.5)
+    assert stiff_reference(stiff, NOW) == 0.5
+    slots = make_slots(news=stiff)
+    assert not check(slots, {"news": 0.58}, authority_evidence=True).ok  # +16% on the hour
+    assert check(slots, {"news": 0.55}, authority_evidence=True).ok
+    # a full window after the change, the reference is the applied value
+    assert stiff_reference(stiff, NOW + 3600) == 0.54
+    assert check(slots, {"news": 0.58}, authority_evidence=True, now=NOW + 3600).ok
+    # no change yet: the creation weight is the reference
+    fresh = WeightSlot("news", "stiff", 0.5, created_weight=0.5)
+    assert stiff_reference(fresh, NOW) == 0.5
+
+
 def test_zero_flexible_weight_can_still_move():
     slots = make_slots(
         crowd_b=WeightSlot("crowd_b", "flexible", 0.6),

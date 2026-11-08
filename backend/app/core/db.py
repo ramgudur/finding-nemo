@@ -1,7 +1,7 @@
 """SQLite persistence.
 
 Tables: apps, inputs, events, connectors, weights_history, trust, pois, trace, changes,
-backtests, keys. This schema is shared: post on the board when it changes (AGENTS.md).
+backtests, keys, label_proposals. This schema is shared: post on the board when it changes (AGENTS.md).
 
 Pydantic contracts (``AppSpec``, ``InputSpec``, ``Event``, ``POI``, ``TraceEntry``,
 ``Change``, ``Backtest``) are stored as their own JSON (``model_dump_json`` /
@@ -33,6 +33,8 @@ from app.core.models import (
     ConnectorConfig,
     Event,
     InputSpec,
+    LabelProposal,
+    LabelProposalStatus,
     PoiStatus,
     TraceEntry,
     Visibility,
@@ -132,6 +134,15 @@ CREATE TABLE IF NOT EXISTS backtests (
     backtest_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_backtests_lookup ON backtests(app_id, t);
+
+CREATE TABLE IF NOT EXISTS label_proposals (
+    id TEXT PRIMARY KEY,
+    app_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    t REAL NOT NULL,
+    proposal_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_label_proposals_lookup ON label_proposals(app_id, status, t);
 
 CREATE TABLE IF NOT EXISTS keys (
     app_id TEXT PRIMARY KEY,
@@ -251,7 +262,11 @@ class Db:
             self._conn.commit()
             return cur.lastrowid
 
-    def list_events(self, app_id: str, input_id: str | None = None, since: float | None = None) -> list[Event]:
+    def list_events(
+        self, app_id: str, input_id: str | None = None, since: float | None = None, limit: int | None = None
+    ) -> list[Event]:
+        """Events in ascending `ts` order. With `limit`, only the most recent `limit` (selected in SQL,
+        still returned ascending)."""
         clauses, params = ["app_id = ?"], [app_id]
         if input_id is not None:
             clauses.append("input_id = ?")
@@ -259,10 +274,27 @@ class Db:
         if since is not None:
             clauses.append("ts > ?")
             params.append(since)
-        rows = self._query(f"SELECT event_json FROM events WHERE {' AND '.join(clauses)} ORDER BY ts", params)
+        where = " AND ".join(clauses)
+        if limit is not None:
+            rows = self._query(
+                f"SELECT event_json FROM events WHERE {where} ORDER BY ts DESC, row_id DESC LIMIT ?",
+                [*params, max(0, int(limit))],
+            )
+            rows = list(reversed(rows))
+        else:
+            rows = self._query(f"SELECT event_json FROM events WHERE {where} ORDER BY ts", params)
         return [Event.model_validate_json(r["event_json"]) for r in rows]
 
     # -- connectors ---------------------------------------------------------------
+
+    def prune_events(self, app_id: str, input_id: str, before_ts: float) -> int:
+        """Delete one input's events with ``ts < before_ts`` (data retention, #213). Returns rows deleted."""
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM events WHERE app_id = ? AND input_id = ? AND ts < ?", (app_id, input_id, before_ts)
+            )
+            self._conn.commit()
+            return cur.rowcount
 
     def upsert_connector(self, app_id: str, input_id: str, config: ConnectorConfig) -> None:
         with self._lock:
@@ -281,9 +313,7 @@ class Db:
         return ConnectorConfig.model_validate_json(row["config_json"]) if row else None
 
     def list_connectors(self, app_id: str) -> list[tuple[str, ConnectorConfig]]:
-        rows = self._query(
-            "SELECT input_id, config_json FROM connectors WHERE app_id = ? ORDER BY input_id", (app_id,)
-        )
+        rows = self._query("SELECT input_id, config_json FROM connectors WHERE app_id = ? ORDER BY input_id", (app_id,))
         return [(r["input_id"], ConnectorConfig.model_validate_json(r["config_json"])) for r in rows]
 
     def record_connector_poll(self, app_id: str, input_id: str, polled_at: float, status: str) -> None:
@@ -427,6 +457,23 @@ class Db:
         rows = self._query(sql, params)
         return [TraceEntry.model_validate_json(r["entry_json"]) for r in rows]
 
+    def prune_trace(self, app_id: str, keep_newest: int, keep_since: float | None = None) -> int:
+        """Delete an app's oldest trace entries, keeping at least the newest ``keep_newest`` and every
+        entry with ``t >= keep_since`` (data retention, #213). Returns rows deleted."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT t FROM trace WHERE app_id = ? ORDER BY t DESC, row_id DESC LIMIT 1 OFFSET ?",
+                (app_id, max(int(keep_newest), 1) - 1),
+            ).fetchone()
+            if row is None:
+                return 0  # no more than keep_newest entries
+            cut = float(row[0])
+            if keep_since is not None:
+                cut = min(cut, keep_since)
+            cur = self._conn.execute("DELETE FROM trace WHERE app_id = ? AND t < ?", (app_id, cut))
+            self._conn.commit()
+            return cur.rowcount
+
     # -- changes --------------------------------------------------------------------
 
     def add_change(self, change: Change) -> None:
@@ -469,6 +516,48 @@ class Db:
     def list_backtests(self, app_id: str) -> list[Backtest]:
         rows = self._query("SELECT backtest_json FROM backtests WHERE app_id = ? ORDER BY t", (app_id,))
         return [Backtest.model_validate_json(r["backtest_json"]) for r in rows]
+
+    # -- label_proposals ------------------------------------------------------------
+
+    def add_label_proposal(self, app_id: str, proposal: LabelProposal) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO label_proposals (id, app_id, status, t, proposal_json) VALUES (?, ?, ?, ?, ?)",
+                (proposal.id, app_id, proposal.status, proposal.t.timestamp(), proposal.model_dump_json()),
+            )
+            self._conn.commit()
+
+    def get_label_proposal(self, app_id: str, proposal_id: str) -> LabelProposal | None:
+        row = self._query_one(
+            "SELECT proposal_json FROM label_proposals WHERE app_id = ? AND id = ?", (app_id, proposal_id)
+        )
+        return LabelProposal.model_validate_json(row["proposal_json"]) if row else None
+
+    def list_label_proposals(self, app_id: str, status: LabelProposalStatus | None = None) -> list[LabelProposal]:
+        clauses, params = ["app_id = ?"], [app_id]
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        rows = self._query(
+            f"SELECT proposal_json FROM label_proposals WHERE {' AND '.join(clauses)} ORDER BY t, rowid", params
+        )
+        return [LabelProposal.model_validate_json(r["proposal_json"]) for r in rows]
+
+    def set_label_proposal_status(
+        self, app_id: str, proposal_id: str, status: LabelProposalStatus
+    ) -> LabelProposal | None:
+        """Set a proposal's status; returns the updated proposal, or None if it doesn't exist."""
+        with self._lock:
+            current = self.get_label_proposal(app_id, proposal_id)
+            if current is None:
+                return None
+            new = current.model_copy(update={"status": status})
+            self._conn.execute(
+                "UPDATE label_proposals SET status = ?, proposal_json = ? WHERE app_id = ? AND id = ?",
+                (status, new.model_dump_json(), app_id, proposal_id),
+            )
+            self._conn.commit()
+            return new
 
     # -- keys -----------------------------------------------------------------------
 

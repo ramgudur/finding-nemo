@@ -42,6 +42,7 @@ FETCH_TIMEOUT_S = 10.0
 CHECK_INTERVAL_S = 1.0
 DEFAULT_CONFIDENCE = 0.6
 MAX_LOCATE_PER_POLL = 5
+MAX_CONCURRENT_POLLS = 4  # due polls run concurrently, at most this many at once
 
 # (app spec, input, item {doc_id, title, description, ts}) -> (lat, lon, confidence) or None
 Locator = Callable[[AppSpec, InputSpec, dict[str, Any]], Awaitable[tuple[float, float, float] | None]]
@@ -168,7 +169,12 @@ def _request(conn: ConnectorConfig) -> tuple[str, dict[str, Any] | None]:
 async def fetch_raw(client: httpx.AsyncClient, conn: ConnectorConfig) -> Any:
     url, params = _request(conn)
     url_guard.check_url(url)  # every poll: an agent may have chosen this URL
-    resp = await client.get(url, params=params, timeout=FETCH_TIMEOUT_S)  # no redirects (httpx default)
+    resp = await client.get(url, params=params, timeout=FETCH_TIMEOUT_S)  # redirects followed by hand below
+    hops = 0
+    while resp.status_code in url_guard.REDIRECT_CODES:  # each hop re-checked (SSRF)
+        url = url_guard.next_hop(str(resp.url), resp.headers.get("location"), hops=hops)
+        hops += 1
+        resp = await client.get(url, timeout=FETCH_TIMEOUT_S)
     resp.raise_for_status()
     return resp.json() if conn.type == "json_api" else resp.text
 
@@ -178,7 +184,12 @@ def fetch_raw_sync(client: httpx.Client, conn: ConnectorConfig) -> Any:
     poll loop -- tool handlers are synchronous (`tools/registry.py`)."""
     url, params = _request(conn)
     url_guard.check_url(url)
-    resp = client.get(url, params=params, timeout=FETCH_TIMEOUT_S)  # no redirects (httpx default)
+    resp = client.get(url, params=params, timeout=FETCH_TIMEOUT_S)  # redirects followed by hand below
+    hops = 0
+    while resp.status_code in url_guard.REDIRECT_CODES:  # each hop re-checked (SSRF)
+        url = url_guard.next_hop(str(resp.url), resp.headers.get("location"), hops=hops)
+        hops += 1
+        resp = client.get(url, timeout=FETCH_TIMEOUT_S)
     resp.raise_for_status()
     return resp.json() if conn.type == "json_api" else resp.text
 
@@ -226,6 +237,10 @@ def check_connector_sync(client: httpx.Client, conn: ConnectorConfig, now: float
     """Fetch once and parse, without writing anything -- what `test_connector` needs to
     honestly say it saw at least one item."""
     raw = fetch_raw_sync(client, conn)
+    if conn.type == "rss":
+        # Count every parsed item, located or not: the live poller places items without a point via
+        # the locator (extract + geocode), so a normal news feed with no coordinates is a working source.
+        return rss.parse_items(raw, now, include_unlocated=True)
     return events_from_raw(conn, raw, now)
 
 
@@ -260,8 +275,10 @@ class ConnectorEngine:
         client: httpx.AsyncClient | None = None,
         check_interval_s: float = CHECK_INTERVAL_S,
         locate: Locator | None = None,
+        max_concurrent_polls: int = MAX_CONCURRENT_POLLS,
     ) -> None:
         self.db = db
+        self.max_concurrent_polls = max(1, int(max_concurrent_polls))
         self.locate = locate  # optional: place RSS items that carry no coordinates
         self._attempted: dict[tuple[str, str], set[str]] = {}  # doc_ids already sent to locate
         self.client = client or httpx.AsyncClient()
@@ -271,8 +288,12 @@ class ConnectorEngine:
         self._stop = asyncio.Event()
 
     async def check_once(self, now: float | None = None) -> list[PollResult]:
+        """Poll every due connector, concurrently (at most `max_concurrent_polls` at once), so one
+        slow feed or extraction never delays the others. Every poll is stamped with the same
+        Clock `now`; one that raises is logged and dropped without touching the rest. Results
+        come back in app/input order."""
         now = clock_mod.now() if now is None else now
-        results = []
+        due: list[tuple[AppSpec, InputSpec, tuple[str, str]]] = []
         for spec in self.db.list_apps():
             if spec.status != "active":
                 continue
@@ -284,22 +305,30 @@ class ConnectorEngine:
                 if now - last < inp.connector.poll_s:
                     continue
                 self._last_polled_at[key] = now
+                due.append((spec, inp, key))
+        if not due:
+            return []
+        sem = asyncio.Semaphore(self.max_concurrent_polls)
+
+        async def one(spec: AppSpec, inp: InputSpec, key: tuple[str, str]) -> PollResult | None:
+            async with sem:
                 try:
-                    results.append(
-                        await poll_once(
-                            self.client,
-                            self.db,
-                            spec.app_id,
-                            inp,
-                            now,
-                            locate=self.locate,
-                            spec=spec,
-                            attempted=self._attempted.setdefault(key, set()),
-                        )
+                    return await poll_once(
+                        self.client,
+                        self.db,
+                        spec.app_id,
+                        inp,
+                        now,
+                        locate=self.locate,
+                        spec=spec,
+                        attempted=self._attempted.setdefault(key, set()),
                     )
                 except Exception:  # noqa: BLE001 - one connector must not stop the others
                     log.exception("connector poll failed for %s/%s", spec.app_id, inp.id)
-        return results
+                    return None
+
+        results = await asyncio.gather(*(one(*d) for d in due))
+        return [r for r in results if r is not None]
 
     async def run(self) -> None:
         self._stop.clear()

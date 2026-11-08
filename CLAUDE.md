@@ -175,6 +175,10 @@ OPENROUTER_RPM=18          # free models: 20 RPM; daily cap of 50 unless the acc
 TAVILY_API_KEY=
 NOMINATIM_USER_AGENT=      # required by Nominatim policy; generic app name + team contact
 SQLITE_PATH=./data/app.db
+COMPILE_MIN_GAP_S=10       # optional: minimum seconds between compiles of one app (/compile returns 429 + Retry-After)
+EVENT_RETENTION_S=86400     # optional: keep push events at least this long (retention runner, #216)
+TRACE_KEEP_PER_APP=20000    # optional: newest trace entries kept per app
+RETENTION_INTERVAL_S=300    # optional: retention run interval; 0 = off
 DEMO_MODE=0                # 1 enables /v1/debug/* (ground-truth error chart)
 ```
 
@@ -209,6 +213,22 @@ Ingest keys and authority keys are generated per app at activation and stored in
 - `POST /v1/apps/{app}/compile`, body `CompileRequest {intent, grid, inputs: CompileInput[], destination_points?}`. `CompileInput` is `{id, kind, shape, meaning, fields, connector?}`; `connector` is pull only, checked by the URL guard. Connectors and `destination_points` are the dev's words: `finalize_app` copies them verbatim (a connector writes a `Change`, kind `connector`, actor `dev`). Returns the `AppSpec` at `pending_confirmation`; `409` if the app is active, `422` if it never finalizes, `503` on rate budget.
 - `PUT /v1/apps/{app}/spec`: the dev edits a `pending_confirmation` spec (full `AppSpec`; `409` otherwise, `422` with every error). It writes a `Change`, kind `spec_edit`, actor `dev`.
 - `POST /v1/apps/{app}/activate` is the only dev confirmation.
+- `GET /v1/apps/{app}` needs no key while the app isn't active (no keys exist yet; the spec holds only the dev's words plus the proposal). Once active, it needs the authority key (401).
+- `GET /v1/apps/{app}/compile/status` (public, no trace text or tool args): `CompileStatus {running, step, elapsed_s, last_validate?: {errors, warnings}}`, 404 once the app is active. A compile that never finalizes returns `422` with `CompileFailure {reason, errors[], warnings[]}`; `503` carries `Retry-After`.
+
+**Running app (authority key):**
+- `POST /v1/apps/{app}/changes/{id}/revert`: applies the Change's `before` through the same tools and guards as `actor=dev`, and writes a new Change with `reverts=<id>`. Dev reverts are exempt from the agent rate caps (trust +0.1 per 5 min, stiff ±10%/h), but not from the flexible ±25% per-step limit or any hard bound. `409` if the target changed since; `422` for `spec_confirm` or a guard failure.
+- `GET /v1/apps/{app}/label-proposals`, which returns `LabelProposal[] {id, label, sensitive, destination, why, status: open|accepted|dismissed, t}`.
+- `POST /v1/apps/{app}/label-proposals/{id}/accept`, optional body `{sensitive?, destination?}`, which returns `{proposal, label_set}`. It adds the label to the running spec and writes a `spec_edit` Change.
+- `POST /v1/apps/{app}/label-proposals/{id}/dismiss`.
+- `POST /v1/apps/{app}/scout`, body `ScoutRequest {input_id, request (1..500 chars)}`, returns `202 ScoutJobAccepted {job_id, app_id, input_id}`. 409 if the app isn't active; 422 for a push input. The request text goes only to the authority trace.
+- The POI Labeler proposes labels with the `propose_label` tool (at most 5 open per app). `why` is agent text and is authority-only.
+
+**Webhook (push, another service's JSON):** `POST /v1/apps/{app}/webhooks/{input}`
+- Auth: the ingest key, as `X-Ingest-Key` or `?key=` (a query-string key can end up in the sender's logs).
+- The input needs `webhook: WebhookMapping {items_path, lat, lon, ts?, ts_format: iso|epoch_s|epoch_ms, user_id?, fields{name: path}}`. Paths are dotted, with list indices; data only (rule 10); push inputs only. It's set from `CompileInput.webhook` and copied verbatim, writing a Change with kind `webhook`.
+- Each item is validated exactly like `/events`. The raw body is never stored. Limits: 1 MB and 500 items.
+- Returns `202 WebhookReceipt {received, accepted, rejected: [{index, reason}] (first 20)}`. Errors: 401, 404, 403 not active, 409 not push or no mapping, 413, 422.
 
 **Event (push):** `POST /v1/apps/{app}/inputs/{input}/events`
 - Header `X-Ingest-Key`; body `{user_id?, lat, lon, ts, ...input fields}`.
@@ -219,7 +239,7 @@ Ingest keys and authority keys are generated per app at activation and stored in
 - **POI:** `{id, candidate_id, lat, lon, radius_m, label, confidence, evidence[], visibility, status, created_at, updated_at}`
 - **Backtest:** `{id, kind: single|batch, candidates_tested, candidates_valid, train_scores, holdout_scores, passed, device: cpu|gpu, elapsed_ms, t}`
 - **TraceEntry:** `{t, app_id, agent, model, saw, hypothesis, tested, result, action, why, tool_calls[], skipped_reason?}`
-- **Change:** `{id, app_id, kind: weight|trust|poi|connector|spec_edit|spec_confirm, target, before, after, reason, backtest_id?, actor: agent|dev, t}`
+- **Change:** `{id, app_id, kind: weight|trust|poi|connector|webhook|spec_edit|spec_confirm, target, before, after, reason, backtest_id?, actor: agent|dev, reverts?, t}`
 - **Instruction:** `{text, destination{lat, lon, label}, route[[lat, lon]], distance_m, computed_at, guard{passed, checks[]}}`
 - **Hotspot:** `{id, lat, lon, radius_m, score, mean, area_m2, n_cells, persisted_ticks, contributing_layers[], visibility}`. `score` is the peak cell score; `radius_m = sqrt(area_m2 / π)`. The tick produces it; `/hotspots` and the Critic/POI tools read it.
 - **MapResponse** (`GET /map?format=geojson`): `{app_id, t, cell_m, bbox: [min_lon, min_lat, max_lon, max_lat], layers: {<layer_id> | "score": FeatureCollection}}`. One Polygon feature per cell with `properties: {value, row, col}` (a single `value` field). Cells with `value < 0.01` are omitted to keep the payload small. Without the authority key, only `public` layers are included.
@@ -242,7 +262,7 @@ Ingest keys and authority keys are generated per app at activation and stored in
 | `GET /v1/apps/{app}/trace` | authority only |
 | `WS /v1/apps/{app}/stream` | filtered by key |
 | `POST /v1/apps/{app}/instruction` | public |
-| `/v1/apps/{app}/webhooks` | stub returning 501 |
+| `POST /v1/apps/{app}/webhooks/{input}` | ingest key |
 | `GET /v1/debug/...` | `DEMO_MODE=1` only |
 
 `POST /v1/apps/{app}/instruction` takes body `{lat, lon}` (the caller's own position). The server never looks up a position by user ID, so the endpoint can't be used to find anyone else.
@@ -272,7 +292,8 @@ Ingest keys and authority keys are generated per app at activation and stored in
 
 **Verification** (`engine/verification.py`):
 - `authority_confirmation`: when an authority input arrives, how early and how close each layer's peak was.
-- `predictive_check` (**leave-one-input-out**): for each input with new events in (t, t+60 s], recompute the score map with that input's layers removed, then measure the share of its new events that land in the top 10% of cells. Average across inputs. This stops crowd events from "predicting" themselves.
+- `predictive_check` (**leave-one-input-out**): for each input with new events in (t, t+60 s], recompute the score map with that input's layers removed, then measure the share of its new events that land in the top 10% of cells (its hit rate). The value is the **weight-share-weighted** mean of the hit rates (share = the input's weight / total weight), so inputs the others corroborate gain value as they gain weight. With equal weights it equals the plain mean. An input's events are never scored against a map that includes it, which stops crowd events from "predicting" themselves (#211).
+- **Weight floor:** no flexible weight may go below 10% of its creation-time value, whoever moves it (#211).
 - `cross_input_agreement`: rank correlation between layers from **different inputs**. It counts as "having data" only when at least two independent inputs have non-zero layers.
 
 **Backtests** (`engine/backtest.py`):
@@ -348,7 +369,6 @@ The engine reads time only from `core/clock.py`. Use fixed seeds in tests.
 ## Scope
 
 - **Stubbed:**
-  - webhooks (501)
   - HTML connector (the config type is rejected)
   - Scout periodic re-evaluation (off; connectors still poll)
 - **Not building now** (pitch as future/production paths only):
@@ -474,3 +494,34 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-08:** Kida A and Kida B are back on platform tasks: #191 (stiff cap leak) for Kida A, #194 (broad field layers flood the score) for Kida B.
 - **2026-11-08:** Navmi is paused, so Allen takes over `frontend/` from her branch `frontend-aquatic-rebuild`, following `frontend/PLAN.md` and `frontend/HANDOFF.md`. He asks his human for the original design image before building visuals, to keep Navmi's vision. Allen's backend issues move: #190 (label proposals) and #169 (hardening) to Kida A; #181 (land PR #187) and #183 (dev-requested Scout) to Kida B. #153 stays on hold, unassigned.
 - **2026-11-08:** Allen owns all of `frontend/` with full authority: design, new dependencies, deleting files and merging, with no lead approval needed for frontend-only changes. Backend contracts, API routes and env vars still go through the lead.
+- **2026-11-08:** Live checks of Nemotron agents on neutral apps:
+  - The Critic ran no backtest before deciding. Its prompt now runs a batch backtest once out of cold start (live: 256 configs tested).
+  - The POI Labeler ran out of steps calling one tool at a time. It now batches evidence calls (live: named "problem spot").
+  - The Compiler gives a single-location field weight 0, or uses it as a vector field (live: 4 of 4).
+  - Dev reverts keep the flexible ±25% per-step limit (Ram: devs rarely set weights by hand).
+  - Core contracts now cover compile status/failure, revert, and label proposals.
+- **2026-11-08:** How weights work (Ram):
+  - The Compiler (Nemotron) picks the factors (operators) and their starting weights.
+  - The scoring engine combines them in code.
+  - The Critic (Nemotron) corrects the weights, gated by held-out backtests.
+- **2026-11-08:** #211: `predictive_check` is weight-share-weighted, so crowd-only apps can tune their weights. A flexible weight never goes below 10% of its creation-time value. Also approved:
+  - `COMPILE_MIN_GAP_S`, an optional env var, and `/compile` returning 429 (#212).
+  - The Scout contract (#209).
+  - Kida A takes data retention.
+- **2026-11-08:** `GET /v1/apps/{app}` is keyless until activation, so a dev can reopen a pending proposal from any browser (found by Allen's frontend). Rule 8 data starts at activation.
+- **2026-11-08:** Data retention approved (#216). A background runner (outside the tick) prunes push events older than max(horizon + backtest window + margin, 1 day) and keeps the newest 20,000 trace entries per app. It never prunes Changes, weight history, backtests, pull-source events or authority markers without a ttl.
+- **2026-11-08:** Webhook receiver contract approved (#222): `InputSpec.webhook` is a `WebhookMapping` (push only, dotted paths, data only), copied verbatim from `CompileInput`. Route `POST /v1/apps/{app}/webhooks/{input}` (ingest key as a header or `?key=`) validates like `/events` and never stores the raw body; limits 1 MB and 500 items; returns 202 `WebhookReceipt`. No Overpass fallback mirror for now: the circuit breaker (#223) is enough.
+- **2026-11-08:** Full live run on a real server (#220, 15 min, neutral app):
+  - The build path through the API worked end to end.
+  - 245 events ingested with 0 rejected; 450 WebSocket frames with 0 errors (max gap 3.2 s); public instructions served.
+  - The Critic applied 9 gated weight changes, down to the 10% floor. The POI Labeler named the place.
+  - Fix: the Labeler ran out of steps in 7 of 9 repeat runs. It now stops early when nothing is new (live: 3 steps).
+- **2026-11-08:** The Scout works live with Tavily (key in `backend/.env`). Fixes from live runs:
+  - Fetched bodies were decompressed twice; this is fixed.
+  - `brotli` is a new dependency (Ram approved), because many feeds force br compression.
+  - Redirects are followed for up to 3 hops, and every hop is re-checked by the URL guard (Scout tools and connector polls).
+  - `test_connector` counts RSS items without coordinates, since the locator places them.
+  - An agent's connector that fails its test is removed (a Change is written).
+  - A connector change updates the running engine's spec.
+  - Scout prompt: commit early, use only probed feeds, one connector per input.
+  - Live result: WBAL feed configured and tested (40 items) in 34 s.

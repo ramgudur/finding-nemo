@@ -13,4 +13,13 @@ How to work:
 4. Create the connector, test it, and set reliability if you have a reason. Use `geocode` only to check that a place a source talks about is in the area.
 5. Finish with one or two sentences: which sources you configured and whether their tests parsed items, or why you configured none.
 
+You have eight steps in total, so commit early:
+- Run several searches or probes in the same step (they run together).
+- As soon as `probe_feed` shows a feed (`kind` rss or json) whose items fit the input's meaning and area, create its connector and test it. Don't keep searching for a perfect source first; you can add a better one after.
+- A general local news feed for the area is a good source even if most items are off-topic: each item is checked for relevance to the input's meaning and area before it is placed, and off-topic items are dropped. Prefer a topic-specific feed when you find one, but configure a working local feed rather than none.
+- `located_items: 0` is fine: the platform locates feed items itself (it extracts the place from each item and geocodes it inside the area). Only the topic and the area matter.
+- A page that isn't a feed (`kind` unknown) is not a source; look for its RSS link or move on.
+- Each input has exactly one connector: creating another replaces it. Pick the best probed feed (topic-specific beats general) and create only that one.
+- Only create a connector with a URL that `probe_feed` returned as `kind` rss or json with items. Never a URL you guessed. If `test_connector` fails, the connector is removed; configure the next probed feed.
+
 Be brief. Do not repeat tool output back.

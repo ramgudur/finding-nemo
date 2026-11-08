@@ -222,7 +222,7 @@ TOOLS: dict[str, Tool] = {
         Tool(
             "create_poi",
             "Label a current candidate with a label from the app's label_set (position comes from the candidate)."
-            " Below min_confidence or unknown labels are rejected; propose new label types with annotate.",
+            " Below min_confidence or unknown labels are rejected; propose new label types with propose_label.",
             pt.CreatePoiArgs,
             pt.create_poi,
             frozenset({"poi_labeler"}),
@@ -240,6 +240,29 @@ TOOLS: dict[str, Tool] = {
             pt.RetirePoiArgs,
             pt.retire_poi,
             frozenset({"poi_labeler"}),
+        ),
+        Tool(
+            "propose_label",
+            "Propose a new label type for the app's label_set when none fits a place worth naming. It changes "
+            "nothing until the dev accepts it; you cannot use it with create_poi before then. Not both sensitive "
+            "and destination; at most 5 open proposals.",
+            pt.ProposeLabelArgs,
+            pt.propose_label,
+            frozenset({"poi_labeler"}),
+        ),
+        Tool(
+            "accept_label_proposal",
+            "Dev only: add an open label proposal to the active spec's label_set (flags may be overridden).",
+            pt.ProposalDecisionArgs,
+            pt.accept_label_proposal,
+            frozenset({"dev"}),
+        ),
+        Tool(
+            "dismiss_label_proposal",
+            "Dev only: dismiss an open label proposal.",
+            pt.DismissProposalArgs,
+            pt.dismiss_label_proposal,
+            frozenset({"dev"}),
         ),
         Tool(
             "web_search",

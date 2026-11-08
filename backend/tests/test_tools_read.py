@@ -178,4 +178,5 @@ def test_critic_sees_read_and_write_tools():
         "create_poi",
         "update_poi",
         "retire_poi",
+        "propose_label",
     }

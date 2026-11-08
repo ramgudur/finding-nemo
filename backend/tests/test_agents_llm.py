@@ -79,6 +79,45 @@ def test_chat_does_not_retry_non_retryable_errors():
     assert len(fake.calls) == 1
 
 
+def test_token_bucket_uses_an_injected_clock_over_time_monotonic(monkeypatch):
+    # time.monotonic must be ignored once a clock is injected (#221: LlmRouter's fake-clock tests)
+    monkeypatch.setattr(llm_mod.time, "monotonic", lambda: 999_999.0)
+    fake_now = [0.0]
+    b = _TokenBucket(rpm=60.0, clock=lambda: fake_now[0])
+    for _ in range(60):
+        assert b.try_take() is True
+    assert b.try_take() is False
+    fake_now[0] += 2.0
+    assert b.available() == pytest.approx(2.0)
+
+
+def test_admit_requires_headroom_by_priority():
+    router = LlmRouter(_settings(nvidia_rpm=60))
+    # capacity 60; interactive needs no headroom, triggered needs 15% (9), scheduled needs 40% (24)
+    router._provider("nvidia").bucket.tokens = 20.0
+    assert router.admit("critic", 6, "interactive") is True  # needs 6 <= 20
+    assert router.admit("critic", 6, "triggered") is True  # needs 6 + 9 = 15 <= 20
+    assert router.admit("critic", 6, "scheduled") is False  # needs 6 + 24 = 30 > 20
+
+
+def test_admit_does_not_take_tokens():
+    router = LlmRouter(_settings(nvidia_rpm=60))
+    before = router._provider("nvidia").bucket.tokens
+    assert router.admit("critic", 6, "interactive") is True
+    assert router._provider("nvidia").bucket.tokens == before
+
+
+def test_admit_false_when_the_bucket_is_too_low_for_the_whole_run():
+    router = LlmRouter(_settings(nvidia_rpm=60))
+    router._provider("nvidia").bucket.tokens = 3.0
+    assert router.admit("critic", 6, "interactive") is False
+
+
+def test_rpm_reads_the_providers_configured_rate():
+    router = LlmRouter(_settings(nvidia_rpm=17))
+    assert router.rpm("critic") == 17
+
+
 def test_log_startup_models_never_logs_the_api_key(caplog):
     router = LlmRouter(_settings())
     with caplog.at_level("INFO"):

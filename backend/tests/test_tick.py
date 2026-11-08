@@ -408,3 +408,111 @@ def test_hotspot_model_fields():
     assert h.radius_m == pytest.approx(np.sqrt(h.area_m2 / np.pi))
     assert h.area_m2 == h.n_cells * rt.grid.cell_m**2
     assert 0.5 <= h.score <= 1.0 and h.mean <= h.score
+
+
+# -- #197: max grid (250,000 cells): hotspot labelling and cache memory ---------------------------
+
+
+def _flood_fill_components(mask):
+    """Reference: plain 8-connected flood fill, components in row-major order of their first cell."""
+    h, w = mask.shape
+    seen = np.zeros_like(mask, dtype=bool)
+    comps = []
+    for r0, c0 in zip(*np.nonzero(mask), strict=True):
+        if seen[r0, c0]:
+            continue
+        stack, cells = [(r0, c0)], []
+        seen[r0, c0] = True
+        while stack:
+            r, c = stack.pop()
+            cells.append(r * w + c)
+            for dr in (-1, 0, 1):
+                for dc in (-1, 0, 1):
+                    rr, cc = r + dr, c + dc
+                    if 0 <= rr < h and 0 <= cc < w and mask[rr, cc] and not seen[rr, cc]:
+                        seen[rr, cc] = True
+                        stack.append((rr, cc))
+        comps.append(sorted(int(x) for x in cells))
+    return comps
+
+
+def test_connected_components_match_a_flood_fill():
+    from app.engine.tick import _connected_components
+
+    rng = np.random.default_rng(3)
+    for _ in range(200):
+        m = rng.random((int(rng.integers(1, 30)), int(rng.integers(1, 30)))) < rng.uniform(0.05, 0.9)
+        assert [c.tolist() for c in _connected_components(m)] == _flood_fill_components(m)
+    snake = np.zeros((41, 41), dtype=bool)  # one long winding component: the slowest case to merge
+    snake[::2, :] = True
+    snake[1::4, -1] = True
+    snake[3::4, 0] = True
+    assert [c.tolist() for c in _connected_components(snake)] == _flood_fill_components(snake)
+    assert _connected_components(np.zeros((5, 5), dtype=bool)) == []
+
+
+def _max_grid_spec(n_inputs: int) -> AppSpec:
+    from app.core.models import MAX_GRID_CELLS
+
+    side_m = 10 * int(np.sqrt(MAX_GRID_CELLS)) - 1  # just under 500 x 500 cells of 10 m
+    lat1 = 45.0 + side_m / 111_194.9
+    lon1 = 10.0 + side_m / (111_194.9 * np.cos(np.radians((45.0 + lat1) / 2)))
+    base = spec().inputs[0].model_dump(exclude_none=True)
+    ops = [{k: v for k, v in o.items() if k != "layer_id"} for o in base["operators"]]
+    inputs = [{**base, "id": f"in{i}", "operators": ops} for i in range(n_inputs)]
+    s = spec(grid={"cell_m": 10, "bbox": {"min_lat": 45.0, "min_lon": 10.0, "max_lat": lat1, "max_lon": lon1}})
+    return spec(grid=s.grid.model_dump(), inputs=inputs)
+
+
+def test_live_cache_stays_under_its_memory_budget_at_the_max_grid():
+    from app.core.models import MAX_GRID_CELLS
+    from app.engine.tick import CACHE_BUDGET_BYTES, CACHE_TICKS, TICK_S
+
+    eng = TickEngine(InMemoryEventSource(), clock=SimClock(T0))
+    rt = eng.add_app(_max_grid_spec(6))
+    h, w = rt.grid.shape
+    assert 0.9 * MAX_GRID_CELLS <= h * w <= MAX_GRID_CELLS
+    cache_bytes = rt.cache._layers.nbytes + rt.cache._overrides.nbytes + rt.cache._t.nbytes
+    assert cache_bytes <= CACHE_BUDGET_BYTES
+    # fewer frames, but they still span the full replay window
+    assert rt.cache.capacity < CACHE_TICKS
+    assert rt.cache.capacity * rt.cache_min_gap_s == pytest.approx(CACHE_TICKS * TICK_S)
+
+
+def test_small_apps_and_backtest_replays_keep_every_tick():
+    from app.engine.tick import CACHE_TICKS
+
+    eng = TickEngine(InMemoryEventSource(), clock=SimClock(T0))
+    rt = eng.add_app(spec())
+    assert (rt.cache.capacity, rt.cache_min_gap_s) == (CACHE_TICKS, 0.0)
+    # no budget (e.g. a backtest replay): every tick, whatever the grid
+    big = AppRuntime(_max_grid_spec(1), cache_ticks=7)
+    assert (big.cache.capacity, big.cache_min_gap_s) == (7, 0.0)
+
+
+def test_budgeted_cache_spaces_frames_over_the_window():
+    from app.engine.tick import TICK_S, cache_frame_bytes
+
+    s = spec()
+    probe = AppRuntime(s)
+    frame = cache_frame_bytes(len(probe.weighted_ids), probe.grid.shape)
+    rt = AppRuntime(s, cache_ticks=30, cache_budget_bytes=10 * frame)  # 10 frames over 60 s
+    assert rt.cache.capacity == 10 and rt.cache_min_gap_s == pytest.approx(6.0)
+    src = InMemoryEventSource()
+    for k in range(60):  # 120 s of 2 s ticks
+        now = T0 + TICK_S * k
+        tick_app(rt, src, now=now, clock=SimClock(now))
+    t = rt.cache.window().t
+    assert len(t) == 10
+    assert np.all(np.diff(t) >= 6.0 - TICK_S / 2)
+    assert t[-1] - t[0] >= 50.0  # still spans most of the window
+
+
+def test_slow_tick_is_logged(monkeypatch, caplog):
+    from app.engine import tick as tick_mod
+
+    rt = AppRuntime(spec())
+    monkeypatch.setattr(tick_mod, "TICK_S", 0.0)
+    with caplog.at_level("WARNING", logger="app.engine.tick"):
+        tick_app(rt, InMemoryEventSource(), now=T0, clock=SimClock(T0))
+    assert any("over the" in r.getMessage() and "test-app" in r.getMessage() for r in caplog.records)

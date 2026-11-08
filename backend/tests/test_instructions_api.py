@@ -2,6 +2,7 @@
 
 import math
 import re
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
@@ -10,9 +11,11 @@ from sim import campus_alert as ca
 from sim.common import LocalFrame, load_spec
 
 from app.api import instructions as instructions_api
+from app.api.instruction_trace import InstructionTraceDedup
 from app.core import clock as clock_mod
 from app.core.clock import SimClock
 from app.core.db import Db
+from app.core.models import DestinationPoint, GuardCheck, GuardResult, Instruction
 from app.engine.tick import TickEngine
 from app.main import DbEventSource, create_app
 
@@ -105,12 +108,60 @@ def test_outside_the_area_gets_the_fallback(p):
     assert ins["text"] == RAW["routing"]["fallback_text"]
 
 
-def test_each_request_is_traced_without_position_or_text(p):
-    _ask(p, 120.0, 120.0)
-    entries = [t for t in p["db"].list_trace("campus-alert") if t.agent == "message_guard"]
-    assert entries
+def _guard_entries(p):
+    return [t for t in p["db"].list_trace("campus-alert") if t.agent == "message_guard"]
+
+
+def test_a_new_outcome_is_traced_without_position_or_text(p):
+    before = len(_guard_entries(p))
+    _ask(p, 120.0, 120.0)  # first request from this cell: always a new outcome
+    entries = _guard_entries(p)
+    assert len(entries) == before + 1
     blob = " ".join(f"{e.saw} {e.tested} {e.result} {e.action} {e.why}" for e in entries)
     assert "32.7" not in blob and "-96." not in blob
+
+
+def test_repeats_with_the_same_outcome_from_the_same_cell_are_not_retraced(p):
+    _ask(p, 130.0, 130.0)
+    before = len(_guard_entries(p))
+    for _ in range(5):  # a page recomputing on every tick
+        assert _ask(p, 130.0, 130.0).status_code == 200
+    assert len(_guard_entries(p)) == before
+
+
+def _ins(passed: bool, label: str | None, failing: tuple[tuple[str, str], ...] = ()) -> Instruction:
+    checks = [GuardCheck(name=n, passed=False, detail=d) for n, d in failing] or [
+        GuardCheck(name="length", passed=True)
+    ]
+    return Instruction(
+        text="t",
+        destination=None if label is None else DestinationPoint(lat=0.0, lon=0.0, label=label),
+        route=[],
+        distance_m=0.0,
+        computed_at=datetime.fromtimestamp(T0, UTC),
+        guard=GuardResult(passed=passed, checks=checks),
+    )
+
+
+def test_dedup_traces_on_any_change_of_destination_or_failure_reason():
+    d = InstructionTraceDedup()
+    key = ("some-app", 3, 4)
+    assert d.should_trace(key, _ins(True, "exit a"))
+    assert not d.should_trace(key, _ins(True, "exit a"))
+    assert d.should_trace(key, _ins(True, "exit b"))  # destination changed
+    assert d.should_trace(key, _ins(False, None, (("route_found", "no reachable destination"),)))
+    assert not d.should_trace(key, _ins(False, None, (("route_found", "no reachable destination"),)))
+    assert d.should_trace(key, _ins(False, None, (("route_found", "start is blocked"),)))  # new reason
+    assert d.should_trace(("some-app", 3, 5), _ins(False, None, (("route_found", "start is blocked"),)))  # new cell
+    assert d.should_trace(("other-app", 3, 4), _ins(True, "exit a"))  # keys are per app
+
+
+def test_dedup_memory_is_bounded():
+    d = InstructionTraceDedup(max_keys=3)
+    for i in range(10):
+        d.should_trace(("some-app", i, 0), _ins(True, "exit a"))
+    assert len(d) == 3
+    assert d.should_trace(("some-app", 0, 0), _ins(True, "exit a"))  # evicted: traced again
 
 
 def test_unknown_app_and_apps_without_routing_are_404(p):
