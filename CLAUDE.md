@@ -207,7 +207,7 @@ Ingest keys and authority keys are generated per app at activation and stored in
 
 `Hotspot`, `MapResponse` and `HotspotsResponse` are Pydantic models in `core/models.py`, mirrored in `types.ts`, like every other contract.
 
-**Outputs.** Without the `X-Authority-Key` header, responses contain only `public` items. This applies to REST and WebSocket alike.
+**Outputs.** Without the `X-Authority-Key` header, responses contain only `public` items. This applies to REST and WebSocket alike. Browsers can't set WebSocket headers, so the WS client sends `{type: "auth", key}` as its first frame; until a valid key arrives the stream is public-only. Never echo or log the key.
 
 | Endpoint | Visibility |
 |---|---|
@@ -414,4 +414,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-07:** Output contracts set: one combined `Hotspot` (Allen's map fields + Kida A's tick stats), `MapResponse` with a single `value` per cell and near-zero cells omitted, `HotspotsResponse`. Navmi adds them to `models.py` in #9; Allen mirrors them in `types.ts` (no separate `outputs.ts`); `tick.py` emits the `Hotspot` model.
 - **2026-11-07:** Campus Alert: classroom buttons use `override`, like the police marker (rule 6: authority overrides always win).
 - **2026-11-07:** Campus Alert runs on a generic, non-school location, not a real recognizable campus.
-- **2026-11-07:** The engine `Grid` takes `bbox` as a tuple in GeoJSON order `(min_lon, min_lat, max_lon, max_lat)` (PR #12). The `Tier` type is defined once, in `core/models.py`; `engine/tiers.py` imports it and does not define its own.
+- **2026-11-07:** The engine `Grid` takes `bbox` as a tuple in GeoJSON order `(min_lon, min_lat, max_lon, max_lat)` (PR #12). The `Tier` type is defined once, in `core/models.py`; `engine/tiers.py` imports it and does not define its own.- **2026-11-07:** WebSocket auth is a first-frame `{type: "auth", key}` message (option a); public-only until a valid key arrives.
