@@ -18,13 +18,14 @@ import { TestControls, centreOf, inArea, type TestPoint } from "../components/ap
 import { useSourceStatus } from "../hooks/useSourceStatus";
 import { ChangesList } from "../components/architecture/ChangesList";
 import DebugDrawer from "../components/architecture/DebugDrawer";
-import HeatmapPanel, { shownLayer } from "../components/architecture/HeatmapPanel";
+import HeatmapPanel, { shownLayer, type ColourMode } from "../components/architecture/HeatmapPanel";
 import { LayerList } from "../components/architecture/LayerList";
 import { specLayers } from "../components/architecture/specLayers";
 import { VerificationScores } from "../components/VerificationScores/VerificationScores";
 import { WeightsPanel } from "../components/WeightsPanel/WeightsPanel";
 import { useAuthorityConsoleData } from "../hooks/useAuthorityConsoleData";
 import { useLiveAppData } from "../hooks/useLiveAppData";
+import { useMapLearning } from "../hooks/useMapLearning";
 import { useVectorReadings } from "../hooks/useVectorReadings";
 import { useBuilderStore } from "../store/useBuilderStore";
 import { isProposed } from "../components/app/appState";
@@ -115,6 +116,20 @@ export default function AppConsole() {
   }, [data.rejected, reject]);
   const sources = useSourceStatus(appId, authority ? key : null, reject);
   const vectors = useVectorReadings(appId, authority ? key : null, authority ? spec : null, reject);
+  // The map shows what the agents did (authority only): colour by source by default, score otherwise.
+  const [colourMode, setColourMode] = useState<ColourMode>("source");
+  const learning = useMapLearning({
+    appId,
+    authorityKey: authority ? key : null,
+    spec: authority ? spec : null,
+    map: live.map,
+    pois: live.pois,
+    weights: data.weights,
+    changes: data.changes,
+    changesLoaded: data.loaded,
+    bySource: colourMode === "source",
+    onRejected: reject,
+  });
 
   // Test your app: where simulated events land (the area's centre until the dev picks a point)
   const [testPoint, setTestPoint] = useState<TestPoint | null>(null);
@@ -250,6 +265,10 @@ export default function AppConsole() {
             }
             marker={authority && (picking || testPoint) ? point : null}
             vectors={authority ? vectors : []}
+            learning={authority ? learning : null}
+            weights={authority ? data.weights : null}
+            colourMode={colourMode}
+            onColourMode={setColourMode}
             emptyHint={
               authority ? (
                 <>

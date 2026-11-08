@@ -86,6 +86,8 @@ def test_dropping_spoofer_trust_passes_on_holdout():
     assert bt.kind == "single" and bt.device == "cpu" and bt.candidates_tested == 1
     assert bt.train_scores and bt.elapsed_ms > 0
     assert bt.t.timestamp() == NOW
+    # the stored Backtest keeps what the candidate was compared against (console holdout delta)
+    assert bt.baseline_holdout_scores == out.baseline_holdout and bt.deciding_method == "authority_confirmation"
 
 
 def test_lowering_real_users_fails():

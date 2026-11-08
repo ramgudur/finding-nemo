@@ -204,6 +204,8 @@ def run_backtest(
             device="cpu",
             elapsed_ms=(time.perf_counter() - started) * 1000.0,
             t=datetime.fromtimestamp(now, UTC),
+            baseline_holdout_scores=kw.get("baseline_holdout", {}),
+            deciding_method=kw.get("deciding_method"),
         )
         return BacktestOutcome(backtest=bt, reason=reason, **kw)
 
@@ -350,7 +352,13 @@ def run_backtest_batch(
     w_valid = w_all[valid][:, to_window]
     current = bounds.current[to_window]
 
-    def finish(passed: bool, reason: str, best: BatchCandidate | None = None, **kw) -> BatchOutcome:
+    def finish(
+        passed: bool,
+        reason: str,
+        best: BatchCandidate | None = None,
+        decided: VerificationMethod | None = None,
+        **kw,
+    ) -> BatchOutcome:
         elapsed = (time.perf_counter() - started) * 1000.0
         bt = Backtest(
             id=uuid.uuid4().hex,
@@ -363,6 +371,8 @@ def run_backtest_batch(
             device=device,
             elapsed_ms=elapsed,
             t=datetime.fromtimestamp(now, UTC),
+            baseline_holdout_scores=kw.get("baseline_holdout", {}),
+            deciding_method=decided,
         )
         head = f"{len(w_all)} configs backtested in {elapsed:.0f} ms on {device} ({int(valid.sum())} valid)"
         return BatchOutcome(backtest=bt, reason=f"{head}; {reason}", **kw)
@@ -415,4 +425,6 @@ def run_backtest_batch(
     reason = f"{len(passing)} of top {len(cands)} by train passed on holdout"
     if best:
         reason += f": {best.reason}"
-    return finish(bool(passing), reason, best, candidates=ordered, baseline_holdout=base_hold)
+    # `accept` decides on the first priority method the baseline has holdout data for, so that is
+    # the deciding method for every passing candidate (and for the reported best).
+    return finish(bool(passing), reason, best, decided=decide, candidates=ordered, baseline_holdout=base_hold)

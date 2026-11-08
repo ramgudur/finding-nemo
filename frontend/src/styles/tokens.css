@@ -41,6 +41,18 @@
   --c-on-deep-2: 199 216 222;
   --c-attn-on-deep: 242 210 156;
   --c-ok-on-deep: 185 220 207;
+  /* Source hues for the console map's "colour by source" (ordered; inputs take them in spec order).
+     Each is >= 3:1 against the cream sheet and the map tiles; blue/teal (water) and coral (risk) are
+     left out so a source never reads as water or as danger. */
+  --c-src-1: 168 119 28;  /* ochre  #A8771C */
+  --c-src-2: 90 79 160;   /* indigo #5A4FA0 */
+  --c-src-3: 63 125 78;   /* moss   #3F7D4E */
+  --c-src-4: 176 74 110;  /* rose   #B04A6E */
+  --c-src-5: 122 127 30;  /* olive  #7A7F1E */
+  --c-src-6: 138 79 125;  /* plum   #8A4F7D */
+  /* Change flash: hotter cells glow warm; cooler cells get a fainter cool outline. */
+  --c-flash-warm: 226 160 48;
+  --c-flash-cool: 62 124 126;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --shadow-1: 0 1px 2px rgba(23, 53, 71, 0.06), 0 8px 24px -14px rgba(23, 53, 71, 0.28);

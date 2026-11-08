@@ -424,6 +424,30 @@ class Db:
         rows = self._query("SELECT user_id, score FROM trust WHERE app_id = ?", (app_id,))
         return {r["user_id"]: r["score"] for r in rows}
 
+    def list_trust_below(self, app_id: str, below: float, limit: int) -> list[TrustRecord]:
+        """Users whose current trust is below ``below``, lowest first (ties: most recently updated)."""
+        rows = self._query(
+            "SELECT user_id, score, updated_at, last_increase_at FROM trust WHERE app_id = ? AND score < ? "
+            "ORDER BY score ASC, updated_at DESC LIMIT ?",
+            (app_id, below, max(0, int(limit))),
+        )
+        return [TrustRecord(r["user_id"], r["score"], r["updated_at"], r["last_increase_at"]) for r in rows]
+
+    def latest_event_by_user(self, app_id: str, user_ids: Sequence[str]) -> dict[str, tuple[str, Event]]:
+        """``{user_id: (input_id, latest event)}`` across the app's inputs, for the given users.
+        One query; users with no stored event are absent."""
+        ids = list(dict.fromkeys(user_ids))
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        # SQLite: a bare column next to MAX() comes from the row holding the maximum.
+        rows = self._query(
+            "SELECT json_extract(event_json, '$.user_id') AS uid, input_id, event_json, MAX(ts) AS last "
+            f"FROM events WHERE app_id = ? AND json_extract(event_json, '$.user_id') IN ({marks}) GROUP BY uid",
+            [app_id, *ids],
+        )
+        return {r["uid"]: (r["input_id"], Event.model_validate_json(r["event_json"])) for r in rows}
+
     # -- pois -----------------------------------------------------------------------
 
     def upsert_poi(self, app_id: str, poi: PoiModel, t: float) -> None:
