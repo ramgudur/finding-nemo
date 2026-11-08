@@ -51,6 +51,7 @@ def test_minimal_spec_fills_defaults():
     assert inp.operators[0].model_extra == {"half_life_s": 60}
     assert s.outputs.layers[1].visibility == "authority"
     assert s.routing.rephrase is False
+    assert s.routing.fallback_text == "No route available."  # neutral default (rule 3)
 
 
 def test_operator_params_feed_the_registry():

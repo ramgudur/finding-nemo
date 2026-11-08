@@ -197,9 +197,7 @@ class RoutingSpec(Model):
     destination_points: list[DestinationPoint] = Field(default_factory=list)
     impassable_score: float = Field(default=0.8, gt=0, le=1)
     alpha: float = Field(default=4.0, ge=0)
-    fallback_text: str = Field(
-        default="No safe route found. Stay where you are and follow official instructions.", max_length=360
-    )
+    fallback_text: str = Field(default="No route available.", max_length=360)
     rephrase: bool = False
 
 
