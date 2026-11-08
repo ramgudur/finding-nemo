@@ -18,6 +18,7 @@ import type {
   OperatorInfo,
   PinRequest,
   POI,
+  PublicAppInfo,
   ScoutJobAccepted,
   ScoutRequest,
   SourceSuggestion,
@@ -140,6 +141,11 @@ export const api = {
   // --- Sources page (fe-sources) ---
   // public-safe compile progress (step count, elapsed, last validation); 404 when nothing is known
   compileStatus: (appId: string) => get<CompileStatus>(`${app(appId)}/compile/status`),
+
+  // --- End-user page (FE1, #269) ---
+  // public: title, intent, status, area, last update and public sources; 404 unknown app (or an
+  // older backend without the route: callers fall back to /map and /instruction alone)
+  publicInfo: (appId: string) => get<PublicAppInfo>(`${app(appId)}/public`),
 };
 
 // --- Architecture page additions (fe-arch-shell) ---
