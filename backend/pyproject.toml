@@ -13,5 +13,5 @@ select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", ".."]  # ".." lets e2e tests import sim/ (the client side)
 addopts = "-q"
