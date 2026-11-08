@@ -13,10 +13,11 @@ Decide:
 
 Rules:
 - Use only option types and preset names from the catalogue. There is no HTML scraping option.
-- For a `json_api` preset, set `config` to `{"preset": "<name>"}`. For an `rss` or custom `json_api` option, set `config` to `{"url": "<url>"}` only if the developer's description contains that exact URL; otherwise leave `config` out. Never invent a URL.
+- For a `json_api` preset, set `config` to `{"preset": "<name>"}`. For an `rss`, `json_list` or custom `json_api` option, set `config` to `{"url": "<url>"}` only if the developer's description contains that exact URL; otherwise leave `config` out. Never invent a URL.
+- `json_list` or custom `json_api`? Choose `json_list` when the endpoint returns a list of items that each carry their own location (for example a GeoJSON FeatureCollection): every item becomes one event. Choose a custom `json_api` when it returns one reading for one fixed place.
 - Push options take no `config`.
 - Copy each option's `type` and `config` exactly as shown in the catalogue entry; `type` is one word.
-- If the description contains a URL, keep it: `rss` with that URL for a feed, or a custom `json_api` with that URL for a JSON endpoint. Never replace a URL the developer gave with a preset.
+- If the description contains a URL, keep it: `rss` with that URL for a feed, `json_list` with that URL for a list of located items, or a custom `json_api` with that URL for a single JSON reading. Never replace a URL the developer gave with a preset.
 
 Return ONLY a JSON object, no commentary:
 {"kind": "push" | "pull", "shape": "<shape>", "options": [{"type": "<type>", "why": "<one line>", "config"?: {...}}]}

@@ -18,58 +18,23 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import ValidationError
 
 from app.api.deps import get_db, ingest_key_header
 from app.api.ingest import _check_fields, _check_position
+from app.connectors.mapping import PathNotFound as _PathNotFound
+from app.connectors.mapping import items as _items
+from app.connectors.mapping import map_item as _map_item
 from app.core import clock as clock_mod
 from app.core.db import Db
-from app.core.models import Event, TsFormat, WebhookMapping, WebhookReceipt, WebhookRejection
+from app.core.models import Event, WebhookReceipt, WebhookRejection
 
 router = APIRouter(prefix="/v1/apps", tags=["webhooks"])
 
 MAX_BODY_BYTES = 1_000_000
 MAX_ITEMS = 500
-
-
-class _PathNotFound(Exception):
-    def __init__(self, path: str) -> None:
-        super().__init__(f"path {path!r} not found")
-        self.path = path
-
-
-def _dig(data: Any, path: str) -> Any:
-    """Dotted path with optional list indices, e.g. "geometry.coordinates.1"."""
-    node = data
-    for part in path.split(".") if path else []:
-        if isinstance(node, list):
-            try:
-                node = node[int(part)]
-            except (ValueError, IndexError) as e:
-                raise _PathNotFound(path) from e
-        elif isinstance(node, dict):
-            if part not in node:
-                raise _PathNotFound(path)
-            node = node[part]
-        else:
-            raise _PathNotFound(path)
-    return node
-
-
-def _items(body: Any, items_path: str) -> list[Any]:
-    node = _dig(body, items_path)
-    return node if isinstance(node, list) else [node]
-
-
-def _parse_ts(raw: Any, ts_format: TsFormat) -> datetime:
-    if ts_format == "epoch_s":
-        return datetime.fromtimestamp(float(raw), tz=UTC)
-    if ts_format == "epoch_ms":
-        return datetime.fromtimestamp(float(raw) / 1000.0, tz=UTC)
-    return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
 
 
 def _short_reason(e: Exception) -> str:
@@ -80,17 +45,6 @@ def _short_reason(e: Exception) -> str:
         more = len(e.errors()) - 3
         return "; ".join(parts) + (f" (+{more} more)" if more > 0 else "")
     return str(e)
-
-
-def _map_item(item: Any, mapping: WebhookMapping, now: datetime) -> dict[str, Any]:
-    """One item -> an `/events`-shaped body, or raises with a reason this item is rejected."""
-    out: dict[str, Any] = {"lat": _dig(item, mapping.lat), "lon": _dig(item, mapping.lon)}
-    out["ts"] = _parse_ts(_dig(item, mapping.ts), mapping.ts_format) if mapping.ts else now
-    if mapping.user_id:
-        out["user_id"] = _dig(item, mapping.user_id)
-    for name, path in mapping.fields.items():
-        out[name] = _dig(item, path)
-    return out
 
 
 @router.post("/{app}/webhooks/{input}", response_model=WebhookReceipt, status_code=202)
