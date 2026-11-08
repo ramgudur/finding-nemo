@@ -1,9 +1,10 @@
 import L from "leaflet";
 import { useEffect, useRef } from "react";
-import type { CellCollection, DistrustedUser, GeoJsonBBox, Hotspot, POI } from "../../api/types";
+import type { CellCollection, DistrustedUser, GeoJsonBBox, Hotspot, POI, VectorGrid } from "../../api/types";
 import type { Flash } from "../../hooks/useMapLearning";
 import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
 import { bboxToBounds, gridShape, heatColor, heatOpacity, lineStride, toLatLng } from "./geo";
+import { VectorFieldOverlay } from "./VectorFieldLayer";
 import "./map.css";
 
 interface Props {
@@ -35,6 +36,9 @@ interface Props {
   newPoiIds?: ReadonlySet<string>;
   /** Server time of the current frame, for "named 3 min ago" (the server clock may be simulated). */
   serverNow?: string | null;
+  /** Vector fields as arrows per cell (MapResponse.vectors), with readable names per layer id. */
+  vectors?: Record<string, VectorGrid>;
+  vectorLabels?: Record<string, string>;
 }
 
 /** Cells at or above this value also get a blurred copy underneath (the soft glow). */
@@ -157,6 +161,8 @@ export function Map({
   agentMarks,
   newPoiIds,
   serverNow,
+  vectors,
+  vectorLabels,
 }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -561,8 +567,9 @@ export function Map({
   // React styles only the wrapper. The inner div's className is static, so React never rewrites it
   // (toggling a class there would wipe the classes Leaflet added at mount).
   return (
-    <div className={`${onPick ? "hm-map--picking" : ""} ${className ?? ""}`} style={{ height, minHeight: 280, width: "100%" }}>
+    <div className={`${onPick ? "hm-map--picking" : ""} ${className ?? ""}`} style={{ height, minHeight: 280, width: "100%", position: "relative" }}>
       <div ref={el} className="hm-map" style={{ height: "100%", width: "100%", borderRadius: 12 }} />
+      <VectorFieldOverlay mapRef={map} vectors={vectors} bbox={bbox} cellM={cellM} labels={vectorLabels} pane="hm-vectors" zIndex={455} />
     </div>
   );
 }

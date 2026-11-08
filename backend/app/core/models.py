@@ -624,14 +624,33 @@ class CellCollection(Model):
     features: list[CellFeature] = Field(default_factory=list)
 
 
+class VectorCell(Model):
+    """One sampled cell of a vector field: u east, v north (field units, e.g. m/s), pointing where it heads."""
+
+    row: int
+    col: int
+    u: float
+    v: float
+
+
+class VectorGrid(Model):
+    """A layer's vector field, sampled every `step` cells on both axes (at most ~400 cells)."""
+
+    step: int = Field(ge=1)
+    cells: list[VectorCell] = Field(default_factory=list)
+
+
 class MapResponse(Model):
-    """Without the authority key, `layers` holds only public layers. 'score' is the combined map."""
+    """Without the authority key, `layers` holds only public layers. 'score' is the combined map.
+    `vectors` holds, per layer id, the vector field an operator computed for it (optional; same
+    visibility as that layer)."""
 
     app_id: str
     t: UtcDatetime
     cell_m: float
     bbox: GeoJsonBBox
     layers: dict[str, CellCollection] = Field(default_factory=dict)
+    vectors: dict[str, VectorGrid] = Field(default_factory=dict)
 
 
 class Hotspot(Model):

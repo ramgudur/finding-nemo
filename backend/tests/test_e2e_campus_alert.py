@@ -123,7 +123,7 @@ def test_undeclared_field_is_rejected(run):
 def test_map_and_hotspots_follow_the_output_contracts(run):
     snap = run["snaps"][62]
     m = snap["map"]
-    assert set(m) == {"app_id", "t", "cell_m", "bbox", "layers"}
+    assert set(m) == {"app_id", "t", "cell_m", "bbox", "layers", "vectors"}
     assert m["bbox"] == list(AppSpec.model_validate(RAW).grid.bbox.as_geojson())
     assert "score" in m["layers"] and "panic.flow_source" in m["layers"]
     for fc in m["layers"].values():

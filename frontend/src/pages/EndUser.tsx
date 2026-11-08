@@ -13,6 +13,7 @@ import { ApiError, api } from "../api/client";
 import { openStream } from "../api/stream";
 import type { CellCollection, GeoJsonBBox, Hotspot, Instruction, InstructionMode, MapResponse, PublicAppInfo } from "../api/types";
 import { bboxToBounds, toLatLng } from "../components/Map/geo";
+import { VectorFieldOverlay } from "../components/Map/VectorFieldLayer";
 
 type Pos = { lat: number; lon: number };
 type Source = "gps" | "map" | null;
@@ -29,10 +30,10 @@ const MAP_RETRY_MAX_MS = 10_000;
 const RISK = "#E07A5F"; // soft warm coral: noticeable, not alarming
 
 /** What a public caller may see of the risk: public hotspots, and the score only if it is public. */
-type Risk = { hotspots: Hotspot[]; score: CellCollection | null };
+type Risk = { hotspots: Hotspot[]; score: CellCollection | null; vectors?: MapResponse["vectors"]; cellM?: number };
 
 function riskOf(map: MapResponse | null, hotspots: Hotspot[]): Risk {
-  return { hotspots: hotspots.filter((h) => h.visibility === "public"), score: map?.layers?.score ?? null };
+  return { hotspots: hotspots.filter((h) => h.visibility === "public"), score: map?.layers?.score ?? null, vectors: map?.vectors, cellM: map?.cell_m };
 }
 
 /** A 404's detail tells a real "not active" / "routing off" apart from "not ticked yet" (transient). */
@@ -714,6 +715,8 @@ export function EndUser({ appId }: { appId: string }) {
             className="w-full rounded-xl"
             style={{ height: "min(60vh, 480px)", minHeight: 280 }}
           />
+          {/* public vector-field layers only: the server sends none the owner kept private (rule 8) */}
+          <VectorFieldOverlay mapRef={map} vectors={risk?.vectors} bbox={bbox} cellM={risk?.cellM} pane="eu-vectors" zIndex={395} legendClassName="bottom-6 left-2 items-start" variant="public" />
           {bbox && (
             <button
               type="button"
