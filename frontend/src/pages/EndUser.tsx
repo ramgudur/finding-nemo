@@ -1,14 +1,17 @@
 // End-user page: public instructions only. Must work on a phone over a tunnel.
 // Sends only this device's own position; shows the guarded instruction and route; recomputes on each
 // public stream tick. No key, no auth frame, no layers beyond what a public caller gets (rule 8): the
-// only calls are the public /public (title, intent, sources), /map (for the area outline),
+// only calls are the public /public (title, intent, sources), /map (area outline and, if the owner
+// made it public, the score), /hotspots (only the public ones; the server filters per item),
 // /instruction and the public stream. The instruction text is the server's, shown as sent.
+// The camera fits the area once, then the first route once; after that only the user (or the
+// Recenter button) moves it.
 import L from "leaflet";
-import { Info, LocateFixed, MoveUpRight, Navigation, Phone, TriangleAlert } from "lucide-react";
+import { Crosshair, Info, LocateFixed, MoveUpRight, Navigation, Phone, TriangleAlert } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, api } from "../api/client";
 import { openStream } from "../api/stream";
-import type { GeoJsonBBox, Instruction, InstructionMode, PublicAppInfo } from "../api/types";
+import type { CellCollection, GeoJsonBBox, Hotspot, Instruction, InstructionMode, MapResponse, PublicAppInfo } from "../api/types";
 import { bboxToBounds, toLatLng } from "../components/Map/geo";
 
 type Pos = { lat: number; lon: number };
@@ -23,6 +26,14 @@ const POLL_MS = 5000;
 const STALE_MS = 10_000;
 const GPS_SLOW_MS = 5000;
 const MAP_RETRY_MAX_MS = 10_000;
+const RISK = "#E07A5F"; // soft warm coral: noticeable, not alarming
+
+/** What a public caller may see of the risk: public hotspots, and the score only if it is public. */
+type Risk = { hotspots: Hotspot[]; score: CellCollection | null };
+
+function riskOf(map: MapResponse | null, hotspots: Hotspot[]): Risk {
+  return { hotspots: hotspots.filter((h) => h.visibility === "public"), score: map?.layers?.score ?? null };
+}
 
 /** A 404's detail tells a real "not active" / "routing off" apart from "not ticked yet" (transient). */
 function terminal404(e: unknown): Phase | null {
@@ -102,6 +113,13 @@ export function EndUser({ appId }: { appId: string }) {
   const map = useRef<L.Map | null>(null);
   const overlay = useRef<L.LayerGroup | null>(null);
   const area = useRef<L.LayerGroup | null>(null);
+  const heat = useRef<L.LayerGroup | null>(null);
+  const riskGroup = useRef<L.LayerGroup | null>(null);
+  const circles = useRef(new Map<string, L.Circle>());
+  // camera: fit the area once, then the first route once; never again on its own
+  const fitArea = useRef(false);
+  const fitRoute = useRef(false);
+  const lastFrameAt = useRef(0);
   const lastAsk = useRef(0);
   const watchId = useRef<number | null>(null);
   const slowTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -121,6 +139,7 @@ export function EndUser({ appId }: { appId: string }) {
   const [netError, setNetError] = useState("");
   const [waitingFirstMap, setWaitingFirstMap] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [risk, setRisk] = useState<Risk | null>(null); // null: not known yet
 
   const live = phase === "loading" || phase === "active";
   const liveRef = useRef(live);
@@ -287,12 +306,29 @@ export function EndUser({ appId }: { appId: string }) {
       onFrame: (f) => {
         if (f.type !== "tick") return;
         setLastTickAt(Date.now());
+        lastFrameAt.current = Date.now();
         if (!bboxRef.current && f.map?.bbox) setBbox(f.map.bbox);
+        setRisk(riskOf(f.map ?? null, f.hotspots?.hotspots ?? []));
         if (posRef.current) void ask(posRef.current);
       },
     });
-    const id = setInterval(() => posRef.current && void ask(posRef.current), POLL_MS);
+    // Risk on load from the public REST routes (no key), then from the stream ticks; REST again only
+    // while the stream is quiet.
+    let stop = false;
+    const loadRisk = () => {
+      Promise.all([api.map(appId).catch(() => null), api.hotspots(appId).catch(() => null)])
+        .then(([m, h]) => {
+          if (!stop && (m || h)) setRisk(riskOf(m, h?.hotspots ?? []));
+        })
+        .catch(() => undefined);
+    };
+    loadRisk();
+    const id = setInterval(() => {
+      if (posRef.current) void ask(posRef.current);
+      if (Date.now() - lastFrameAt.current > STALE_MS) loadRisk();
+    }, POLL_MS);
     return () => {
+      stop = true;
       close();
       clearInterval(id);
     };
@@ -319,12 +355,19 @@ export function EndUser({ appId }: { appId: string }) {
       setPos({ lat: e.latlng.lat, lon: e.latlng.lng });
       setSource("map");
     });
+    // risk sits under the route and markers: heat, then circles, then the default overlay pane
+    m.createPane("eu-heat").style.zIndex = "380";
+    m.createPane("eu-risk").style.zIndex = "390";
     area.current = L.layerGroup().addTo(m);
+    heat.current = L.layerGroup().addTo(m);
+    riskGroup.current = L.layerGroup().addTo(m);
     overlay.current = L.layerGroup().addTo(m);
     map.current = m;
+    const cs = circles.current;
     return () => {
       m.remove();
       map.current = null;
+      cs.clear();
     };
   }, []);
 
@@ -338,14 +381,98 @@ export function EndUser({ appId }: { appId: string }) {
     L.rectangle(bboxToBounds(bbox), { color: "#35596b", weight: 2, dashArray: "6 6", fill: false, interactive: false }).addTo(g);
   }, [bbox]);
 
-  // outside the area: show both the area and where the user is, so they can see which way it lies
+  // What "Recenter" frames: the route and you; else the area (and you, if you're outside it).
+  const insRef = useRef<Instruction | null>(null);
+  insRef.current = ins;
+  const frame = useCallback((): L.LatLngBounds | null => {
+    const b = bboxRef.current;
+    const p = posRef.current;
+    const r = insRef.current;
+    const out = p !== null && b !== null && !inside(b, p);
+    if (!out && r && r.route.length > 1) {
+      const bounds = L.latLngBounds(r.route.map(([la, lo]) => toLatLng(la, lo)));
+      if (p) bounds.extend(toLatLng(p.lat, p.lon));
+      if (r.destination) bounds.extend(toLatLng(r.destination.lat, r.destination.lon));
+      return bounds;
+    }
+    if (!b) return null;
+    const bounds = bboxToBounds(b);
+    if (out && p) bounds.extend(toLatLng(p.lat, p.lon));
+    return bounds;
+  }, []);
+
+  const recenter = useCallback(() => {
+    const m = map.current;
+    const f = frame();
+    if (m && f) m.fitBounds(f, { padding: [28, 28] });
+  }, [frame]);
+
+  // First load: fit the area once (with you, if you're already outside it). Nothing refits later.
   useEffect(() => {
     const m = map.current;
-    const p = posRef.current;
-    if (!m || !bbox) return;
-    if (outside && p) m.fitBounds(bboxToBounds(bbox).extend(toLatLng(p.lat, p.lon)), { padding: [24, 24] });
-    else m.fitBounds(bboxToBounds(bbox), { padding: [12, 12] });
-  }, [outside, bbox]);
+    if (!m || !bbox || fitArea.current) return;
+    fitArea.current = true;
+    const f = frame();
+    if (f) m.fitBounds(f, { padding: [12, 12] });
+  }, [bbox, frame]);
+
+  // First route: fit route + you once. Later routes (a new tap, a tick) leave the camera alone.
+  const hasRoute = !outside && ins !== null && ins.route.length > 1;
+  useEffect(() => {
+    if (!hasRoute || fitRoute.current) return;
+    fitRoute.current = true;
+    recenter();
+  }, [hasRoute, recenter]);
+
+  // Public high-risk areas: soft coral circles, opacity from the score; new ones fade in (opacity
+  // only). Kept by id, so a tick updates them in place instead of re-flashing every 2 s.
+  useEffect(() => {
+    const g = riskGroup.current;
+    if (!g) return;
+    const seen = new Set<string>();
+    for (const h of risk?.hotspots ?? []) {
+      seen.add(h.id);
+      const s = Math.max(0, Math.min(1, h.score));
+      const style = { color: RISK, weight: 1.5, opacity: 0.35 + 0.35 * s, fillColor: RISK, fillOpacity: 0.12 + 0.23 * s };
+      const radius = Math.max(h.radius_m, 1);
+      const c = circles.current.get(h.id);
+      if (c) {
+        c.setLatLng(toLatLng(h.lat, h.lon));
+        c.setRadius(radius);
+        c.setStyle(style);
+      } else {
+        const n = L.circle(toLatLng(h.lat, h.lon), { ...style, radius, pane: "eu-risk", className: "eu-risk-in" });
+        // a tap names it and still bubbles to the map, so you can set your position inside one
+        n.bindTooltip("High risk", { direction: "top" });
+        n.on("click", () => n.openTooltip());
+        n.addTo(g);
+        circles.current.set(h.id, n);
+      }
+    }
+    for (const [id, c] of circles.current) {
+      if (!seen.has(id)) {
+        g.removeLayer(c);
+        circles.current.delete(id);
+      }
+    }
+  }, [risk]);
+
+  // the public score, only if the owner made it public: a subtle heat wash under the circles
+  const score = risk?.score ?? null;
+  useEffect(() => {
+    const g = heat.current;
+    if (!g) return;
+    g.clearLayers();
+    if (!score || score.features.length === 0) return;
+    L.geoJSON(score, {
+      pane: "eu-heat",
+      interactive: false,
+      style: (f) => {
+        const v = Math.max(0, Math.min(1, Number(f?.properties?.value) || 0));
+        return { stroke: false, fillColor: RISK, fillOpacity: v < 0.15 ? 0 : 0.05 + 0.25 * v };
+      },
+    }).addTo(g);
+  }, [score]);
 
   // the map div is hidden in the terminal states; Leaflet needs a resize when it shows again
   useEffect(() => {
@@ -389,6 +516,9 @@ export function EndUser({ appId }: { appId: string }) {
     setBbox(null);
     setInfo(null);
     setPhase("loading");
+    setRisk(null);
+    fitArea.current = false;
+    fitRoute.current = false;
     setCheckKey((k) => k + 1);
     lastAsk.current = 0;
     if (posRef.current) setPos({ ...posRef.current }); // re-ask for the current position
@@ -481,6 +611,7 @@ export function EndUser({ appId }: { appId: string }) {
   }
 
   const showIns = live && ins !== null && !outside;
+  const publicRisk = risk !== null && (risk.score !== null || risk.hotspots.length > 0);
   const askForLocation = live && !pos;
 
   return (
@@ -575,13 +706,50 @@ export function EndUser({ appId }: { appId: string }) {
         </button>
       )}
 
-      <div
-        ref={el}
-        hidden={!live}
-        aria-label="Map. Tap where you are to set your position."
-        className="w-full rounded-xl"
-        style={{ height: "min(60vh, 480px)", minHeight: 280 }}
-      />
+      <div hidden={!live} className="grid gap-2">
+        <div className="relative">
+          <div
+            ref={el}
+            aria-label="Map. Tap where you are to set your position."
+            className="w-full rounded-xl"
+            style={{ height: "min(60vh, 480px)", minHeight: 280 }}
+          />
+          {bbox && (
+            <button
+              type="button"
+              onClick={recenter}
+              aria-label={hasRoute ? "Recenter on your route" : "Recenter on the area"}
+              className="absolute right-2.5 top-2.5 z-[1000] inline-flex min-h-[44px] items-center gap-1.5 rounded-xl border border-slate/25 bg-[#FBF9F3] px-3 text-[16px] font-bold text-slate shadow-[0_1px_6px_rgba(31,52,64,0.18)] transition-transform duration-150 ease-out active:scale-[0.97]"
+            >
+              <Crosshair aria-hidden className="h-[18px] w-[18px]" strokeWidth={2.25} />
+              Recenter
+            </button>
+          )}
+        </div>
+        <ul aria-label="Map legend" className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-[15px] font-semibold text-inkSoft">
+          <li className="inline-flex items-center gap-1.5">
+            <span aria-hidden className="inline-block h-3 w-3 rounded-full border-2 border-white bg-[#3b6895] shadow-[0_0_0_1px_#3b6895]" />
+            your position
+          </li>
+          <li className="inline-flex items-center gap-1.5">
+            <span aria-hidden className="inline-block h-1.5 w-5 rounded-full bg-[#3b6895]" />
+            route
+          </li>
+          <li className="inline-flex items-center gap-1.5">
+            <span aria-hidden className="inline-block h-3.5 w-3.5 rounded-full border" style={{ borderColor: RISK, background: `${RISK}59` }} />
+            high-risk area
+          </li>
+          <li className="inline-flex items-center gap-1.5">
+            <span aria-hidden className="inline-block h-3 w-3 rounded-full border-2 border-[#0a6b37] bg-[#19a35b]" />
+            destination
+          </li>
+        </ul>
+        {risk !== null && !publicRisk && (
+          <p className="m-0 text-[15px] leading-snug text-inkSoft">
+            This alert's owner keeps the risk map private — your directions already avoid high-risk areas.
+          </p>
+        )}
+      </div>
       {live && pos && (
         <div className="grid gap-1">
           <p className="m-0 text-[16px] leading-snug text-inkSoft">
