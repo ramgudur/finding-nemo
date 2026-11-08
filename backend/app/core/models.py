@@ -9,6 +9,7 @@ Conventions: meters, seconds, UTC ISO-8601 datetimes. Coordinates are always nam
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
@@ -67,9 +68,30 @@ class BBox(Model):
         return (self.min_lon, self.min_lat, self.max_lon, self.max_lat)
 
 
+MAX_GRID_CELLS = 250_000  # resource limit (e.g. 500 x 500): every tick and backtest scales with cell count
+_EARTH_RADIUS_M = 6_371_008.8  # same as engine/grid.py, so the count matches the engine's grid shape
+
+
 class GridSpec(Model):
     cell_m: float = Field(gt=0)
     bbox: BBox
+
+    def shape(self) -> tuple[int, int]:
+        """(rows, cols) the engine's Grid will have for this spec."""
+        b = self.bbox
+        m_per_deg = _EARTH_RADIUS_M * math.pi / 180.0
+        height = (b.max_lat - b.min_lat) * m_per_deg
+        width = (b.max_lon - b.min_lon) * m_per_deg * math.cos(math.radians((b.min_lat + b.max_lat) / 2))
+        return max(1, math.ceil(height / self.cell_m - 1e-9)), max(1, math.ceil(width / self.cell_m - 1e-9))
+
+    @model_validator(mode="after")
+    def _size_limit(self) -> GridSpec:
+        h, w = self.shape()
+        if h * w > MAX_GRID_CELLS:
+            raise ValueError(
+                f"grid would be {h} x {w} cells; the limit is {MAX_GRID_CELLS:,}. Use a smaller area or bigger cells."
+            )
+        return self
 
 
 class InputField(Model):

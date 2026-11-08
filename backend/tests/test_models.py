@@ -194,3 +194,15 @@ def test_hotspot_rejects_both_sensitive_defaults_and_bad_radius():
     with pytest.raises(ValidationError):
         Hotspot(id="h1", lat=1.0, lon=2.0, radius_m=-1.0, score=0.9, mean=0.5, area_m2=78.5, n_cells=1,
                  persisted_ticks=0, visibility="authority")  # fmt: skip
+
+
+def test_grid_size_is_capped_and_matches_the_engine():
+    from app.core.models import MAX_GRID_CELLS, GridSpec
+    from app.engine.grid import Grid
+
+    ok = GridSpec(cell_m=25, bbox=BBox(min_lat=32.0, min_lon=-97.0, max_lat=32.05, max_lon=-96.95))
+    assert ok.shape() == Grid.from_spec(ok).shape  # same count as the engine allocates
+    assert ok.shape()[0] * ok.shape()[1] <= MAX_GRID_CELLS
+    with pytest.raises(ValidationError, match="the limit is 250,000"):
+        GridSpec(cell_m=25, bbox=BBox(min_lat=-27.0, min_lon=-128.0, max_lat=56.0, max_lon=128.0))
+    GridSpec(cell_m=50_000, bbox=BBox(min_lat=-27.0, min_lon=-128.0, max_lat=56.0, max_lon=128.0))  # coarse is fine
