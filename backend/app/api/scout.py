@@ -10,30 +10,15 @@ the response never echoes it (rule 8).
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
 
-from app.agents.scout import MAX_REQUEST_CHARS, ScoutRunner
+from app.agents.scout import ScoutRunner
 from app.api.deps import authority_key_header, get_db, get_engine
 from app.api.trace import _authority
 from app.core.db import Db
+from app.core.models import ScoutJobAccepted, ScoutRequest
 from app.engine.tick import TickEngine
 
 router = APIRouter(prefix="/v1/apps", tags=["scout"])
-
-
-class ScoutRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    input_id: str = Field(min_length=1)
-    request: str = Field(min_length=1, max_length=MAX_REQUEST_CHARS, description="Plain-text request to the Scout.")
-
-
-class ScoutJobAccepted(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    job_id: str
-    app_id: str
-    input_id: str
 
 
 def get_scout_runner(request: Request) -> ScoutRunner:
