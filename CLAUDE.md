@@ -506,3 +506,8 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-08:** `GET /v1/apps/{app}` is keyless until activation, so a dev can reopen a pending proposal from any browser (found by Allen's frontend). Rule 8 data starts at activation.
 - **2026-11-08:** Data retention approved (#216). A background runner (outside the tick) prunes push events older than max(horizon + backtest window + margin, 1 day) and keeps the newest 20,000 trace entries per app. It never prunes Changes, weight history, backtests, pull-source events or authority markers without a ttl.
 - **2026-11-08:** Webhook receiver contract approved (#222): `InputSpec.webhook` is a `WebhookMapping` (push only, dotted paths, data only), copied verbatim from `CompileInput`. Route `POST /v1/apps/{app}/webhooks/{input}` (ingest key as a header or `?key=`) validates like `/events` and never stores the raw body; limits 1 MB and 500 items; returns 202 `WebhookReceipt`. No Overpass fallback mirror for now: the circuit breaker (#223) is enough.
+- **2026-11-08:** Full live run on a real server (#220, 15 min, neutral app):
+  - The build path through the API worked end to end.
+  - 245 events ingested with 0 rejected; 450 WebSocket frames with 0 errors (max gap 3.2 s); public instructions served.
+  - The Critic applied 9 gated weight changes, down to the 10% floor. The POI Labeler named the place.
+  - Fix: the Labeler ran out of steps in 7 of 9 repeat runs. It now stops early when nothing is new (live: 3 steps).
