@@ -210,6 +210,8 @@ def annotate(ctx: ToolContext, args: AnnotateArgs) -> dict[str, Any]:
 # --- corroboration by reference inputs (Critic only, read-only) ------------------------------
 
 REFERENCE_TIERS = ("stiff", "locked")
+# Only inputs that locate something can corroborate a location; a field (e.g. a vector field) can't.
+REFERENCE_SHAPES = ("point", "fixed_point", "document", "track")
 CORROBORATION_WINDOW_S = 600.0
 CORROBORATION_RADIUS_CELLS = 3.0
 MAX_CORROBORATION_USERS = 200
@@ -236,7 +238,8 @@ def _min_dist(x: np.ndarray, y: np.ndarray, rx: np.ndarray, ry: np.ndarray) -> n
 def get_corroboration(ctx: ToolContext, args: CorroborationArgs) -> dict[str, Any]:
     """How much each crowd reporter is corroborated by the app's reference inputs.
 
-    Reference events: recent events of inputs whose tier is stiff or locked. Scored: every user of
+    Reference events: recent events of inputs whose tier is stiff or locked and that locate
+    something (not field-shaped). Scored: every user of
     every flexible point/track input, by the share of their recent events within
     R = 3 x cell_m of any reference event. Deterministic code; the Critic only reads it."""
     spec = ctx.spec
@@ -244,7 +247,7 @@ def get_corroboration(ctx: ToolContext, args: CorroborationArgs) -> dict[str, An
     now = ctx.now()
     since = now - args.window_s
     radius = CORROBORATION_RADIUS_CELLS * float(grid.cell_m)
-    refs = [i for i in spec.inputs if i.tier in REFERENCE_TIERS]
+    refs = [i for i in spec.inputs if i.tier in REFERENCE_TIERS and i.shape in REFERENCE_SHAPES]
     ref_x, ref_y, ref_counts = [], [], {}
     for inp in refs:
         ev = ctx.engine.source.events(ctx.app_id, inp.id, since, now)
