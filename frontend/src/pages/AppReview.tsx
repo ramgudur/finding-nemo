@@ -169,6 +169,8 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
   };
 
   const nLayers = specLayers(d.draft).length;
+  // The builder draft (sessionStorage) can reopen this proposal's inputs only when it is for this same app.
+  const draftHere = useBuilderStore((s) => s.appId === appId && s.sources.length > 0);
 
   return (
     <AppShell wide>
@@ -182,6 +184,17 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
         <p className="font-mono text-[12px] text-ink">
           {plural(inputs.length, "input")} · {plural(nLayers, "layer")} · {spec.grid.cell_m} m cells
         </p>
+        {draftHere && (
+          <p className="text-[13px] text-ink">
+            <Link
+              to="/new/sources"
+              className="rounded-md font-semibold text-primary underline underline-offset-[3px] hover:text-primaryHover"
+            >
+              Edit inputs in the builder
+            </Link>{" "}
+            (changing inputs means compiling again).
+          </p>
+        )}
       </header>
 
       <section aria-labelledby="rv-how" className="rounded-3xl bg-washedSky/60 p-4 shadow-[0_6px_24px_-12px_rgba(53,89,107,0.25)] sm:p-5">

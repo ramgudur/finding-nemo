@@ -59,7 +59,7 @@ export function BuilderLayout() {
         aria-hidden
         className="pointer-events-none fixed inset-x-0 top-0 z-10 h-20 bg-gradient-to-b from-[#d2e6ec] via-[#d2e6ec]/85 to-transparent"
       />
-      <div className="relative mx-auto flex max-w-3xl flex-col gap-6 px-4 pb-40 pt-24 sm:px-6 sm:pt-28">
+      <div className="relative mx-auto flex max-w-3xl flex-col gap-6 px-4 pb-[calc(10rem+env(safe-area-inset-bottom))] pt-24 sm:px-6 sm:pt-28">
         {step && (
           <div className="flex flex-wrap items-center gap-3">
             <Stepper current={step} complete={complete} />
@@ -78,6 +78,7 @@ export function BuilderLayout() {
           <Outlet />
         </div>
       </div>
+      {/* Steps render a fixed StepFooter; the bottom padding above keeps content clear of it. */}
       {toast}
     </main>
   );

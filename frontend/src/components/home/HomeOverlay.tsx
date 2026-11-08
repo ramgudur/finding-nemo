@@ -61,7 +61,7 @@ export default function HomeOverlay() {
           whileHover={hover}
           whileTap={tap}
           onClick={() => navigate("/new")}
-          className="pointer-events-auto inline-flex items-center gap-2.5 rounded-full border border-white/60 bg-[#4F80B0] px-[clamp(20px,2vw,34px)] py-[clamp(11px,1vw,16px)] font-sans text-[clamp(15px,1.15vw,19px)] font-semibold text-[#FBF8F0] shadow-[0_8px_24px_-10px_rgba(47,88,114,0.55),inset_0_1px_0_rgba(255,255,255,0.25)] outline-none transition-shadow hover:shadow-[0_14px_30px_-12px_rgba(47,88,114,0.6),inset_0_1px_0_rgba(255,255,255,0.25)] focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#4F80B0]"
+          className="pointer-events-auto inline-flex items-center gap-2.5 rounded-full border border-white/60 bg-primary px-[clamp(20px,2vw,34px)] py-[clamp(11px,1vw,16px)] font-sans text-[clamp(15px,1.15vw,19px)] font-semibold text-[#FBF8F0] shadow-[0_8px_24px_-10px_rgba(47,88,114,0.55),inset_0_1px_0_rgba(255,255,255,0.25)] outline-none transition-[background-color,box-shadow] hover:bg-primaryHover hover:shadow-[0_14px_30px_-12px_rgba(47,88,114,0.6),inset_0_1px_0_rgba(255,255,255,0.25)] focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-primary"
         >
           Start Project
           <ArrowRight size={18} strokeWidth={2.4} aria-hidden="true" />

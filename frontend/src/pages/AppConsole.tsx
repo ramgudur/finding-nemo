@@ -348,7 +348,7 @@ function UnlockForm({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         aria-describedby={rejected ? "unlock-rejected" : undefined}
-        className="min-w-[220px] flex-1 rounded-lg border border-paleWater bg-white/80 px-2.5 py-1.5 font-mono text-[13px] text-slate placeholder:text-ink/70 focus:outline-none focus:ring-2 focus:ring-mutedTeal/40"
+        className="min-w-[220px] flex-1 rounded-lg border border-paleWater bg-white/80 px-2.5 py-1.5 font-mono text-[13px] text-slate placeholder:text-ink/70"
       />
       <button
         type="submit"
