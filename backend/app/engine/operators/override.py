@@ -1,4 +1,4 @@
-"""override: authority fixed points (room buttons, police markers).
+"""override: authority fixed points.
 
 Each event marks a point; every cell whose center is within `radius_m` of an active point
 gets 1.0. A point stays active until an event with `clear_field` true arrives within

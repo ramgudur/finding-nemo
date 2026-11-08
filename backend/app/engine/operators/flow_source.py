@@ -1,9 +1,9 @@
-"""flow_source: divergence / flux operator for moving-GPS tracks.
+"""flow_source: divergence / flux operator for moving tracks.
 
 Ported from reference/flowsource.py (the lead's reference). Two outputs from the same tracks:
-  1. layer: net outflow of trusted people per cell over the window (exits minus entries),
-     Gaussian-smoothed. `polarity` picks which side becomes heat: "source" (people leaving)
-     or "sink" (people converging). The other side is clipped to zero.
+  1. layer: net outflow of trusted entities per cell over the window (exits minus entries),
+     Gaussian-smoothed. `polarity` picks which side becomes heat: "source" (entities leaving)
+     or "sink" (entities converging). The other side is clipped to zero.
   2. extras["point"]: weighted least-squares intersection of back-extended movement lines,
      with Cauchy robust reweighting, plus whether the flow is a source or a sink.
 
@@ -68,7 +68,7 @@ def divergence(x: np.ndarray, y: np.ndarray, uidx: np.ndarray, w: np.ndarray, gr
 def displacements(
     x: np.ndarray, y: np.ndarray, uidx: np.ndarray, min_move_m: float
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """First -> last ping per user (a long baseline beats GPS jitter).
+    """First -> last ping per user (a long baseline beats position jitter).
     Returns (start_xy [N,2], unit_dir [N,2], dist [N], user index [N]) for users who moved."""
     if len(x) == 0:
         empty = np.zeros((0, 2))

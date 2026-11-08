@@ -136,37 +136,37 @@ def test_override_wins_after_weighted_sum_and_clears():
     assert res.override.max() == 0.0 and res.score.max() == 0.0
 
 
-def _wind_spec(shift_layer: str) -> AppSpec:
+def _vector_spec(shift_layer: str) -> AppSpec:
     crowd = spec().inputs[0].model_dump()
-    wind = {
-        "id": "wind",
+    vec = {
+        "id": "vec",
         "kind": "pull",
         "shape": "field",
         "tier": "stiff",
-        "meaning": "wind stations",
+        "meaning": "vector readings",
         "operators": [
             {
                 "op": "field",
                 "weight": 0.0,
-                "wind_speed_field": "speed",
-                "wind_dir_field": "dir",
+                "vector_speed_field": "speed",
+                "vector_dir_field": "dir",
                 "shift_layer": shift_layer,
                 "shift_horizon_s": 20,
             }
         ],
     }
-    return spec(inputs=[crowd, wind])
+    return spec(inputs=[crowd, vec])
 
 
-def test_field_shift_carries_target_layer_downwind():
-    rt = AppRuntime(_wind_spec("crowd.density"))
+def test_field_shift_carries_target_layer_along_vector_field():
+    rt = AppRuntime(_vector_spec("crowd.density"))
     still = AppRuntime(spec())
     src = InMemoryEventSource()
     src.add("test-app", "crowd", cluster(rt.grid, 200, 250, 30, T0))
     # 5 m/s from the west: blows east, so the crowd layer moves ~100 m east over 20 s
     lat, lon = rt.grid.to_latlon(250.0, 250.0)
     src.add(
-        "test-app", "wind", [{"t": T0 - 1, "lat": float(lat), "lon": float(lon), "value": 1, "speed": 5, "dir": 270}]
+        "test-app", "vec", [{"t": T0 - 1, "lat": float(lat), "lon": float(lon), "value": 1, "speed": 5, "dir": 270}]
     )
     res = tick_app(rt, src, now=T0, clock=SimClock(T0))
     base = tick_app(still, src, now=T0, clock=SimClock(T0))
@@ -177,11 +177,11 @@ def test_field_shift_carries_target_layer_downwind():
 
 
 def test_field_shift_to_unknown_layer_is_an_error_not_a_crash():
-    rt = AppRuntime(_wind_spec("nope.density"))
+    rt = AppRuntime(_vector_spec("nope.density"))
     src = InMemoryEventSource()
     lat, lon = rt.grid.to_latlon(250.0, 250.0)
     src.add(
-        "test-app", "wind", [{"t": T0 - 1, "lat": float(lat), "lon": float(lon), "value": 1, "speed": 5, "dir": 270}]
+        "test-app", "vec", [{"t": T0 - 1, "lat": float(lat), "lon": float(lon), "value": 1, "speed": 5, "dir": 270}]
     )
     res = tick_app(rt, src, now=T0, clock=SimClock(T0))
     assert any("shift target 'nope.density'" in e for e in res.errors)

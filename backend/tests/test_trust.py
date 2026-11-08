@@ -9,6 +9,7 @@ from app.engine.trust import (
     check_trust_change,
     summarize,
     suspicious_users,
+    suspicious_users_by_input,
     trust_map,
 )
 
@@ -160,3 +161,65 @@ def test_campus_alert_sim_spoofers_flagged_and_real_users_not(seed):
     flagged = {s.user_id for s in suspicious_users(ev)}
     spoof = set(sc.truth["spoof_users"])
     assert flagged == spoof
+
+
+def _fast_straight_tracks(prefix, speed=40.0, n=6):
+    """Fast, perfectly straight, constant-speed tracks: suspicious for slow entities,
+    normal for entities that legitimately move that way."""
+    rows = []
+    for k in range(n):
+        y0 = 50.0 + 60 * k
+        rows += [(f"{prefix}{k}", float(t), 10.0 + speed * t, y0) for t in range(0, 21, 2)]
+    return events_from_xy(GRID, rows)
+
+
+def test_plausibility_from_spec_overrides_defaults():
+    ev = _fast_straight_tracks("m")
+    flagged = _flags(ev)
+    assert all({"impossible_speed", "constant_speed", "straight_track"} <= set(f) for f in flagged.values())
+    fast_ok = SpoofParams.from_plausibility(
+        {"max_speed_mps": 30.0, "flag_constant_speed": False, "flag_straight_line": False}
+    )
+    assert suspicious_users(ev, fast_ok) == []
+
+    # unset keys keep the defaults; objects with attributes work too
+    class Plaus:
+        max_speed_mps = 30.0
+        jitter_m = None
+        flag_constant_speed = None
+        flag_straight_line = None
+
+    p = SpoofParams.from_plausibility(Plaus())
+    assert p.max_speed_mps == 30.0 and p.jitter_m == SpoofParams().jitter_m and p.flag_straight_line
+    assert SpoofParams.from_plausibility(None) == SpoofParams()
+
+
+def test_by_input_uses_each_inputs_limits_and_merges():
+    fast = _fast_straight_tracks("m")
+    dup = events_from_xy(GRID, [(f"s{k}", float(t), 100.0, 300.0) for k in range(3) for t in range(0, 30, 5)])
+    sus = suspicious_users_by_input(
+        {"tags": fast, "presses": dup},
+        {"tags": {"max_speed_mps": 30.0, "flag_constant_speed": False, "flag_straight_line": False}},
+    )
+    assert {s.user_id for s in sus} == {"s0", "s1", "s2"}
+    # a user flagged in two inputs gets the union of flags
+    both = suspicious_users_by_input({"a": dup, "b": _fast_straight_tracks("s", n=1)})
+    s0 = next(s for s in both if s.user_id == "s0")
+    assert {"duplicate_coords", "impossible_speed"} <= set(s0.flags)
+
+
+def test_plausibility_from_the_spec_model():
+    from app.core.models import InputSpec
+
+    inp = InputSpec.model_validate(
+        {
+            "id": "tags",
+            "kind": "push",
+            "shape": "track",
+            "tier": "flexible",
+            "meaning": "tracker pings",
+            "plausibility": {"max_speed_mps": 30.0, "flag_straight_line": False},
+        }
+    )
+    p = SpoofParams.from_plausibility(inp.plausibility)
+    assert p.max_speed_mps == 30.0 and not p.flag_straight_line and p.flag_constant_speed

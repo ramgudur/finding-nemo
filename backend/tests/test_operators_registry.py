@@ -34,3 +34,13 @@ def test_run_with_raw_spec_entry():
     ev = events_from_xy(grid, [("u1", 10.0, 262.5, 262.5)])
     r = registry.run("density", ev, {"op": "density", "weight": 1.0}, None, FixedClock(10.0), grid)
     assert r.layer.shape == grid.shape and r.layer.max() == pytest.approx(1.0)
+
+
+def test_horizons():
+    assert registry.horizon_s("flow_source") == 20.0
+    assert registry.horizon_s("density", {"half_life_s": 60}) == 60 * 8
+    assert registry.horizon_s("override") is None  # until cleared: all history
+    assert registry.horizon_s("override", {"ttl_s": 300}) == 300
+    for name in registry.OPERATORS:
+        h = registry.horizon_s(name)
+        assert h is None or h > 0
