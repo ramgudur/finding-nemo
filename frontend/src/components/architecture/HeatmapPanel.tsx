@@ -1,57 +1,18 @@
-// LEFT panel of the Architecture page. Before activation: the proposed grid schematic (no values).
-// After activation: the live score map (WS stream, REST fallback) from the real MapResponse.
+// The console's hero: the live score map (WS stream, REST fallback) from the real MapResponse.
 // Rule 8: what is drawn is exactly what the server returned for this key; without a key that is
-// public layers and public hotspots only.
-import type { ReactNode } from "react";
+// public layers and public hotspots only. `spec` is null in the public view (the spec is authority-only),
+// so the geometry then comes from the MapResponse itself.
 import type { AppSpec, GeoJsonBBox, MapResponse } from "../../api/types";
-import { useLiveAppData } from "../../hooks/useLiveAppData";
+import type { LiveAppData } from "../../hooks/useLiveAppData";
 import { Map } from "../Map/Map";
 import { HEAT_GRADIENT_CSS, fmtLatLon, gridShape } from "../Map/geo";
 import { HeatmapStats } from "./HeatmapStats";
-import ProposedSchematic from "./ProposedSchematic";
 
 export interface HeatmapPanelProps {
-  spec: AppSpec;
-  appId: string;
-  authorityKey: string | null;
-  active: boolean;
+  spec: AppSpec | null;
+  live: LiveAppData;
   selectedLayerId: string | null;
-  /** Called once when the server rejects the authority key (401/403 or auth_ok: false). */
-  onAuthError?: () => void;
   className?: string;
-}
-
-export default function HeatmapPanel({
-  spec,
-  appId,
-  authorityKey,
-  active,
-  selectedLayerId,
-  onAuthError,
-  className,
-}: HeatmapPanelProps) {
-  return (
-    <section
-      aria-label="Heatmap"
-      className={`flex min-w-0 flex-col gap-3 rounded-2xl border border-mutedTeal/15 bg-washedSky/70 p-4 shadow-[0_8px_30px_rgba(53,89,107,0.08)] ${className ?? ""}`}
-    >
-      <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-[15px] font-semibold text-slate">Heatmap</h2>
-        <span className="font-mono text-[11px] text-inkSoft">{appId}</span>
-      </header>
-      {active ? (
-        <LiveHeatmap
-          spec={spec}
-          appId={appId}
-          authorityKey={authorityKey}
-          selectedLayerId={selectedLayerId}
-          onAuthError={onAuthError}
-        />
-      ) : (
-        <ProposedSchematic spec={spec} selectedLayerId={selectedLayerId} />
-      )}
-    </section>
-  );
 }
 
 function maxValue(m: MapResponse | null, id: string): number | null {
@@ -62,108 +23,81 @@ function maxValue(m: MapResponse | null, id: string): number | null {
   return mx;
 }
 
-function Pill({ children, tone }: { children: ReactNode; tone: "live" | "warn" | "neutral" }) {
-  const cls =
-    tone === "live"
-      ? "bg-seaGlass/25 text-mutedTeal"
-      : tone === "warn"
-        ? "bg-coral/20 text-[#B4664C]"
-        : "bg-softStone/50 text-ink";
-  return <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-[11px] ${cls}`}>{children}</span>;
+/** The layer drawn: the selected one if this key can see it, else score, else the first visible one. */
+export function shownLayer(map: MapResponse | null, selectedLayerId: string | null): string | null {
+  const ids = map ? Object.keys(map.layers) : [];
+  if (selectedLayerId !== null && ids.includes(selectedLayerId)) return selectedLayerId;
+  return ids.includes("score") ? "score" : (ids[0] ?? null);
 }
 
-function LiveHeatmap({
-  spec,
-  appId,
-  authorityKey,
-  selectedLayerId,
-  onAuthError,
-}: {
-  spec: AppSpec;
-  appId: string;
-  authorityKey: string | null;
-  selectedLayerId: string | null;
-  onAuthError?: () => void;
-}) {
-  const live = useLiveAppData(appId, authorityKey, { onAuthError });
+export default function HeatmapPanel({ spec, live, selectedLayerId, className }: HeatmapPanelProps) {
   const { map, hotspots } = live;
   const ids = map ? Object.keys(map.layers) : [];
+  const shown = shownLayer(map, selectedLayerId);
+  const selectedHidden = selectedLayerId !== null && map !== null && !ids.includes(selectedLayerId);
 
-  // Which layer to draw: the selected one if this key can see it, else score, else the first visible one.
-  const selectedVisible = selectedLayerId !== null && ids.includes(selectedLayerId);
-  const shown = selectedVisible ? selectedLayerId : ids.includes("score") ? "score" : (ids[0] ?? null);
-  const selectedHidden = selectedLayerId !== null && map !== null && !selectedVisible;
-
-  const bbox: GeoJsonBBox = map?.bbox ?? [spec.grid.bbox.min_lon, spec.grid.bbox.min_lat, spec.grid.bbox.max_lon, spec.grid.bbox.max_lat];
-  const cellM = map?.cell_m ?? spec.grid.cell_m;
-  const shape = gridShape(bbox, cellM);
+  const specBbox: GeoJsonBBox | null = spec
+    ? [spec.grid.bbox.min_lon, spec.grid.bbox.min_lat, spec.grid.bbox.max_lon, spec.grid.bbox.max_lat]
+    : null;
+  const bbox: GeoJsonBBox | null = map?.bbox ?? specBbox;
+  const cellM = map?.cell_m ?? spec?.grid.cell_m ?? null;
+  const shape = bbox && cellM ? gridShape(bbox, cellM) : null;
   const maxScore = maxValue(map, "score");
   const hsCount = hotspots?.hotspots.length ?? null;
-  const updated = live.lastUpdate ? new Date(live.lastUpdate).toLocaleTimeString() : null;
   const emptyShown = map !== null && shown !== null && (map.layers[shown]?.features.length ?? 0) === 0;
-
-  const conn =
-    live.streamState === "open" ? "live (ws)" : live.streamState === "connecting" ? "connecting" : "polling (rest)";
+  const threshold = spec?.outputs?.hotspot_threshold ?? 0.5;
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Pill tone={live.connected ? "live" : "neutral"}>
-          <span
-            aria-hidden
-            className={`h-1.5 w-1.5 rounded-full ${live.connected ? "bg-mutedTeal motion-safe:animate-pulse" : "bg-inkSoft"}`}
-          />
-          {conn}
-        </Pill>
-        <Pill tone={live.authority ? "live" : "neutral"}>{live.authority ? "authority view" : "public view"}</Pill>
-        {shown && <Pill tone="neutral">showing: {shown}</Pill>}
+    <section
+      aria-label="Live map"
+      className={`flex min-w-0 flex-col gap-3 rounded-3xl bg-washedSky/70 p-4 shadow-[0_8px_30px_-12px_rgba(53,89,107,0.3)] ${className ?? ""}`}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-[15px] font-bold text-slate">Live map</h2>
+        <span className="font-mono text-[12px] text-ink">showing {shown ?? "nothing yet"}</span>
       </div>
 
-      {live.keyRejected && (
-        <p role="alert" className="rounded-lg bg-coral/15 px-3 py-2 text-[13px] text-[#9A5440]">
-          Authority key rejected. Showing the public view only.
-        </p>
-      )}
       {live.error && !live.keyRejected && (
-        <p role="alert" className="rounded-lg bg-coral/15 px-3 py-2 text-[13px] text-[#9A5440]">
+        <p role="alert" className="rounded-lg bg-coral/20 px-3 py-2 text-[13px] text-[#7A4232]">
           {live.error}
         </p>
       )}
       {selectedHidden && (
-        <p className="font-mono text-[11px] text-ink">
+        <p className="font-mono text-[12px] text-ink">
           {selectedLayerId} isn't visible with the current key{shown ? `; showing ${shown}` : ""}.
         </p>
       )}
 
       <div className="relative">
-        <Map
-          bbox={bbox}
-          layers={map?.layers ?? {}}
-          visible={shown ? [shown] : []}
-          hotspots={hotspots?.hotspots ?? []}
-          cellM={cellM}
-          height={440}
-        />
-        <div className="pointer-events-none absolute bottom-2 left-2 z-[500] rounded-md bg-cream/85 px-2 py-1 font-mono text-[10px] text-ink shadow-sm">
-          SW {fmtLatLon(bbox[1], bbox[0])}
-        </div>
-        <div className="pointer-events-none absolute right-2 top-2 z-[500] rounded-md bg-cream/85 px-2 py-1 font-mono text-[10px] text-ink shadow-sm">
-          NE {fmtLatLon(bbox[3], bbox[2])}
-        </div>
+        {bbox ? (
+          <Map bbox={bbox} layers={map?.layers ?? {}} visible={shown ? [shown] : []} hotspots={hotspots?.hotspots ?? []} cellM={cellM ?? undefined} height={480} />
+        ) : (
+          <div aria-hidden className="h-[480px] rounded-2xl bg-mist/70 motion-safe:animate-pulse" />
+        )}
+        {bbox && (
+          <>
+            <div className="pointer-events-none absolute bottom-2 left-2 z-[500] rounded-md bg-cream/90 px-2 py-1 font-mono text-[10.5px] text-slate shadow-sm">
+              SW {fmtLatLon(bbox[1], bbox[0])}
+            </div>
+            <div className="pointer-events-none absolute right-2 top-2 z-[500] rounded-md bg-cream/90 px-2 py-1 font-mono text-[10.5px] text-slate shadow-sm">
+              NE {fmtLatLon(bbox[3], bbox[2])}
+            </div>
+          </>
+        )}
         {(map === null || emptyShown || shown === null) && (
           <div className="pointer-events-none absolute inset-0 z-[500] flex items-center justify-center">
-            <p className="rounded-lg bg-mist/90 px-3 py-1.5 font-mono text-[12px] text-ink shadow-sm">
+            <p className="rounded-lg bg-mist/95 px-3 py-1.5 font-mono text-[12px] text-slate shadow-sm">
               {map === null
-                ? "waiting for the first tick"
+                ? "Waiting for the first tick"
                 : shown === null
-                  ? "no layers visible with the current key"
-                  : "no cells above 0.01 yet: waiting for events"}
+                  ? "No layers are public. Unlock the authority view to see them."
+                  : "No cells above 0.01 yet: waiting for events"}
             </p>
           </div>
         )}
       </div>
 
-      <div className="flex flex-col gap-1 font-mono text-[10px] text-inkSoft">
+      <div className="flex flex-col gap-1 font-mono text-[11px] text-ink">
         <div className="flex items-center gap-2">
           <span>0</span>
           <span className="h-1.5 min-w-0 flex-1 rounded-full" style={{ background: HEAT_GRADIENT_CSS }} aria-hidden />
@@ -179,21 +113,22 @@ function LiveHeatmap({
           {
             label: "max score",
             value: maxScore === null ? "not visible" : maxScore.toFixed(2),
-            tone: maxScore === null ? "muted" : maxScore >= (spec.outputs?.hotspot_threshold ?? 0.5) ? "warm" : "default",
+            tone: maxScore === null ? "muted" : maxScore >= threshold ? "warm" : "default",
             title: maxScore === null ? "The score layer isn't visible with the current key" : undefined,
           },
-          { label: "hotspots", value: hsCount === null ? "..." : String(hsCount), tone: hsCount ? "warm" : "default" },
-          { label: "updated", value: updated ?? "...", title: live.lastUpdate ?? undefined },
-          { label: "connection", value: conn, tone: live.connected ? "default" : "muted" },
-          { label: "cell", value: `${cellM} m · ${shape.rows} x ${shape.cols}`, title: `${(shape.rows * shape.cols).toLocaleString()} cells` },
+          { label: "hotspots", value: hsCount === null ? "…" : String(hsCount), tone: hsCount ? "warm" : "default" },
+          {
+            label: "cell",
+            value: shape && cellM ? `${cellM} m · ${shape.rows} x ${shape.cols}` : "…",
+            title: shape ? `${(shape.rows * shape.cols).toLocaleString()} cells` : undefined,
+          },
           {
             label: "bbox (sw → ne)",
-            value: `${fmtLatLon(bbox[1], bbox[0])} → ${fmtLatLon(bbox[3], bbox[2])}`,
+            value: bbox ? `${fmtLatLon(bbox[1], bbox[0])} → ${fmtLatLon(bbox[3], bbox[2])}` : "…",
             wide: true,
           },
-          { label: "state", value: live.authority ? "active · authority" : "active · public" },
         ]}
       />
-    </div>
+    </section>
   );
 }
