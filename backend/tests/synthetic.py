@@ -51,12 +51,13 @@ class LocalGrid:
         return float(np.hypot(x[0] - xy[0], y[0] - xy[1]))
 
 
-def events_from_xy(grid: LocalGrid, rows: list[tuple[str, float, float, float]]) -> Events:
-    """rows: (user_id, t, x, y) in grid meters."""
+def events_from_xy(grid: LocalGrid, rows: list[tuple], fields: tuple[str, ...] = ()) -> Events:
+    """rows: (user_id, t, x, y, *field values) in grid meters; `fields` names the extra values."""
     uid = np.array([r[0] for r in rows], dtype=object)
     t = np.array([r[1] for r in rows], dtype=float)
     lat, lon = grid.to_latlon(np.array([r[2] for r in rows]), np.array([r[3] for r in rows]))
-    return Events(uid, t, lat, lon)
+    cols = {name: np.array([r[4 + k] for r in rows], dtype=object) for k, name in enumerate(fields)}
+    return Events(uid, t, lat, lon, cols)
 
 
 def flee_scenario(
