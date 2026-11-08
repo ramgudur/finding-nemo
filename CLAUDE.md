@@ -176,6 +176,9 @@ TAVILY_API_KEY=
 NOMINATIM_USER_AGENT=      # required by Nominatim policy; generic app name + team contact
 SQLITE_PATH=./data/app.db
 COMPILE_MIN_GAP_S=10       # optional: minimum seconds between compiles of one app (/compile returns 429 + Retry-After)
+EVENT_RETENTION_S=86400     # optional: keep push events at least this long (retention runner, #216)
+TRACE_KEEP_PER_APP=20000    # optional: newest trace entries kept per app
+RETENTION_INTERVAL_S=300    # optional: retention run interval; 0 = off
 DEMO_MODE=0                # 1 enables /v1/debug/* (ground-truth error chart)
 ```
 
@@ -501,3 +504,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
   - The Scout contract (#209).
   - Kida A takes data retention.
 - **2026-11-08:** `GET /v1/apps/{app}` is keyless until activation, so a dev can reopen a pending proposal from any browser (found by Allen's frontend). Rule 8 data starts at activation.
+- **2026-11-08:** Data retention approved (#216). A background runner (outside the tick) prunes push events older than max(horizon + backtest window + margin, 1 day) and keeps the newest 20,000 trace entries per app. It never prunes Changes, weight history, backtests, pull-source events or authority markers without a ttl.
