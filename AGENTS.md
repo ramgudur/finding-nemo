@@ -71,12 +71,12 @@ Assigned by the lead on 2026-11-07. Paths are under `backend/app/` unless they s
 | Area | Owner | Folders | Notes |
 |---|---|---|---|
 | Lead: scope, routing, contracts | `@ramgudur` | `CLAUDE.md`, `AGENTS.md`; approves every change to `core/models.py`, `frontend/src/api/types.ts`, `specs/*.json` | Routes issues and checks PR scope. Also builds `api/instructions.py` + `frontend/src/pages/EndUser.tsx` (#107) and the step-7 live path (#108). |
-| Scoring model (physics-informed / physics-based ML) | `@AllenZheng-05` (from Kida, 2026-11-07) | `engine/operators/` (except `flow_source.py`), `engine/combine.py`, `engine/layer_cache.py`, `engine/verification.py`, `engine/backtest.py`, `engine/trust.py`, `reference/` | Reassigned by the lead when Kida left. |
-| Token-heavy work: scaffold, frontend, sim | `@AllenZheng-05` | initial skeleton (first draft of `core/models.py` + `types.ts`, lead approves), `frontend/`, `sim/`, `specs/`, `backend/tests/fixtures/`, `api/debug.py`, `api/trace.py` (handed over by the lead) | Claude Max. Also takes large refactors, broad reviews and bulk test writing that other owners hand off. |
-| Engine runtime + tool layer | `@AllenZheng-05` (from Kida, 2026-11-07); `tools/` Compiler tools: `@Navmi-Srithaj` | `engine/tick.py`, `engine/grid.py`, `engine/tiers.py`, `core/clock.py`, `tools/` (incl. `guards.py`; except `message_guard.py`, `poi_tools.py`) | Reassigned by the lead when Kida left. The lead's machine did #52 and #88 here. |
-| Routing, message guard, POI tools | `@kida-k:a` (from 10:15 PM CST, 2026-11-07) | `engine/routing.py`, `tools/message_guard.py`, `tools/poi_tools.py` | Kida returns; issues #94, #95. |
-| Candidate generators, `flow_source`, GPU path | `@kida-k:b` (from 10:15 PM CST, 2026-11-07) | `engine/candidates/`, `engine/operators/flow_source.py` | Also `agents/poi_labeler.py` + its prompt (#106). Issues #102, #106, #86. |
-| API, data, connectors, Nemotron agents | `@Navmi-Srithaj` | `api/` (except `debug.py`, `trace.py`, `instructions.py`), `main.py` (after scaffold), `core/db.py`, `core/config.py`, `core/access.py`, `connectors/`, `agents/` (except `poi_labeler.py`) | |
+| Scoring model (physics-informed / physics-based ML) | `@kida-k:b` (temporary while Allen is away, 2026-11-07) | `engine/operators/` (incl. `flow_source.py`), `engine/combine.py`, `engine/layer_cache.py`, `engine/verification.py`, `engine/backtest.py`, `engine/trust.py`, `reference/` | Back with seat b, its original owner. |
+| Frontend, sim, specs, fixtures | `@ramgudur` (temporary while Allen is away, 2026-11-07) | `frontend/`, `sim/`, `specs/`, `backend/tests/fixtures/` | Allen (`@AllenZheng-05`) is unavailable until he posts that he's back: no tasks, no reviews, don't mention him. |
+| Engine runtime + tool layer | `@kida-k:a` (temporary while Allen is away, 2026-11-07); `tools/compiler_tools.py`: `@Navmi-Srithaj` | `engine/tick.py`, `engine/grid.py`, `engine/tiers.py`, `core/clock.py`, `tools/` (incl. `guards.py`, `message_guard.py`, `poi_tools.py`) | Back with seat a, its original owner. If seat a is unavailable, seat b reviews tick.py changes. |
+| Routing | `@kida-k:a` | `engine/routing.py` | Issues #94, #95. |
+| Candidate generators, GPU path, POI Labeler | `@kida-k:b` | `engine/candidates/`, `agents/poi_labeler.py` + its prompt | Issues #102, #106, #86. |
+| API, data, connectors, Nemotron agents | `@Navmi-Srithaj` | `api/` (incl. `debug.py`, `trace.py`; except `instructions.py`), `main.py`, `core/db.py`, `core/config.py`, `core/access.py`, `connectors/`, `agents/` (except `poi_labeler.py`) | `debug.py`/`trace.py` back while Allen is away. |
 
 ## 5. Escalation: when to stop and ask
 
