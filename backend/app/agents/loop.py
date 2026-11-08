@@ -3,9 +3,14 @@
 Flow: send the system+task messages with the agent's tool schemas
 (`tools.registry.tool_schemas`); for each tool call the model requests, run it through
 `tools.registry.call_tool` (which never raises) and feed the result back; repeat until
-the model answers with no more tool calls, or `max_iterations` is hit. The final answer
-is validated against the caller's Pydantic model; on failure it is retried once with
-`REPAIR_MODEL`, then logged and given up (returns `None`).
+the model answers with no more tool calls, or `max_iterations` is hit.
+
+Every agent acts through tool calls (`set_user_trust`, `apply_changes`, `create_poi`,
+`finalize_app`, ...); the final message is a free-text summary for the trace, not a
+structured answer -- `output_model=None` (the default) just returns that text as-is.
+Pass `output_model` only for an agent whose final answer IS the structured output (e.g.
+Scout's per-article extraction): it is then validated against that Pydantic model, with
+one retry via `REPAIR_MODEL` on failure before logging and giving up (`None`).
 
 Every step writes a `TraceEntry`: a model call that returns tool calls, the final
 validated output, a failed/gave-up run, or -- when the provider's rate budget is empty --
@@ -17,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -30,6 +36,8 @@ from app.tools.registry import call_tool, tool_schemas
 log = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+OnToolResult = Callable[[str, dict[str, Any], dict[str, Any]], None]
 
 _REPAIR_SYSTEM = (
     "The following JSON must validate against the given JSON Schema but does not. "
@@ -59,7 +67,11 @@ def _assistant_message(message: Any) -> dict[str, Any]:
 
 
 async def _run_tool_calls(
-    ctx: ToolContext, agent: AgentName, model_id: str, tool_calls: list[Any]
+    ctx: ToolContext,
+    agent: AgentName,
+    model_id: str,
+    tool_calls: list[Any],
+    on_tool_result: OnToolResult | None,
 ) -> list[dict[str, Any]]:
     """Executes each call, appends a `TraceEntry`, and returns the `tool` messages to feed back."""
     trace_calls: list[ToolCall] = []
@@ -72,6 +84,8 @@ async def _run_tool_calls(
             args = {}
         else:
             result = call_tool(ctx, tc.function.name, args)
+        if on_tool_result is not None:
+            on_tool_result(tc.function.name, args, result)
         summary = str(result.get("result") if result.get("ok") else result.get("error"))[:200]
         trace_calls.append(
             ToolCall(name=tc.function.name, args=args, ok=result.get("ok", False), result_summary=summary)
@@ -110,13 +124,19 @@ async def run_agent(
     model_field: AgentField,
     system: str,
     task: str,
-    output_model: type[T],
+    output_model: type[T] | None = None,
     llm: LlmRouter | None = None,
     max_iterations: int = 8,
     enable_thinking: bool = True,
-) -> T | None:
-    """Run one tool-calling episode for `agent`. Returns the validated output, or `None`
-    on a skipped, rate-limited, or ultimately invalid run (always traced either way)."""
+    on_tool_result: OnToolResult | None = None,
+) -> T | str | None:
+    """Run one tool-calling episode for `agent`.
+
+    Returns the agent's final text (`output_model=None`, the default) or the validated
+    `output_model` instance, or `None` on a skipped, rate-limited, or ultimately invalid
+    run (always traced either way). `on_tool_result(name, args, result)` fires for every
+    executed tool call -- a caller that needs more than the trace's truncated summary
+    (e.g. the Critic reading real backtest deltas) hooks in there."""
     llm = llm or LlmRouter()
     model = llm.settings.agent_model(model_field)
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}, {"role": "user", "content": task}]
@@ -137,6 +157,9 @@ async def run_agent(
         tool_calls = getattr(message, "tool_calls", None) or []
         if not tool_calls:
             content = message.content or ""
+            if output_model is None:
+                _trace(ctx, agent, model=model.model_id, action="output", result=content[:500], why="final answer")
+                return content
             try:
                 result = output_model.model_validate_json(content)
             except ValidationError as e:
@@ -145,10 +168,10 @@ async def run_agent(
                     return None
                 _trace(ctx, agent, model=model.model_id, action="output", why="validated after repair")
                 return repaired
-            _trace(ctx, agent, model=model.model_id, action="output", why="validated")
+            _trace(ctx, agent, model=model.model_id, action="output", result=content[:500], why="validated")
             return result
 
-        messages.extend(await _run_tool_calls(ctx, agent, model.model_id, tool_calls))
+        messages.extend(await _run_tool_calls(ctx, agent, model.model_id, tool_calls, on_tool_result))
 
     _trace(ctx, agent, model=model.model_id, action="gave up", why=f"exceeded {max_iterations} iterations")
     return None

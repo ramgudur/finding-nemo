@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.agents.critic import CriticScheduler
 from app.api import apps as apps_api
 from app.api import debug as debug_api
 from app.api import ingest as ingest_api
@@ -37,9 +38,16 @@ class DbEventSource:
         return Events.from_records(records) if records else empty_events()
 
 
-def create_app(*, db: Db | None = None, engine: TickEngine | None = None, autostart_engine: bool = True) -> FastAPI:
+def create_app(
+    *,
+    db: Db | None = None,
+    engine: TickEngine | None = None,
+    critic_scheduler: CriticScheduler | None = None,
+    autostart_engine: bool = True,
+) -> FastAPI:
     db = db if db is not None else Db(get_settings().sqlite_path)
     engine = engine if engine is not None else TickEngine(DbEventSource(db), trust=db.list_trust)
+    critic_scheduler = critic_scheduler if critic_scheduler is not None else CriticScheduler(db, engine)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -47,14 +55,20 @@ def create_app(*, db: Db | None = None, engine: TickEngine | None = None, autost
             for spec in db.list_apps():
                 if spec.status == "active":
                     engine.add_app(spec)
+            critic_scheduler.llm.log_startup_models(
+                ["compiler", "critic", "scout", "extract", "poi", "repair", "safety"]
+            )
             engine.start()
+            critic_scheduler.start()
         yield
         if autostart_engine:
+            await critic_scheduler.stop()
             await engine.stop()
 
     fastapi_app = FastAPI(title="Geo heat-map platform", version="0.1.0", lifespan=lifespan)
     fastapi_app.state.db = db
     fastapi_app.state.engine = engine
+    fastapi_app.state.critic_scheduler = critic_scheduler
     fastapi_app.include_router(apps_api.router)
     fastapi_app.include_router(ingest_api.router)
     fastapi_app.include_router(outputs_api.router)
