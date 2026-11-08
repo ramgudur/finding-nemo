@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -23,6 +22,7 @@ import httpx
 
 from app.api.ingest import _check_fields
 from app.connectors import json_api, rss
+from app.core import clock as clock_mod
 from app.core.db import Db
 from app.core.models import ConnectorConfig, Event, InputSpec
 
@@ -42,11 +42,11 @@ class PollResult:
     error: str | None = None
 
 
-def _rss_events(raw_text: str, config: dict[str, Any]) -> list[dict[str, Any]]:
+def _rss_events(raw_text: str, config: dict[str, Any], now: float) -> list[dict[str, Any]]:
     source_id = str(config.get("source_id", "rss"))
     confidence = float(config.get("default_confidence", DEFAULT_CONFIDENCE))
     out = []
-    for item in rss.parse_items(raw_text):
+    for item in rss.parse_items(raw_text, now):
         out.append(
             {
                 "user_id": source_id,
@@ -98,13 +98,20 @@ def fetch_raw_sync(client: httpx.Client, conn: ConnectorConfig) -> Any:
 
 def events_from_raw(conn: ConnectorConfig, raw: Any, now: float) -> list[dict[str, Any]]:
     if conn.type == "rss":
-        return _rss_events(raw, conn.config)
+        return _rss_events(raw, conn.config, now)
     if conn.type == "json_api":
         return _json_api_events(raw, conn.preset, conn.config, now)
     raise ValueError(f"connector type {conn.type!r} has no fetcher")
 
 
 def write_events(db: Db, app_id: str, inp: InputSpec, raw_events: list[dict[str, Any]], now: float) -> PollResult:
+    # A poll can see the same document again (an unchanged feed, an overlapping window);
+    # skip a (user_id, doc_id) already written for this input, and within this batch too.
+    seen_docs = {
+        (e.user_id, e.model_extra["doc_id"])
+        for e in db.list_events(app_id, inp.id)
+        if e.model_extra and e.model_extra.get("doc_id")
+    }
     written, errors = 0, []
     for raw in raw_events:
         try:
@@ -112,11 +119,16 @@ def write_events(db: Db, app_id: str, inp: InputSpec, raw_events: list[dict[str,
         except Exception as e:  # noqa: BLE001 - one bad item must not drop the rest
             errors.append(f"invalid event: {e}")
             continue
+        doc_id = (event.model_extra or {}).get("doc_id")
+        if doc_id and (event.user_id, doc_id) in seen_docs:
+            continue
         reason = _check_fields(inp.fields, event.model_extra or {})
         if reason is not None:
             errors.append(reason)
             continue
         db.insert_event(app_id, inp.id, event, received_at=now)
+        if doc_id:
+            seen_docs.add((event.user_id, doc_id))
         written += 1
     if written == 0 and errors:
         return PollResult(app_id, inp.id, ok=False, error="; ".join(errors[:3]))
@@ -154,7 +166,7 @@ class ConnectorEngine:
         self._stop = asyncio.Event()
 
     async def check_once(self, now: float | None = None) -> list[PollResult]:
-        now = time.time() if now is None else now
+        now = clock_mod.now() if now is None else now
         results = []
         for spec in self.db.list_apps():
             if spec.status != "active":

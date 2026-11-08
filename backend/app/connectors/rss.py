@@ -30,19 +30,21 @@ def _parse_point(raw: str) -> tuple[float, float] | None:
     return lat, lon
 
 
-def _parse_date(raw: str | None) -> datetime:
+def _parse_date(raw: str | None, now: float) -> datetime:
     if raw is None:
-        return datetime.now(UTC)
+        return datetime.fromtimestamp(now, tz=UTC)
     try:
         dt = parsedate_to_datetime(raw)
     except (TypeError, ValueError):
-        return datetime.now(UTC)
+        return datetime.fromtimestamp(now, tz=UTC)
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
-def parse_items(xml_text: str) -> list[dict[str, Any]]:
+def parse_items(xml_text: str, now: float) -> list[dict[str, Any]]:
     """Each item becomes `{doc_id, title, description, ts, lat, lon}`. An item with no
-    `<georss:point>` (or an unparseable one) is skipped: never guess a location."""
+    `<georss:point>` (or an unparseable one) is skipped: never guess a location. `now`
+    (from `core/clock.py`, via the caller) is only the fallback for a missing/unparseable
+    `pubDate` -- this module reads no clock itself, so it stays pure and sim runs line up."""
     root = ElementTree.fromstring(xml_text)  # noqa: S314 - a connector's own feed, not untrusted user input
     items: list[dict[str, Any]] = []
     for item in root.iter("item"):
@@ -57,7 +59,7 @@ def parse_items(xml_text: str) -> list[dict[str, Any]]:
                 "doc_id": guid,
                 "title": _text(item, "title") or "",
                 "description": _text(item, "description") or "",
-                "ts": _parse_date(_text(item, "pubDate")),
+                "ts": _parse_date(_text(item, "pubDate"), now),
                 "lat": lat,
                 "lon": lon,
             }

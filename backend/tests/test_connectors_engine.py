@@ -8,7 +8,7 @@ from app.core.models import AppSpec, ConnectorConfig, InputSpec
 
 RSS_FEED = (
     '<rss version="2.0" xmlns:georss="http://www.georss.org/georss"><channel>'
-    '<item><title>Alert</title><description>Something.</description>'
+    "<item><title>Alert</title><description>Something.</description>"
     '<guid isPermaLink="false">doc-1</guid>'
     "<pubDate>Sun, 08 Nov 2026 05:00:00 GMT</pubDate>"
     "<georss:point>32.825 -96.7225</georss:point></item>"
@@ -125,6 +125,65 @@ def test_write_events_writes_valid_events_and_skips_invalid_ones():
     result = engine.write_events(db, "app", inp, raw, now=0.0)
     assert result.ok is True and result.events_written == 1
     assert len(db.list_events("app", "x")) == 1
+
+
+def test_write_events_dedupes_by_user_and_doc_id_against_the_store_and_within_a_batch():
+    db = Db(":memory:")
+    inp = InputSpec.model_validate(
+        {
+            "id": "x",
+            "kind": "pull",
+            "shape": "document",
+            "tier": "stiff",
+            "meaning": "m",
+            "fields": [{"name": "doc_id", "type": "string", "required": False}],
+        }
+    )
+    first = [{"user_id": "feed-1", "lat": 1.0, "lon": 2.0, "ts": "2026-01-01T00:00:00Z", "doc_id": "d1"}]
+    engine.write_events(db, "app", inp, first, now=0.0)
+    assert len(db.list_events("app", "x")) == 1
+
+    # a second poll re-reports d1 (unchanged feed) alongside a genuinely new d2, and the
+    # same batch repeats d2 (e.g. a feed listing the same item twice)
+    second = [
+        {"user_id": "feed-1", "lat": 1.0, "lon": 2.0, "ts": "2026-01-01T00:01:00Z", "doc_id": "d1"},
+        {"user_id": "feed-1", "lat": 1.1, "lon": 2.1, "ts": "2026-01-01T00:01:00Z", "doc_id": "d2"},
+        {"user_id": "feed-1", "lat": 1.1, "lon": 2.1, "ts": "2026-01-01T00:01:00Z", "doc_id": "d2"},
+    ]
+    result = engine.write_events(db, "app", inp, second, now=1.0)
+    assert result.events_written == 1  # only d2, once
+    assert {e.model_extra["doc_id"] for e in db.list_events("app", "x")} == {"d1", "d2"}
+
+
+def test_write_events_dedup_is_scoped_per_user_id():
+    db = Db(":memory:")
+    inp = InputSpec.model_validate(
+        {
+            "id": "x",
+            "kind": "pull",
+            "shape": "document",
+            "tier": "stiff",
+            "meaning": "m",
+            "fields": [{"name": "doc_id", "type": "string", "required": False}],
+        }
+    )
+    engine.write_events(
+        db,
+        "app",
+        inp,
+        [{"user_id": "feed-1", "lat": 1.0, "lon": 2.0, "ts": "2026-01-01T00:00:00Z", "doc_id": "d1"}],
+        now=0.0,
+    )
+    # a different source reporting the same doc_id is not a duplicate
+    result = engine.write_events(
+        db,
+        "app",
+        inp,
+        [{"user_id": "feed-2", "lat": 1.0, "lon": 2.0, "ts": "2026-01-01T00:00:00Z", "doc_id": "d1"}],
+        now=1.0,
+    )
+    assert result.events_written == 1
+    assert len(db.list_events("app", "x")) == 2
 
 
 # -- poll_once (fetch + parse + write) --------------------------------------------------

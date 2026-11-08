@@ -14,7 +14,7 @@ FEED = (
 
 
 def test_parses_the_scripted_feeds_exact_shape():
-    items = rss.parse_items(FEED)
+    items = rss.parse_items(FEED, now=1_800_000_000.0)
     assert len(items) == 1
     item = items[0]
     assert item["doc_id"] == "campus-alert-scripted-1"
@@ -28,7 +28,7 @@ def test_item_with_no_georss_point_is_skipped():
         '<rss version="2.0"><channel><item><title>No location</title>'
         '<guid isPermaLink="false">x</guid></item></channel></rss>'
     )
-    assert rss.parse_items(feed) == []
+    assert rss.parse_items(feed, now=1_800_000_000.0) == []
 
 
 def test_item_with_a_malformed_point_is_skipped():
@@ -37,7 +37,7 @@ def test_item_with_a_malformed_point_is_skipped():
         '<item><title>Bad point</title><guid isPermaLink="false">y</guid>'
         "<georss:point>not-a-point</georss:point></item></channel></rss>"
     )
-    assert rss.parse_items(feed) == []
+    assert rss.parse_items(feed, now=1_800_000_000.0) == []
 
 
 def test_falls_back_to_link_then_title_when_no_guid():
@@ -49,19 +49,20 @@ def test_falls_back_to_link_then_title_when_no_guid():
         "<georss:point>3.0 4.0</georss:point></item>"
         "</channel></rss>"
     )
-    items = rss.parse_items(feed)
+    items = rss.parse_items(feed, now=1_800_000_000.0)
     assert items[0]["doc_id"] == "http://example.com/a"
     assert items[1]["doc_id"] == "Only a title"
 
 
-def test_missing_pubdate_falls_back_to_now_but_stays_aware():
+def test_missing_pubdate_falls_back_to_the_given_now_not_wall_time():
     feed = (
         '<rss version="2.0" xmlns:georss="http://www.georss.org/georss"><channel>'
         '<item><title>No date</title><guid isPermaLink="false">z</guid>'
         "<georss:point>5.0 6.0</georss:point></item></channel></rss>"
     )
-    item = rss.parse_items(feed)[0]
+    item = rss.parse_items(feed, now=1_800_000_000.0)[0]
     assert item["ts"].tzinfo is not None
+    assert item["ts"].timestamp() == 1_800_000_000.0  # the caller's `now`, so sim runs line up
 
 
 def test_multiple_items_all_parse():
@@ -75,5 +76,5 @@ def test_multiple_items_all_parse():
         )
         + "</channel></rss>"
     )
-    items = rss.parse_items(feed)
+    items = rss.parse_items(feed, now=1_800_000_000.0)
     assert [i["doc_id"] for i in items] == ["g0", "g1", "g2"]
