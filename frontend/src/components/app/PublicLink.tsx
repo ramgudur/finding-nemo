@@ -1,6 +1,6 @@
 // The public end-user link (/apps/:id/go) with copy and a client-side QR code, shared by the console
 // header and the keys page. VITE_PUBLIC_BASE (a public host or tunnel) wins over this page's origin.
-import { QrCode as QrIcon, X } from "lucide-react";
+import { QrCode as QrIcon, Share2, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { CopyButton } from "./AppShell";
 import { encodeQr, qrPath } from "./qr";
@@ -81,12 +81,11 @@ export function PublicLinkRow({ link }: { link: string }) {
   );
 }
 
-/** Console header: copy plus a small QR popover anchored under the button. */
-export function PublicLinkButtons({ link }: { link: string }) {
+/** Console header: one Share button; its popover holds the link, Copy and the QR code. */
+export function ShareButton({ link }: { link: string }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   const panel = useId();
-  const fits = useMemo(() => encodeQr(link) !== null, [link]);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
@@ -101,35 +100,44 @@ export function PublicLinkButtons({ link }: { link: string }) {
     };
   }, [open]);
   return (
-    <div ref={wrap} className="relative flex items-center gap-2">
-      <CopyButton value={link} label="Copy public link" />
-      {fits && (
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={panel}
-          aria-label="Show the public link as a QR code"
-          onClick={() => setOpen((o) => !o)}
-          className="tap wp-press inline-flex shrink-0 items-center gap-1.5 rounded-full bg-sheet px-3 py-1 text-[12.5px] font-bold text-slate shadow-[inset_0_0_0_1px_rgb(var(--c-slate)/0.24)] transition-[background-color,box-shadow] duration-150 hover:bg-white hover:shadow-sm"
-        >
-          <QrIcon aria-hidden className="h-3.5 w-3.5" /> QR
-        </button>
-      )}
+    <div ref={wrap} className="relative">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panel}
+        aria-haspopup="dialog"
+        onClick={() => setOpen((o) => !o)}
+        className="tap wp-press inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-sheet px-3.5 text-[13px] font-bold text-slate shadow-[inset_0_0_0_1px_rgb(var(--c-slate)/0.24)] transition-[background-color,box-shadow] duration-150 hover:bg-white hover:shadow-sm"
+      >
+        <Share2 aria-hidden className="h-3.5 w-3.5" /> Share
+      </button>
       {open && (
         <div
           id={panel}
           role="dialog"
-          aria-label="Public link QR code"
-          className="absolute right-0 top-full z-[1100] mt-2 w-[236px] space-y-2 rounded-2xl bg-sheet p-3 shadow-[var(--shadow-2)]"
+          aria-label="Share the end-user page"
+          className="absolute right-0 top-full z-[1100] mt-2 w-[min(272px,calc(100vw-32px))] space-y-2.5 rounded-2xl bg-sheet p-3.5 shadow-[var(--shadow-2)] max-md:left-0 max-md:right-auto"
         >
           <div className="flex items-center justify-between">
-            <p className="text-[13px] font-bold text-slate">End-user page</p>
+            <p className="text-[14px] font-bold text-slate">End-user page</p>
             <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="hit relative rounded p-0.5 text-ink hover:text-slate">
               <X aria-hidden className="h-4 w-4" />
             </button>
           </div>
-          <QrSvg value={link} size={210} />
-          <p className="break-all font-mono text-[11px] leading-snug text-ink">{link}</p>
+          <p className="text-[13px] text-ink">Anyone with this link gets route instructions only.</p>
+          <div className="flex items-center gap-2">
+            <a
+              href={link}
+              target="_blank"
+              rel="noreferrer"
+              className="min-w-0 flex-1 truncate rounded-[10px] bg-white/70 px-2.5 py-1.5 font-mono text-[12px] text-slate shadow-[inset_0_0_0_1px_rgb(var(--c-slate)/0.18)] underline decoration-deep/40 underline-offset-2"
+              title={link}
+            >
+              {link}
+            </a>
+            <CopyButton value={link} />
+          </div>
+          <QrSvg value={link} size={210} className="mx-auto block" />
           {isLocalBase() && <p className="text-[12px] text-danger">A localhost link only opens on this computer. Set VITE_PUBLIC_BASE to a public host or tunnel.</p>}
         </div>
       )}

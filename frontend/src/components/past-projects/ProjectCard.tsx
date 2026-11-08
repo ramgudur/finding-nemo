@@ -1,18 +1,19 @@
-// One app built in this browser: its name (or id), what it's for, whether it's live, and where it opens.
+// One app built in this browser: its display name (with the id under it), what it's for, whether it's live, and where it opens.
 // A proposed app opens its review; a live one opens its console.
 import { ArrowRight, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { ProjectRecord } from "../../api/authorityKey";
+import { appDisplayName } from "../app/appName";
 
 export function ProjectCard({ project, onRemove }: { project: ProjectRecord; onRemove: (appId: string) => void }) {
   const active = project.status === "active";
-  const title = project.name?.trim() || project.appId;
+  const title = appDisplayName(project.appId) || project.appId;
   const to = `/apps/${encodeURIComponent(project.appId)}${active ? "" : "/review"}`;
   return (
     <div className="group relative flex items-center justify-between gap-4 rounded-2xl border border-softAqua/60 bg-cream/65 px-5 py-4 shadow-[0_2px_12px_rgba(53,89,107,0.05)] transition-[background-color,box-shadow] duration-200 focus-within:bg-cream/90 hover:bg-cream/90 hover:shadow-[0_6px_20px_rgba(53,89,107,0.08)]">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="truncate text-[16px] font-semibold text-slate">{title}</h2>
+          <h2 className="truncate font-display text-[19px] font-semibold leading-tight text-slate">{title}</h2>
           <span
             className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
               active ? "bg-seaGlass/40 text-slate" : "bg-washedSky text-ink ring-1 ring-softStone"
@@ -21,7 +22,7 @@ export function ProjectCard({ project, onRemove }: { project: ProjectRecord; onR
             {active ? "Live" : "Awaiting your review"}
           </span>
         </div>
-        {project.name?.trim() && <p className="font-mono text-[11px] text-ink">{project.appId}</p>}
+        <p className="truncate font-mono text-[12px] text-ink">{project.appId}</p>
         <p className="mt-1 line-clamp-2 max-w-[60ch] text-sm text-ink">{project.intent || "No intent recorded."}</p>
         <p className="mt-0.5 text-[11px] text-ink">Updated {new Date(project.updatedAt).toLocaleString()}</p>
       </div>
