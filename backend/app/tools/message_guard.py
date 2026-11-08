@@ -195,6 +195,8 @@ def safe_instruction(
         avoid = routing.avoid_direction(grid, score_arr, (lat, lon), hot)
         text = routing.instruction_text(route, grid, avoid, leave=leave)
         mode = "escape" if route.escape_cells > 0 else "route"
+        if safe.reason == "already safe" and route.distance_m > routing.far_limit_m(grid.cell_m):
+            text = f"{routing.NOT_AT_RISK_TEXT} {text}"  # a long trip is never sent silently
     guard = check_instruction(
         text=text,
         destination=route.destination,

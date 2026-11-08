@@ -19,8 +19,13 @@
   (Chebyshev, so it scales with ``cell_m``) from any cell at or above the hotspot threshold.
   "Reasonable" is relative to the danger itself, not a fixed length: a destination route is too
   far when it is more than ``FAR_FACTOR`` times as long as the route to the nearest safe cell
-  *and* longer than ``FAR_MIN_CELLS`` cells. The nearest safe distance grows with the size of the
-  hotspot the caller is in, so the rule follows hotspot geometry and the spec's ``cell_m``.
+  *and* longer than ``far_limit_m(cell_m)`` = min(``FAR_MIN_CELLS`` cells, ``FAR_LIMIT_M``). The
+  nearest safe distance grows with the size of the hotspot the caller is in, so the rule follows
+  hotspot geometry and the spec's ``cell_m``. The ``FAR_LIMIT_M`` cap (like the walking pace and
+  the driving hint) is about the person reading the instruction, not the app's entities: on a
+  coarse grid, 100 cells would be tens of kilometres.
+- A caller who is already safe and whose destination is farther than ``far_limit_m`` still gets
+  the route, but its text starts with ``NOT_AT_RISK_TEXT``, so a long trip is never sent silently.
 
 Text is built by code from the route only: direction, distance, destination label, the direction
 of the highest-score area to avoid. It names nothing the grid doesn't know (no floors, rooms or
@@ -49,7 +54,9 @@ HEADING_LOOKAHEAD_CELLS = 4  # the first direction is read this far along the ro
 AVOID_RADIUS_CELLS = 20  # only areas this close to the caller are worth naming
 SAFE_CLEAR_CELLS = 3  # a nearest-safe target is at least this many cells from any hotspot-level cell
 FAR_FACTOR = 3.0  # a destination this many times farther than the nearest safe cell is "too far"...
-FAR_MIN_CELLS = 100  # ...but only when it is also longer than this many cells (e.g. 500 m at 5 m cells, 5 km at 50 m)
+FAR_MIN_CELLS = 100  # ...and also longer than this many cells (500 m at 5 m cells, 5 km at 50 m)...
+FAR_LIMIT_M = 5000.0  # ...or than this many metres, whichever is shorter (the reader's scale, not the app's)
+NOT_AT_RISK_TEXT = "You're not in a high-risk area right now."
 SAFE_LABEL = "a safer area"  # the destination label of a nearest-safe route (code-built, names nothing)
 # Text for the people who read instructions: walking pace (m/s) and the length past which driving is suggested.
 WALK_MPS = 1.3
@@ -257,9 +264,14 @@ def plan_nearest_safe(
     return RouteOutcome(_build_route(grid, start, end, dest, prev, cost, s, region), "ok")
 
 
+def far_limit_m(cell_m: float) -> float:
+    """Length past which a destination route counts as long: min(FAR_MIN_CELLS cells, FAR_LIMIT_M)."""
+    return min(FAR_MIN_CELLS * cell_m, FAR_LIMIT_M)
+
+
 def too_far(route: Route, safe: Route, cell_m: float) -> bool:
     """A destination route is unreasonably long next to just getting clear of the danger."""
-    return route.distance_m > max(FAR_FACTOR * safe.distance_m, FAR_MIN_CELLS * cell_m)
+    return route.distance_m > max(FAR_FACTOR * safe.distance_m, far_limit_m(cell_m))
 
 
 def _build_route(

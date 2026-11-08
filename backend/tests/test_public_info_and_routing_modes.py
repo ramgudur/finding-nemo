@@ -309,3 +309,51 @@ def test_compile_rejects_destination_points_outside_the_area_before_any_model_ca
     assert r.status_code == 422
     assert "outside the app's area" in r.text
     assert fake.calls == []
+
+
+# -- coarse grids: the far limit is capped at FAR_LIMIT_M (the reader's scale) -------------
+
+# Synthetic ~30 km x 30 km box, 500 m cells: 60 x 60. Nothing app-specific.
+COARSE = {"min_lat": 34.0, "min_lon": -100.0, "max_lat": 34.27, "max_lon": -99.675}
+
+
+def _coarse_spec(points: list[dict]) -> AppSpec:
+    return AppSpec.model_validate(
+        {
+            "app_id": "coarse-modes",
+            "intent": "test",
+            "status": "active",
+            "grid": {"cell_m": 500, "bbox": COARSE},
+            "routing": {"enabled": True, "alpha": 4.0, "impassable_score": 0.8, "destination_points": points},
+        }
+    )
+
+
+@pytest.fixture
+def coarse() -> Grid:
+    return Grid.from_spec(_coarse_spec([]).grid)
+
+
+def test_far_limit_is_capped_in_metres_on_coarse_grids():
+    assert routing.far_limit_m(500) == routing.FAR_LIMIT_M == 5000.0  # not 100 cells = 50 km
+    assert routing.far_limit_m(5) == 500.0
+
+
+def test_coarse_grid_far_destination_goes_to_the_nearest_safe_cell(coarse):
+    spec = _coarse_spec([_point(coarse, 25000, 25000, "meeting area")])  # ~28 km away
+    score = _hot_disc(coarse, 5000, 5000, 1500)
+    ins = _ask(spec, coarse, score, 5000, 5000)
+    assert ins.guard.passed, ins.guard
+    assert ins.mode == "nearest_safe" and ins.destination.label == routing.SAFE_LABEL
+    assert ins.distance_m < 9000 and len(ins.text) <= 360
+
+
+def test_safe_caller_with_a_far_destination_is_told_they_are_not_at_risk(coarse):
+    spec = _coarse_spec([_point(coarse, 25000, 25000, "meeting area")])
+    ins = _ask(spec, coarse, np.zeros(coarse.shape), 5000, 5000)
+    assert ins.guard.passed and ins.mode == "route"
+    assert ins.text.startswith(routing.NOT_AT_RISK_TEXT)
+    assert "min on foot" in ins.text and "consider driving" in ins.text
+    assert len(ins.text) <= 360 and ins.walk_minutes == routing.walk_minutes(ins.distance_m)
+    near = _ask(_coarse_spec([_point(coarse, 7000, 5000, "meeting area")]), coarse, np.zeros(coarse.shape), 5000, 5000)
+    assert near.mode == "route" and not near.text.startswith(routing.NOT_AT_RISK_TEXT)
