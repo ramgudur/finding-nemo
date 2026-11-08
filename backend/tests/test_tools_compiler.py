@@ -312,15 +312,59 @@ def test_create_connector_rejects_an_unknown_input(ctx):
     assert r["ok"] is False and "does not exist" in r["error"]
 
 
-def test_test_connector_validates_shape_without_a_live_fetch(ctx):
+def test_test_connector_does_a_real_fetch_against_an_injected_client(ctx):
+    import httpx
+
     _call(
         ctx,
         "create_input",
         {"id": "weather", "kind": "pull", "shape": "field", "tier": "stiff", "meaning": "wind"},
     )
-    created = _call(ctx, "create_connector", {"input_id": "weather", "type": "json_api", "preset": "open_meteo"})
+    created = _call(
+        ctx,
+        "create_connector",
+        {
+            "input_id": "weather",
+            "type": "json_api",
+            "preset": "open_meteo",
+            "config": {"latitude": 32.8, "longitude": -96.7},
+        },
+    )
+
+    def handler(request):
+        return httpx.Response(200, json={"current": {"wind_speed_10m": 5.0, "wind_direction_10m": 180}})
+
+    ctx.extra["http_client"] = httpx.Client(transport=httpx.MockTransport(handler))
     r = _call(ctx, "test_connector", {"connector_id": created["result"]["connector_id"]})
     assert r["ok"] is True and r["result"]["config_valid"] is True
+    assert r["result"]["items_parsed"] == 1
+
+
+def test_test_connector_reports_a_failed_fetch(ctx):
+    import httpx
+
+    _call(
+        ctx,
+        "create_input",
+        {"id": "weather", "kind": "pull", "shape": "field", "tier": "stiff", "meaning": "wind"},
+    )
+    _call(
+        ctx,
+        "create_connector",
+        {
+            "input_id": "weather",
+            "type": "json_api",
+            "preset": "open_meteo",
+            "config": {"latitude": 32.8, "longitude": -96.7},
+        },
+    )
+
+    def handler(request):
+        return httpx.Response(500, text="server error")
+
+    ctx.extra["http_client"] = httpx.Client(transport=httpx.MockTransport(handler))
+    r = _call(ctx, "test_connector", {"connector_id": "weather"})
+    assert r["ok"] is False and "connector test failed" in r["error"]
 
 
 def test_create_connector_writes_a_change(ctx):
