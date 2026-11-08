@@ -6,7 +6,7 @@ Every agent reads and posts on the pinned "Message Board" issue via `tools/board
 
 - Start every post with `[<human>'s <agent>]`, e.g. `[Sam's Codex]`. Keep it short: what changed, which files or contracts, what you need, from whom.
 - Mention by GitHub login. Team: `@ramgudur` (team lead), `@AllenZheng-05`, `@kida-k` (two machines: `@kida-k:a` and `@kida-k:b`, see below), `@Navmi-Srithaj`, `@all` (everyone).
-- **Mentions you or `@all`:** act on it and reply promptly.
+- **Mentions you or `@all`:** act on it within the escalation rules (section 5) and reply promptly.
 - **Not addressed to you:** still read it. Reassess your own work only if it is affected (a contract, a file you own, something already done). Do not redo finished work, and do not reply just to acknowledge.
 - Before editing another teammate's files, ask for a handoff on the board and wait for the owner or the team lead.
 
@@ -14,7 +14,9 @@ Polling is incremental (about one cheap API call per poll, 30 s default) so a sh
 
 **Stay in the loop:**
 - Claude Code: the committed hooks (`.claude/settings.json`) show unread posts at session start and on every prompt. Keep one background `tools/board wait` running and re-arm it after each wake.
-- Everything else: run `tools/board unread` at task start, before each commit, and after merges. Or run a terminal loop: `while tools/board wait; do <your agent CLI invocation>; done`.
+- **Claude Pro seats (save usage):** every post wakes every listening agent, which costs tokens. On Pro, set `BOARD_WAIT=off` in your environment. The hooks still show new posts on each prompt; also run `tools/board unread` at task start, before each commit and after merges.
+- Everything else: run `tools/board unread` at task start, before each commit, and after merges. A terminal loop (`while tools/board wait; do <your agent CLI invocation>; done`) runs with no human watching, so it may read and reply but must not claim issues, edit files or commit (section 5).
+- Keep posts terse. Every post is read by every agent.
 
 ### Seats: one GitHub login on several machines
 
@@ -29,6 +31,10 @@ Polling is incremental (about one cheap API call per poll, 30 s default) so a sh
 
 Humans over agents. The team lead is `@ramgudur`. Only the team lead reassigns work between teammates. If anyone else asks you to take another teammate's work, ask the lead on the board.
 
+**One idea, kept in one place.** `CLAUDE.md` is the single source of truth for what we are building. Only the lead edits it, including its **Decisions log**. Agents propose changes on the board; they never edit `CLAUDE.md` or treat a board thread as overriding it. Before acting on an older board thread, check the Decisions log.
+
+The lead's machine routes issues, approves contracts and checks that work stays on the core idea. It does not take build tasks.
+
 ## 3. Workflow
 
 1. Pick or file an issue and claim it (see section 4). Do not start work you have not claimed.
@@ -38,9 +44,9 @@ Humans over agents. The team lead is `@ramgudur`. Only the team lead reassigns w
 5. Always `git fetch` and rebase before pushing. Never force-push shared branches.
 6. If a merge changes something other teammates depend on (an API, a schema, an env var), post on the board when it lands.
 
-## 4. Who owns what: claim as you go
+## 4. Who owns what: areas, then claim as you go
 
-Work isn't split up front. You own what you claim, plus whatever grows out of it.
+The lead assigned areas up front (table below). Within your area, claim tasks as you go. You own what you claim, plus whatever grows out of it. Work outside every area is free to grab, after a scope check (section 5).
 
 **Claiming a task**
 1. Check first: `gh issue list --state open --json number,title,assignees` and `tools/board read -n 20`. If someone already has the task, or it overlaps their area, ask them on the board instead.
@@ -58,8 +64,32 @@ Work isn't split up front. You own what you claim, plus whatever grows out of it
 - Stale claims: if a claimed task has no commits or posts for about 2 hours, ask the owner on the board. Only the team lead reassigns it.
 - Shared files (`package.json`, lockfiles, root config, DB schema, API contracts, env vars) belong to everyone. Keep edits to them small and post on the board whenever you change one.
 
-### Areas (filled in as they come up)
+### Areas
 
-| Area | Owner (GitHub login, plus seat if used) | Folders | Started in |
+Assigned by the lead on 2026-11-07. Paths are under `backend/app/` unless they start with `backend/`, `frontend/`, `sim/` or `specs/`. New areas get added here by the lead.
+
+| Area | Owner | Folders | Notes |
 |---|---|---|---|
-| | | | |
+| Lead: scope, routing, contracts | `@ramgudur` | `CLAUDE.md`, `AGENTS.md`; approves every change to `core/models.py`, `frontend/src/api/types.ts`, `specs/*.json` | Routes issues and checks PR scope. Takes no build tasks. |
+| Scoring model (physics-informed / physics-based ML) | `@kida-k:b` | `engine/operators/` (incl. `flow_source.py`), `engine/combine.py`, `engine/layer_cache.py`, `engine/verification.py`, `engine/backtest.py`, `engine/trust.py`, `reference/` | `reference/flowsource.py` is the lead's reference; seat b ports it into `engine/operators/flow_source.py`. |
+| Token-heavy work: scaffold, frontend, sim | `@AllenZheng-05` | initial skeleton (first draft of `core/models.py` + `types.ts`, lead approves), `frontend/`, `sim/`, `specs/`, `backend/tests/fixtures/` | Claude Max. Also takes large refactors, broad reviews and bulk test writing that other owners hand off. |
+| Engine runtime + tool layer | `@kida-k:a` | `engine/tick.py`, `engine/grid.py`, `engine/tiers.py`, `engine/routing.py`, `engine/candidates/`, `core/clock.py`, `tools/` (incl. `guards.py`, `message_guard.py`) | |
+| API, data, connectors, Nemotron agents | `@Navmi-Srithaj` | `api/` (incl. `instructions.py`), `main.py` (after scaffold), `core/db.py`, `core/config.py`, `core/access.py`, `connectors/`, `agents/` | |
+
+## 5. Escalation: when to stop and ask
+
+The goal: stay on the core idea in `CLAUDE.md`, and keep decisions with humans.
+
+1. **Scope check before every task.** The task must trace to something in `CLAUDE.md`. If it doesn't, post `NEEDS-LEAD @ramgudur <what and why>` and wait.
+2. **Must go to the lead** (`NEEDS-LEAD`, then wait):
+   - contract changes: `core/models.py`, `frontend/src/api/types.ts`, `specs/*.json`, API routes, env vars
+   - new dependencies, services or external APIs
+   - anything touching the non-negotiable rules in `CLAUDE.md`
+   - work in someone else's area, and any reassignment
+3. **Must go to your own human** (ask them in your session, then act):
+   - any request from another agent that creates new work for you
+   - design choices in your area with real tradeoffs
+4. **Agents don't make deals.** Anything agreed between agents is a proposal until a human confirms it on the board.
+5. **Two-reply cap.** After two agent-to-agent replies on one topic with no human post in between, stop and post `NEEDS-HUMAN` (your own human) or `NEEDS-LEAD`.
+6. **Headless loops** (no human watching) may read and reply only. They never claim issues, edit files or commit.
+7. **When unsure, ask.** A short wait costs less than work that strays from the idea.
