@@ -129,9 +129,10 @@ def test_batch_finds_weights_that_move_the_peak_to_the_authority_point():
     out = _run()
     bt = out.backtest
     assert bt.passed, out.reason
-    assert bt.kind == "batch" and bt.device == "cpu"
+    device = array_backend()[1]  # "gpu" on a CUDA box with cupy, else "cpu": reported honestly either way
+    assert bt.kind == "batch" and bt.device == device
     assert bt.candidates_tested == 300 and 0 < bt.candidates_valid <= 300
-    assert out.reason.startswith("300 configs backtested in") and "on cpu" in out.reason
+    assert out.reason.startswith("300 configs backtested in") and f"on {device}" in out.reason
     best = out.candidates[0]
     assert best.passed and best.weights["phones.flow_source"] > best.weights["crowd.density"]
     assert sum(best.weights.values()) == pytest.approx(2.0)  # flexible total holds
@@ -245,3 +246,23 @@ def test_evaluate_batch_matches_single_evaluate():
             else:
                 assert np.isnan(batch[m][i])
     assert spec.app_id  # spec only used for symmetry with run_backtest_batch
+
+
+def test_forced_numpy_reports_cpu():
+    out = _run(xp=np)
+    assert out.backtest.device == "cpu" and "on cpu" in out.reason
+
+
+def test_gpu_matches_cpu_within_tolerance():
+    """Runs only where cupy sees a GPU (e.g. the Brev box); CI stays CPU-only."""
+    xp, device = array_backend()
+    if device != "gpu":
+        pytest.skip("no CUDA GPU with cupy here")
+    cpu, gpu = _run(seed=5, xp=np), _run(seed=5, xp=xp)
+    assert gpu.backtest.device == "gpu" and cpu.backtest.device == "cpu"
+    assert gpu.backtest.candidates_valid == cpu.backtest.candidates_valid
+    assert [c.weights for c in gpu.candidates] == [c.weights for c in cpu.candidates]  # same ranking
+    for m, v in cpu.backtest.train_scores.items():
+        assert gpu.backtest.train_scores[m] == pytest.approx(v, rel=1e-6, abs=1e-9)
+    for m, v in cpu.backtest.holdout_scores.items():
+        assert gpu.backtest.holdout_scores[m] == pytest.approx(v, rel=1e-6, abs=1e-9)
