@@ -1,0 +1,75 @@
+{
+  "scenario": "scout_rss",
+  "description": "Scout run finding and configuring an RSS source for a pull input, then testing it.",
+  "steps": [
+    {
+      "expect": {
+        "tools_include": [
+          "web_search",
+          "probe_feed",
+          "create_connector",
+          "test_connector"
+        ]
+      },
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_s1",
+            "name": "web_search",
+            "arguments": {
+              "query": "local news RSS incidents near the site"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_s2",
+            "name": "probe_feed",
+            "arguments": {
+              "url": "http://localhost:8765/campus-news.xml"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_s3",
+            "name": "create_connector",
+            "arguments": {
+              "input_id": "local_news",
+              "type": "rss",
+              "url": "http://localhost:8765/campus-news.xml",
+              "poll_s": 30
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call_s4",
+            "name": "test_connector",
+            "arguments": {
+              "connector_id": "${tool_result:call_s3:connector_id}"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "content": "Configured 1 RSS connector; the test parsed at least one item.",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

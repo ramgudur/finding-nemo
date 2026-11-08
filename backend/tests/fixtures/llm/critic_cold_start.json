@@ -1,0 +1,29 @@
+{
+  "scenario": "critic_cold_start",
+  "description": "Critic run before two verification methods have data: reads the report and stops without changing anything.",
+  "steps": [
+    {
+      "expect": {
+        "reasoning": true
+      },
+      "response": {
+        "reasoning_content": "Check whether verification has enough data first.",
+        "tool_calls": [
+          {
+            "id": "call_k1",
+            "name": "get_verification_report",
+            "arguments": {
+              "window_s": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "content": "Cold start: fewer than two verification methods have data, so no weight changes yet.",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

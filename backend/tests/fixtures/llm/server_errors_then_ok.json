@@ -1,0 +1,24 @@
+{
+  "scenario": "server_errors_then_ok",
+  "description": "500 then 503, then a normal reply: retries on 5xx.",
+  "steps": [
+    {
+      "error": {
+        "status": 500,
+        "message": "Internal server error"
+      }
+    },
+    {
+      "error": {
+        "status": 503,
+        "message": "Service unavailable"
+      }
+    },
+    {
+      "response": {
+        "content": "ok",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

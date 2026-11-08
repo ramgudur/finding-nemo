@@ -1,0 +1,18 @@
+{
+  "scenario": "malformed_then_repair",
+  "description": "First reply is invalid JSON for the expected output model; the retry (REPAIR_MODEL) returns valid JSON.",
+  "steps": [
+    {
+      "response": {
+        "content": "{\"label\": \"example\", \"confidence\": }",
+        "finish_reason": "stop"
+      }
+    },
+    {
+      "response": {
+        "content": "{\"label\": \"example\", \"confidence\": 0.7}",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

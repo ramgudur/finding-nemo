@@ -1,0 +1,82 @@
+{
+  "scenario": "critic_campus_alert",
+  "description": "Critic run on campus-alert after the spoof burst: reads the map and suspicious users, lowers one spoofer's trust, backtests a flexible weight shift and applies it with the returned backtest_id.",
+  "steps": [
+    {
+      "expect": {
+        "tools_include": [
+          "get_map_summary",
+          "get_suspicious_users",
+          "run_backtest",
+          "apply_changes"
+        ],
+        "reasoning": true
+      },
+      "response": {
+        "reasoning_content": "A new hotspot appeared far from the earlier one right after a burst of new accounts. Check spoof flags before trusting it.",
+        "tool_calls": [
+          {
+            "id": "call_c1",
+            "name": "get_map_summary",
+            "arguments": {}
+          },
+          {
+            "id": "call_c2",
+            "name": "get_suspicious_users",
+            "arguments": {
+              "window_s": 300
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "reasoning_content": "Several accounts share exact coordinates and appeared together. Lower trust on one duplicate, then test giving flow a little more weight than density.",
+        "tool_calls": [
+          {
+            "id": "call_c3",
+            "name": "set_user_trust",
+            "arguments": {
+              "user_id": "u-d00",
+              "trust": 0.2,
+              "reason": "exact-duplicate coordinates shared with 5 other new accounts"
+            }
+          },
+          {
+            "id": "call_c4",
+            "name": "run_backtest",
+            "arguments": {
+              "weights": {
+                "panic.flow_source": 0.65,
+                "panic.density": 0.35
+              },
+              "reason": "the duplicate cluster inflates density; flow is less affected by stationary duplicates"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "reasoning_content": "Holdout passed on the deciding method. Apply exactly what was tested.",
+        "tool_calls": [
+          {
+            "id": "call_c5",
+            "name": "apply_changes",
+            "arguments": {
+              "backtest_id": "${tool_result:call_c4:backtest_id}",
+              "reason": "holdout improved on the deciding method"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "content": "Lowered trust for 1 duplicate-coordinate account and shifted flexible weight toward flow (backtested, holdout passed).",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

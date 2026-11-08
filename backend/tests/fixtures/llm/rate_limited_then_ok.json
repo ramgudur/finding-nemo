@@ -1,0 +1,18 @@
+{
+  "scenario": "rate_limited_then_ok",
+  "description": "429 on the first call, then a normal reply: exercises backoff and retry.",
+  "steps": [
+    {
+      "error": {
+        "status": 429,
+        "message": "Rate limit exceeded"
+      }
+    },
+    {
+      "response": {
+        "content": "ok",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}

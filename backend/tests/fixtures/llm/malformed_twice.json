@@ -1,0 +1,18 @@
+{
+  "scenario": "malformed_twice",
+  "description": "Invalid JSON from the agent model and from the repair model: the caller logs and gives up.",
+  "steps": [
+    {
+      "response": {
+        "content": "not json",
+        "finish_reason": "stop"
+      }
+    },
+    {
+      "response": {
+        "content": "{still not json",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}
