@@ -355,6 +355,10 @@ def tick_app(
                 errors.append(f"{li.input_id}: event read failed: {e}")
                 ev = empty_events()
             events_by_input[li.input_id] = ev
+        # One store read per input covers its longest horizon; each operator sees only its own.
+        own = lookback_s if li.horizon_s is None else li.horizon_s
+        if math.isfinite(own) and len(ev):
+            ev = ev.select(ev.t > now - own)
         layer = np.zeros(grid.shape)
         if li.op not in registry.OPERATORS:
             errors.append(f"{li.layer_id}: operator {li.op!r} not registered; layer is zero")

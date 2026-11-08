@@ -301,3 +301,36 @@ def test_hotspot_threshold_comes_from_the_spec():
     _, cells_high = peak_hotspots(1.0)
     assert cells_low > cells_default > cells_high
     assert int((res.score >= 0.5).sum()) == cells_default
+
+
+def test_each_operator_gets_only_its_own_history(monkeypatch):
+    """An input mixing an override (all history) with a regular operator: the regular one still
+    sees only its default lookback, not everything the override needs."""
+    seen: dict[str, float] = {}
+    info = registry.OPERATORS["density"]
+
+    def spy(events, params, trust, clock, grid):
+        seen["oldest"] = float(events.t.min()) if len(events) else float("nan")
+        return info.fn(events, params, trust, clock, grid)
+
+    monkeypatch.setitem(registry.OPERATORS, "density", info.__class__(**{**info.__dict__, "fn": spy}))
+    mixed = {
+        "id": "marker",
+        "kind": "push",
+        "shape": "fixed_point",
+        "tier": "locked",
+        "meaning": "an authority point",
+        "operators": [
+            {"op": "override", "weight": 0, "radius_m": 30},
+            {"op": "density", "weight": 0.5, "half_life_s": 60, "sigma_m": 15},
+        ],
+    }
+    rt = AppRuntime(spec(inputs=[mixed]))
+    src = InMemoryEventSource()
+    lat, lon = rt.grid.to_latlon(200.0, 200.0)
+    now = T0 + 3 * 3600
+    src.add("test-app", "marker", [{"t": T0, "lat": float(lat), "lon": float(lon)}])
+    src.add("test-app", "marker", [{"t": now - 10, "lat": float(lat), "lon": float(lon)}])
+    res = tick_app(rt, src, now=now, clock=SimClock(now))
+    assert res.override.max() == 1.0  # the override still sees the 3-hour-old point
+    assert seen["oldest"] >= now - LOOKBACK_S  # density does not
