@@ -1,65 +1,273 @@
 import L from "leaflet";
 import { useEffect, useRef } from "react";
-import type { CellCollection, CellFeature, GeoJsonBBox, Hotspot } from "../../api/types";
-import { bboxToBounds, heatStyle, toLatLng } from "./geo";
+import type { CellCollection, GeoJsonBBox, Hotspot } from "../../api/types";
+import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
+import { bboxToBounds, gridShape, heatColor, heatOpacity, lineStride, toLatLng } from "./geo";
+import "./map.css";
 
 interface Props {
   bbox: GeoJsonBBox | null;
   layers: Record<string, CellCollection>;
+  /** Layer ids to draw, in order (later ones on top). Ids absent from `layers` are skipped. */
   visible: string[];
   hotspots: Hotspot[];
+  /** Grid cell size; when given, subtle grid lines are drawn over the bbox. */
+  cellM?: number;
+  height?: number | string;
+  className?: string;
 }
 
-/** Plain Leaflet inside React: one map instance, overlays redrawn when data changes. */
-export function Map({ bbox, layers, visible, hotspots }: Props) {
+/** Cells at or above this value also get a blurred copy underneath (the soft glow). */
+const GLOW_FROM = 0.6;
+const FADE_MS = 700;
+const MAX_GRID_LINES = 64; // per axis; larger grids draw every k-th boundary
+const MAX_STAGGER_MS = 650;
+
+interface CellEntry {
+  poly: L.Polygon;
+  glow: L.Polygon | null;
+  value: number;
+  removeTimer?: ReturnType<typeof setTimeout>;
+}
+
+const ring = (coords: number[][][]): L.LatLngTuple[] =>
+  (coords[0] ?? []).map(([lon = 0, lat = 0]) => toLatLng(lat, lon));
+
+function paint(el: Element | undefined, v: number, opacity: number, delayMs = 0) {
+  if (!(el instanceof SVGElement)) return;
+  el.style.transitionDelay = delayMs ? `${delayMs}ms` : "";
+  el.style.fill = heatColor(v);
+  el.style.fillOpacity = String(opacity);
+}
+
+/**
+ * Plain Leaflet inside React: one map instance; cells are long-lived paths keyed by layer/row/col and
+ * restyled in place each tick, so values ease between frames instead of flashing.
+ */
+export function Map({ bbox, layers, visible, hotspots, cellM, height = "min(70vh, 560px)", className }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
-  const overlay = useRef<L.LayerGroup | null>(null);
-  const fitted = useRef(false);
+  const renderers = useRef<{ cells: L.Renderer; glow: L.Renderer } | null>(null);
+  const cells = useRef(new globalThis.Map<string, CellEntry>());
+  const gridGroup = useRef<L.LayerGroup | null>(null);
+  const hotspotGroup = useRef<L.LayerGroup | null>(null);
+  const fittedFor = useRef("");
+  const reduced = usePrefersReducedMotion();
+  const reducedRef = useRef(reduced);
+  reducedRef.current = reduced;
 
   useEffect(() => {
     if (!el.current) return;
-    const m = L.map(el.current, { zoomControl: true });
+    const m = L.map(el.current, { zoomControl: true, attributionControl: true, zoomSnap: 0.25 });
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 20,
       maxNativeZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(m);
     m.setView([0, 0], 2);
-    overlay.current = L.layerGroup().addTo(m);
+
+    // Panes, bottom to top: tiles (200) < grid < glow < cells < hotspots.
+    const pane = (name: string, z: number) => {
+      const p = m.createPane(name);
+      p.style.zIndex = String(z);
+      p.style.pointerEvents = "none";
+      return p;
+    };
+    pane("hm-grid", 360);
+    pane("hm-glow", 380);
+    pane("hm-cells", 400);
+    pane("hm-hotspots", 450).style.pointerEvents = "auto";
+
+    renderers.current = {
+      cells: L.svg({ pane: "hm-cells", padding: 0.5 }),
+      glow: L.svg({ pane: "hm-glow", padding: 0.5 }),
+    };
+    gridGroup.current = L.layerGroup().addTo(m);
+    hotspotGroup.current = L.layerGroup().addTo(m);
     map.current = m;
+    const cellMap = cells.current;
     return () => {
+      for (const c of cellMap.values()) clearTimeout(c.removeTimer);
+      cellMap.clear();
       m.remove();
       map.current = null;
-      fitted.current = false;
+      renderers.current = null;
+      fittedFor.current = "";
     };
   }, []);
 
+  // Fit once per bbox (a new app or a changed grid), not on every tick.
   useEffect(() => {
-    if (map.current && bbox && !fitted.current) {
-      map.current.fitBounds(bboxToBounds(bbox));
-      fitted.current = true;
-    }
+    const m = map.current;
+    if (!m || !bbox) return;
+    const k = bbox.join(",");
+    if (fittedFor.current === k) return;
+    m.fitBounds(bboxToBounds(bbox), { padding: [12, 12] });
+    fittedFor.current = k;
   }, [bbox]);
 
+  // Subtle grid lines over the bbox.
   useEffect(() => {
-    const group = overlay.current;
-    if (!group) return;
-    group.clearLayers();
+    const g = gridGroup.current;
+    if (!g) return;
+    g.clearLayers();
+    if (!bbox || !cellM) return;
+    const [minLon, minLat, maxLon, maxLat] = bbox;
+    const s = gridShape(bbox, cellM);
+    const dLat = cellM / s.mPerDegLat;
+    const dLon = cellM / s.mPerDegLon;
+    const top = minLat + s.rows * dLat; // last row may run past the bbox (ceil), as on the server
+    const right = minLon + s.cols * dLon;
+    const style: L.PolylineOptions = {
+      pane: "hm-grid",
+      color: "#638F91",
+      weight: 0.6,
+      opacity: 0.16,
+      interactive: false,
+    };
+    const rs = lineStride(s.rows, MAX_GRID_LINES);
+    const cs = lineStride(s.cols, MAX_GRID_LINES);
+    for (let i = 0; i <= s.rows; i += rs) {
+      const lat = minLat + i * dLat;
+      L.polyline([toLatLng(lat, minLon), toLatLng(lat, right)], style).addTo(g);
+    }
+    for (let j = 0; j <= s.cols; j += cs) {
+      const lon = minLon + j * dLon;
+      L.polyline([toLatLng(minLat, lon), toLatLng(top, lon)], style).addTo(g);
+    }
+    // The bbox itself, a touch stronger.
+    L.rectangle(bboxToBounds([minLon, minLat, maxLon, maxLat]), {
+      pane: "hm-grid",
+      color: "#638F91",
+      weight: 1,
+      opacity: 0.4,
+      dashArray: "3 5",
+      fill: false,
+      interactive: false,
+    }).addTo(g);
+  }, [bbox, cellM]);
+
+  // Cells: create, restyle in place, or fade out and remove.
+  useEffect(() => {
+    const m = map.current;
+    const r = renderers.current;
+    if (!m || !r) return;
+    const reducedNow = reducedRef.current;
+    const seen = new Set<string>();
+    const fresh: Array<{ entry: CellEntry; delay: number }> = [];
+    let maxRc = 1;
+    for (const id of visible) for (const f of layers[id]?.features ?? []) maxRc = Math.max(maxRc, f.properties.row + f.properties.col);
+
     for (const id of visible) {
       const fc = layers[id];
       if (!fc) continue;
-      L.geoJSON(fc as GeoJSON.FeatureCollection, {
-        style: (f) => heatStyle(f ? (f as unknown as CellFeature).properties.value : 0),
-        interactive: false,
-      }).addTo(group);
+      for (const f of fc.features) {
+        const { value, row, col } = f.properties;
+        const key = `${id}|${row}|${col}`;
+        seen.add(key);
+        let entry = cells.current.get(key);
+        if (!entry) {
+          const latlngs = ring(f.geometry.coordinates);
+          const poly = L.polygon(latlngs, {
+            renderer: r.cells,
+            pane: "hm-cells",
+            className: "hm-cell",
+            stroke: true,
+            color: "#F0EBDD",
+            weight: 0.4,
+            opacity: 0.35,
+            fillOpacity: 0,
+            interactive: false,
+          }).addTo(m);
+          entry = { poly, glow: null, value };
+          cells.current.set(key, entry);
+          // Progressive fade-in, sweeping from the SW corner (row 0, col 0) outward.
+          fresh.push({ entry, delay: reducedNow ? 0 : Math.round(((row + col) / maxRc) * MAX_STAGGER_MS) });
+        } else {
+          clearTimeout(entry.removeTimer);
+          entry.removeTimer = undefined;
+          entry.value = value;
+          paint(entry.poly.getElement(), value, heatOpacity(value));
+        }
+        entry.value = value;
+        // glow copy only for hot cells
+        if (value >= GLOW_FROM && !entry.glow) {
+          entry.glow = L.polygon(entry.poly.getLatLngs() as L.LatLng[][], {
+            renderer: r.glow,
+            pane: "hm-glow",
+            className: "hm-cell",
+            stroke: false,
+            fillOpacity: 0,
+            interactive: false,
+          }).addTo(m);
+          paint(entry.glow.getElement(), value, 0);
+          const g = entry.glow;
+          requestAnimationFrame(() => requestAnimationFrame(() => paint(g.getElement(), value, 0.8)));
+        } else if (entry.glow) {
+          if (value >= GLOW_FROM) paint(entry.glow.getElement(), value, 0.8);
+          else {
+            entry.glow.remove();
+            entry.glow = null;
+          }
+        }
+      }
     }
-    for (const h of hotspots) {
-      L.circle(toLatLng(h.lat, h.lon), { radius: h.radius_m, color: "#7a00cc", weight: 2, fill: false })
-        .bindTooltip(`${h.id}: score ${h.score.toFixed(2)}`)
-        .addTo(group);
-    }
-  }, [layers, visible, hotspots]);
 
-  return <div ref={el} style={{ height: "min(70vh, 560px)", minHeight: 320, width: "100%", borderRadius: 4 }} />;
+    if (fresh.length) {
+      for (const { entry } of fresh) paint(entry.poly.getElement(), entry.value, 0);
+      // two frames so the browser commits opacity 0 before the transition target
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          for (const { entry, delay } of fresh) paint(entry.poly.getElement(), entry.value, heatOpacity(entry.value), delay);
+        }),
+      );
+    }
+
+    for (const [key, entry] of cells.current) {
+      if (seen.has(key) || entry.removeTimer) continue;
+      paint(entry.poly.getElement(), entry.value, 0);
+      if (entry.glow) paint(entry.glow.getElement(), entry.value, 0);
+      entry.removeTimer = setTimeout(
+        () => {
+          entry.poly.remove();
+          entry.glow?.remove();
+          cells.current.delete(key);
+        },
+        reducedNow ? 0 : FADE_MS,
+      );
+    }
+  }, [layers, visible]);
+
+  // Hotspots: soft coral rings, few enough to redraw each tick.
+  useEffect(() => {
+    const g = hotspotGroup.current;
+    if (!g) return;
+    g.clearLayers();
+    for (const h of hotspots) {
+      L.circle(toLatLng(h.lat, h.lon), {
+        pane: "hm-hotspots",
+        className: "hm-hotspot",
+        radius: h.radius_m,
+        color: "#D9937E",
+        weight: 1.5,
+        opacity: 0.9,
+        dashArray: "4 4",
+        fillColor: "#E8875F",
+        fillOpacity: 0.06,
+      })
+        .bindTooltip(
+          `${h.id} · peak ${h.score.toFixed(2)} · mean ${h.mean.toFixed(2)} · r ${Math.round(h.radius_m)} m · ${h.persisted_ticks} ticks`,
+          { className: "hm-tooltip", direction: "top" },
+        )
+        .addTo(g);
+    }
+  }, [hotspots]);
+
+  return (
+    <div
+      ref={el}
+      className={`hm-map ${className ?? ""}`}
+      style={{ height, minHeight: 280, width: "100%", borderRadius: 12 }}
+    />
+  );
 }
