@@ -388,6 +388,16 @@ def finalize_app(ctx: ToolContext, args: FinalizeAppArgs) -> dict[str, Any]:
                 for i in raw["inputs"]
             ],
         }
+    dev_webhooks: dict[str, Any] = ctx.extra.get("dev_webhooks") or {}
+    if dev_webhooks and isinstance(raw, dict) and isinstance(raw.get("inputs"), list):
+        # the dev's webhook mapping, verbatim: the model can't change it (#222)
+        raw = {
+            **raw,
+            "inputs": [
+                {**i, "webhook": dev_webhooks[i["id"]]} if isinstance(i, dict) and i.get("id") in dev_webhooks else i
+                for i in raw["inputs"]
+            ],
+        }
     try:
         spec = AppSpec.model_validate(raw)
     except Exception as e:  # noqa: BLE001 - surfaced to the agent, not raised past the tool
@@ -417,6 +427,23 @@ def finalize_app(ctx: ToolContext, args: FinalizeAppArgs) -> dict[str, Any]:
                     before=prev.model_dump(mode="json") if prev is not None else None,
                     after=inp.connector.model_dump(mode="json"),
                     reason=f"the dev's chosen source for {inp.id!r}, copied at compile",
+                    actor="dev",
+                    t=ctx.now_dt(),
+                )
+            )
+    before_webhooks = {i.id: i.webhook for i in existing.inputs} if existing is not None else {}
+    for inp in spec.inputs:
+        if inp.id in dev_webhooks and inp.webhook is not None and before_webhooks.get(inp.id) != inp.webhook:
+            prev = before_webhooks.get(inp.id)
+            ctx.db.add_change(
+                Change(
+                    id=str(uuid.uuid4()),
+                    app_id=ctx.app_id,
+                    kind="webhook",
+                    target=inp.id,
+                    before=prev.model_dump(mode="json") if prev is not None else None,
+                    after=inp.webhook.model_dump(mode="json"),
+                    reason=f"the dev's webhook mapping for {inp.id!r}, copied at compile",
                     actor="dev",
                     t=ctx.now_dt(),
                 )

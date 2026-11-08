@@ -113,9 +113,10 @@ async def run_compiler(
 
     `destination_points` are the dev's own words, like `meaning`: `finalize_app` writes them
     into `routing.destination_points` verbatim, whatever the model proposed. So is each pull
-    input's `connector` when the dev gave one: `finalize_app` copies it onto that input. The
-    inputs themselves (ids, kind, shape, meaning, fields), the intent and the grid are pinned the
-    same way: the model can't add, drop or reword them."""
+    input's `connector`, and each push input's `webhook` mapping, when the dev gave one:
+    `finalize_app` copies them onto that input. The inputs themselves (ids, kind, shape, meaning,
+    fields), the intent and the grid are pinned the same way: the model can't add, drop or reword
+    them."""
     cache = COMPILER_CACHE if cache is None else cache
     destinations = list(destination_points or [])
     ctx.extra["dev_inputs"] = [
@@ -125,6 +126,7 @@ async def run_compiler(
     ctx.extra["dev_grid"] = grid
     ctx.extra["dev_destination_points"] = destinations
     ctx.extra["dev_connectors"] = {i["id"]: i["connector"] for i in inputs if i.get("connector")}
+    ctx.extra["dev_webhooks"] = {i["id"]: i["webhook"] for i in inputs if i.get("webhook")}
     cached = cache.get(intent, inputs, destinations)
     if cached is not None:
         # Through finalize_app (not a direct db.upsert_app), so a cache hit gets the same
