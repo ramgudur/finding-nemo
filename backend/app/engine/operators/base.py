@@ -52,26 +52,51 @@ class Events:
     t: np.ndarray
     lat: np.ndarray
     lon: np.ndarray
+    fields: Mapping[str, np.ndarray] = field(default_factory=dict)  # the input's declared fields, per event
 
     def __post_init__(self) -> None:
         n = len(self.t)
         if not (len(self.user_id) == len(self.lat) == len(self.lon) == n):
             raise ValueError("Events columns must have equal length")
+        if any(len(v) != n for v in self.fields.values()):
+            raise ValueError("Events fields must have one value per event")
 
     def __len__(self) -> int:
         return len(self.t)
 
     @classmethod
     def from_records(cls, records: list[Mapping[str, Any]]) -> Events:
+        """`t` is seconds; every key besides user_id/t/ts/lat/lon becomes a field (None where missing)."""
+        names = sorted({k for r in records for k in r} - {"user_id", "t", "ts", "lat", "lon"})
         return cls(
             user_id=np.array([str(r.get("user_id") or "") for r in records], dtype=object),
             t=np.array([float(r["t"]) for r in records], dtype=float),
             lat=np.array([float(r["lat"]) for r in records], dtype=float),
             lon=np.array([float(r["lon"]) for r in records], dtype=float),
+            fields={k: np.array([r.get(k) for r in records], dtype=object) for k in names},
         )
 
     def select(self, mask: np.ndarray) -> Events:
-        return Events(self.user_id[mask], self.t[mask], self.lat[mask], self.lon[mask])
+        return Events(
+            self.user_id[mask],
+            self.t[mask],
+            self.lat[mask],
+            self.lon[mask],
+            {k: v[mask] for k, v in self.fields.items()},
+        )
+
+    def column(self, name: str, default: float) -> np.ndarray:
+        """A declared field as floats; missing field, None or non-numeric values become `default`."""
+        raw = self.fields.get(name)
+        if raw is None:
+            return np.full(len(self), float(default))
+        out = np.empty(len(self))
+        for i, v in enumerate(raw):
+            try:
+                out[i] = default if v is None else float(v)
+            except (TypeError, ValueError):
+                out[i] = default
+        return np.where(np.isfinite(out), out, default)
 
 
 @dataclass

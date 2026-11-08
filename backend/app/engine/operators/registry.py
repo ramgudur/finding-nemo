@@ -2,19 +2,26 @@
 
 An AppSpec operator entry is `{op, weight, noise_floor?, ...params}`. `op` and `weight` belong to
 the combine step, so `parse_params` drops them and validates the rest against the params model.
+
+`role` tells the tick where a layer goes: "layer" layers are normalized and weighted; "override"
+layers are 0/1 masks fed to combine's override step (applied after the weighted sum, never weighted).
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from .base import ClockLike, Events, GridLike, OperatorParams, OperatorResult
 from .density import DensityParams, density
+from .dwell import DwellParams, dwell
+from .event_points import EventPointsParams, event_points
+from .field import FieldParams, field
 from .flow_source import FlowSourceParams, flow_source
+from .override import OverrideParams, override
 
-_SPEC_ONLY_KEYS = {"op", "weight"}
+_SPEC_ONLY_KEYS = {"op", "weight", "layer_id"}
 
 
 @dataclass(frozen=True)
@@ -24,6 +31,7 @@ class OperatorInfo:
     params: type[OperatorParams]
     shapes: tuple[str, ...]  # input shapes it accepts (AppSpec `shape`)
     description: str
+    role: Literal["layer", "override"] = "layer"
 
 
 OPERATORS: dict[str, OperatorInfo] = {
@@ -43,6 +51,36 @@ OPERATORS: dict[str, OperatorInfo] = {
             DensityParams,
             ("point", "track"),
             "Smoothed density of point events with half-life decay, trust weights and per-user duplicate removal.",
+        ),
+        OperatorInfo(
+            "dwell",
+            dwell,
+            DwellParams,
+            ("track",),
+            "Stop detection: people staying within R meters for at least T seconds, as stationary clusters.",
+        ),
+        OperatorInfo(
+            "field",
+            field,
+            FieldParams,
+            ("field",),
+            "Station or gridded readings interpolated onto the grid; with wind fields it can carry another "
+            "layer downwind (advection-diffusion).",
+        ),
+        OperatorInfo(
+            "event_points",
+            event_points,
+            EventPointsParams,
+            ("document",),
+            "Geocoded documents (e.g. news) as confidence x source reliability, decaying over time.",
+        ),
+        OperatorInfo(
+            "override",
+            override,
+            OverrideParams,
+            ("fixed_point",),
+            "Authority fixed points: score forced to 1.0 within a radius until cleared; applied after weighting.",
+            role="override",
         ),
     )
 }
@@ -80,6 +118,7 @@ def list_operators() -> list[dict[str, Any]]:
             "name": i.name,
             "description": i.description,
             "shapes": list(i.shapes),
+            "role": i.role,
             "params": i.params.model_json_schema(),
         }
         for i in OPERATORS.values()
