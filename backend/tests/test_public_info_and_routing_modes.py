@@ -353,7 +353,15 @@ def test_safe_caller_with_a_far_destination_is_told_they_are_not_at_risk(coarse)
     ins = _ask(spec, coarse, np.zeros(coarse.shape), 5000, 5000)
     assert ins.guard.passed and ins.mode == "route"
     assert ins.text.startswith(routing.NOT_AT_RISK_TEXT)
-    assert "min on foot" in ins.text and "consider driving" in ins.text
+    assert f"about {routing.walk_text(ins.walk_minutes)} on foot" in ins.text and "consider driving" in ins.text
     assert len(ins.text) <= 360 and ins.walk_minutes == routing.walk_minutes(ins.distance_m)
     near = _ask(_coarse_spec([_point(coarse, 7000, 5000, "meeting area")]), coarse, np.zeros(coarse.shape), 5000, 5000)
     assert near.mode == "route" and not near.text.startswith(routing.NOT_AT_RISK_TEXT)
+
+
+def test_walk_text_reads_in_hours_when_long():
+    assert routing.walk_text(42) == "42 min"
+    assert routing.walk_text(89) == "89 min"
+    assert routing.walk_text(90) == "1½ h"
+    assert routing.walk_text(336) == "5½ h"
+    assert routing.walk_text(600) == "10 h"
