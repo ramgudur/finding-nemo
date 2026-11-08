@@ -13,6 +13,7 @@ PRESETS: dict[str, dict[str, Any]] = {
             "latitude": "{latitude}",
             "longitude": "{longitude}",
             "current": "wind_speed_10m,wind_direction_10m",
+            "wind_speed_unit": "ms",  # the field operator reads vector magnitudes in m/s
         },
         "response_path": "current",
         "fields": ["wind_speed_10m", "wind_direction_10m"],
