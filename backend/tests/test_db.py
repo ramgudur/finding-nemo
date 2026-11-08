@@ -320,3 +320,65 @@ def test_create_keys_overwrites_existing_pair(db):
     assert first != second
     assert db.check_ingest_key("app", first.ingest_key) is False
     assert db.check_ingest_key("app", second.ingest_key) is True
+
+
+@pytest.mark.parametrize("bad_key", [None, 123, True, [], {}, "", "ééé"])
+def test_key_checks_never_raise_on_non_string_empty_or_non_ascii_keys(db, bad_key):
+    db.create_keys("app", t=1.0)
+    assert db.check_ingest_key("app", bad_key) is False
+    assert db.check_authority_key("app", bad_key) is False
+
+
+def test_key_checks_accept_a_non_ascii_key_that_actually_matches(db):
+    keys = db.create_keys("app", t=1.0)
+    # the stored key is always URL-safe ASCII, but the comparison itself must not choke
+    # on a non-ASCII candidate even when it's wrong
+    assert db.check_ingest_key("app", keys.ingest_key + "é") is False
+
+
+# -- concurrency (#71: unlocked reads interleaving with writes on the shared connection) --
+
+
+def test_concurrent_writes_and_reads_never_corrupt_the_shared_connection(db):
+    """Regression for #71: a reader thread (the tick) and writer threads (ingest)
+    hitting the single shared sqlite3 connection at once used to raise
+    sqlite3.InterfaceError and surface as a false "not found"."""
+    import threading
+
+    spec = make_spec()
+    db.upsert_app(spec, t=0.0)
+    n_writers, events_per_writer = 8, 50
+    errors: list[BaseException] = []
+    stop = threading.Event()
+
+    def write(i: int) -> None:
+        try:
+            for j in range(events_per_writer):
+                e = Event(user_id=f"u{i}-{j}", lat=1.0, lon=2.0, ts=t("2026-01-01T00:00:00Z"))
+                db.insert_event("campus-alert", "panic", e, received_at=float(j))
+        except BaseException as exc:  # noqa: BLE001 - captured to fail the test, not crash the thread
+            errors.append(exc)
+
+    def read() -> None:
+        try:
+            while not stop.is_set():
+                db.get_app("campus-alert")
+                db.list_events("campus-alert", "panic")
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    readers = [threading.Thread(target=read) for _ in range(4)]
+    writers = [threading.Thread(target=write, args=(i,)) for i in range(n_writers)]
+    for r in readers:
+        r.start()
+    for w in writers:
+        w.start()
+    for w in writers:
+        w.join()
+    stop.set()
+    for r in readers:
+        r.join()
+
+    assert errors == []
+    assert len(db.list_events("campus-alert", "panic")) == n_writers * events_per_writer
+    assert db.get_app("campus-alert") == spec
