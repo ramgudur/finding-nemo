@@ -13,14 +13,27 @@ a missing or wrong key is 401 (rule 8: raw inputs never reach a request without 
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
+from typing import Any
 
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import authority_key_header, get_db, get_engine
 from app.core.access import require_authority_if_present, visible
 from app.core.db import Db
-from app.core.models import POI, AppSpec, CellCollection, Event, HotspotsResponse, MapResponse, UtcDatetime
+from app.core.models import (
+    POI,
+    AppSpec,
+    CellCollection,
+    Event,
+    HotspotsResponse,
+    MapResponse,
+    UtcDatetime,
+    VectorCell,
+    VectorGrid,
+)
 from app.engine.grid import Grid
 from app.engine.tick import TickEngine, TickResult
 
@@ -30,6 +43,31 @@ router = APIRouter(prefix="/v1/apps", tags=["outputs"])
 # (values are rounded to 4 decimals, so this margin never changes which cells are kept).
 _CELL_MIN_VALUE = 0.0099995
 MAX_RAW = 5000
+MAX_VECTOR_CELLS = 400  # per layer: the map draws one arrow per sampled cell
+
+
+def vector_grid(u: Any, v: Any, max_cells: int = MAX_VECTOR_CELLS) -> VectorGrid | None:
+    """Sample an operator's per-cell vector field (u east, v north) every `step` cells, at cell centres
+    of each block, so at most `max_cells` arrows go out. None when there is no usable field."""
+    try:
+        uu = np.asarray(u, dtype=float)
+        vv = np.asarray(v, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if uu.ndim != 2 or uu.shape != vv.shape or uu.size == 0:
+        return None
+    h, w = uu.shape
+    step = max(1, math.ceil(math.sqrt(h * w / max_cells)))
+    while math.ceil(h / step) * math.ceil(w / step) > max_cells:
+        step += 1
+    off = step // 2
+    cells = []
+    for r in range(min(off, h - 1), h, step):
+        for c in range(min(off, w - 1), w, step):
+            cu, cv = float(uu[r, c]), float(vv[r, c])
+            if math.isfinite(cu) and math.isfinite(cv) and (cu or cv):
+                cells.append(VectorCell(row=r, col=c, u=round(cu, 3), v=round(cv, 3)))
+    return VectorGrid(step=step, cells=cells) if cells else None
 
 
 def build_map_response(app_id: str, spec: AppSpec, grid: Grid, result: TickResult, authority: bool) -> MapResponse:
@@ -40,12 +78,21 @@ def build_map_response(app_id: str, spec: AppSpec, grid: Grid, result: TickResul
         for layer_id, arr in arrays.items()
         if authority or layer_id in public_ids
     }
+    # A layer's vector field follows that layer's visibility (rule 8).
+    vectors = {}
+    for layer_id, ex in (result.extras or {}).items():
+        if not isinstance(ex, dict) or "vector_u" not in ex or not (authority or layer_id in public_ids):
+            continue
+        vg = vector_grid(ex["vector_u"], ex.get("vector_v"))
+        if vg is not None:
+            vectors[layer_id] = vg
     return MapResponse(
         app_id=app_id,
         t=datetime.fromtimestamp(result.t, tz=UTC),
         cell_m=grid.cell_m,
         bbox=grid.bbox,
         layers=layers,
+        vectors=vectors,
     )
 
 

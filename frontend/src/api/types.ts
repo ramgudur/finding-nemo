@@ -322,12 +322,28 @@ export interface CellCollection {
 }
 
 /** Without the authority key, `layers` holds only public layers. "score" is the combined map. */
+/** One sampled cell of a vector field: u east, v north (m/s for a vector field), pointing where it heads. */
+export interface VectorCell {
+  row: number;
+  col: number;
+  u: number;
+  v: number;
+}
+
+/** A layer's vector field, sampled every `step` cells on both axes (at most ~400 cells). */
+export interface VectorGrid {
+  step: number;
+  cells: VectorCell[];
+}
+
 export interface MapResponse {
   app_id: string;
   t: IsoDateTime;
   cell_m: number;
   bbox: GeoJsonBBox;
   layers: Record<string, CellCollection>;
+  /** Per layer id, the vector field its operator computed; same visibility as that layer. Optional (older servers). */
+  vectors?: Record<string, VectorGrid>;
 }
 
 /** `score` is the peak cell score; radius_m = sqrt(area_m2 / pi). */

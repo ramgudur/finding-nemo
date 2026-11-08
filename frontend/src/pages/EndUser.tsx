@@ -14,6 +14,7 @@ import { ApiError, api } from "../api/client";
 import { openStream } from "../api/stream";
 import type { CellCollection, GeoJsonBBox, Hotspot, Instruction, InstructionMode, MapResponse, PublicAppInfo } from "../api/types";
 import { bboxToBounds, toLatLng } from "../components/Map/geo";
+import { VectorFieldOverlay } from "../components/Map/VectorFieldLayer";
 import { appDisplayName } from "../components/app/appName";
 
 type Pos = { lat: number; lon: number };
@@ -32,13 +33,15 @@ const RISK = "#E07A5F"; // soft warm coral: noticeable, not alarming
 
 /** What a public caller may see of the risk: public hotspots, the score only if it is public, and how
  * many layers the public map carries at all (the server leaves out every authority-only one). */
-type Risk = { hotspots: Hotspot[]; score: CellCollection | null; layers: number };
+type Risk = { hotspots: Hotspot[]; score: CellCollection | null; layers: number; vectors?: MapResponse["vectors"]; cellM?: number };
 
 function riskOf(map: MapResponse | null, hotspots: Hotspot[]): Risk {
   return {
     hotspots: hotspots.filter((h) => h.visibility === "public"),
     score: map?.layers?.score ?? null,
     layers: Object.keys(map?.layers ?? {}).length,
+    vectors: map?.vectors,
+    cellM: map?.cell_m,
   };
 }
 
@@ -812,6 +815,8 @@ export function EndUser({ appId }: { appId: string }) {
             aria-label={live ? "Map. Tap where you are to set your position." : "Map of the area this alert covers."}
             className="h-[min(60vh,480px)] min-h-[280px] w-full rounded-xl md:h-full md:min-h-0 md:rounded-none"
           />
+          {/* public vector-field layers only: the server sends none the owner kept private (rule 8) */}
+          <VectorFieldOverlay mapRef={map} vectors={risk?.vectors} bbox={bbox} cellM={risk?.cellM} pane="eu-vectors" zIndex={395} legendClassName="bottom-6 right-2.5 items-end" variant="public" />
           {bbox && (
             <button
               type="button"

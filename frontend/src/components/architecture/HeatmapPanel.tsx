@@ -91,7 +91,9 @@ export default function HeatmapPanel({
   const emptyShown = map !== null && shown !== null && (map.layers[shown]?.features.length ?? 0) === 0;
   const threshold = spec?.outputs?.hotspot_threshold ?? 0.5;
   const shownVector = vectors.find((v) => v.layer.layerId === shown && v.layer.shiftOnly) ?? null;
-  const badges = vectors.filter((v) => v.reading);
+  // The corner badge only where the map doesn't already draw that field as arrows.
+  const badges = vectors.filter((v) => v.reading && !map?.vectors?.[v.layer.layerId]?.cells.length);
+  const vectorLabels = useMemo(() => Object.fromEntries(vectors.map((v) => [v.layer.layerId, v.layer.name])), [vectors]);
   // Colour by source: authority view, the combined score shown, and some input that can tint.
   const canBySource = !!learning && live.authority && shown === "score" && learning.inputs.some((i) => i.hue);
   const bySource = canBySource && colourMode === "source";
@@ -177,6 +179,8 @@ export default function HeatmapPanel({
             agentMarks={!!learning}
             newPoiIds={learning?.newPoiIds}
             serverNow={map?.t ?? null}
+            vectors={map?.vectors}
+            vectorLabels={vectorLabels}
           />
         ) : (
           <div aria-hidden className="h-[clamp(320px,56vh,540px)] rounded-xl bg-mist/70 motion-safe:animate-pulse" />

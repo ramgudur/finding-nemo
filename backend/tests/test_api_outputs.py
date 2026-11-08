@@ -97,7 +97,7 @@ def test_map_shape_matches_contract(setup):
     _post_pings(client, keys["ingest_key"])
     engine.tick_once()
     m = client.get("/v1/apps/test-app/map", headers={"X-Authority-Key": keys["authority_key"]}).json()
-    assert set(m) == {"app_id", "t", "cell_m", "bbox", "layers"}
+    assert set(m) == {"app_id", "t", "cell_m", "bbox", "layers", "vectors"}
     assert m["app_id"] == "test-app"
     assert m["cell_m"] == 10
 
