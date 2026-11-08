@@ -1,8 +1,9 @@
 // Home pond <Canvas> root (lazy-loaded by pages/Home.tsx). Owns the shared conventions in pond.ts:
 // orthographic top-down camera (viewport height = 100 world units), the scene clock, pointer
-// tracking + ripple ring buffer, reducedMotion/mobile flags, dpr cap, tab-hidden pause, WebGL gate.
+// tracking + ripple ring buffer, reducedMotion/mobile flags, dpr cap (1 on low-power devices), tab-hidden and offscreen pause,
+// WebGL gate.
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Component, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Component, type ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { OrthographicCamera } from "three";
 import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
 import { useWebGLSupport } from "../../hooks/useWebGLSupport";
@@ -72,6 +73,33 @@ function useDocumentHidden(): boolean {
   return hidden;
 }
 
+/** False while the wrapper is scrolled fully out of view, so the render loop can stop. */
+function useOnScreen(ref: RefObject<HTMLElement>): boolean {
+  const [onScreen, setOnScreen] = useState(true);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((entries) => {
+      const e = entries[entries.length - 1];
+      if (e) setOnScreen(e.isIntersecting);
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [ref]);
+  return onScreen;
+}
+
+/**
+ * Low-power hint (few cores or little memory): render at dpr 1 instead of up to 1.75. Normal
+ * machines keep the full cap, so the pond looks the same there.
+ */
+function isLowPowerDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const cores = navigator.hardwareConcurrency;
+  const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  return (typeof cores === "number" && cores > 0 && cores <= 4) || (typeof memory === "number" && memory <= 4);
+}
+
 function useIsMobile(): boolean {
   const query = "(max-width: 767px)";
   const [mobile, setMobile] = useState(() => typeof window !== "undefined" && window.matchMedia(query).matches);
@@ -90,6 +118,8 @@ export default function PondScene() {
   const mobile = useIsMobile();
   const hidden = useDocumentHidden();
   const wrapRef = useRef<HTMLDivElement>(null);
+  const onScreen = useOnScreen(wrapRef);
+  const [lowPower] = useState(isLowPowerDevice);
 
   pond.reducedMotion = reducedMotion;
   pond.mobile = mobile;
@@ -153,9 +183,9 @@ export default function PondScene() {
         <Canvas
           className="!absolute inset-0"
           style={{ pointerEvents: "none" }}
-          dpr={[1, 1.75]}
+          dpr={lowPower ? 1 : [1, 1.75]}
           flat
-          frameloop={hidden ? "never" : "always"}
+          frameloop={hidden || !onScreen ? "never" : "always"}
           gl={{ antialias: true, alpha: false, powerPreference: "high-performance" }}
         >
           <CameraRig />

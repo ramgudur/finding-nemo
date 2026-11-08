@@ -3,7 +3,12 @@ import { useEffect, useState } from "react";
 function probe(): boolean {
   try {
     const canvas = document.createElement("canvas");
-    return !!(canvas.getContext("webgl2") || canvas.getContext("webgl") || canvas.getContext("experimental-webgl"));
+    const gl = (canvas.getContext("webgl2") || canvas.getContext("webgl") || canvas.getContext("experimental-webgl")) as
+      | WebGLRenderingContext
+      | null;
+    // Release the probe context right away; browsers cap live contexts and this one is never drawn to.
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+    return !!gl;
   } catch {
     return false;
   }
