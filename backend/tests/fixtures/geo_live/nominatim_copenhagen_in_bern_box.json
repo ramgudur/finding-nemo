@@ -1,0 +1,99 @@
+{
+ "_meta": {
+  "recorded": "live, Nominatim jsonv2, #219",
+  "q": "Copenhagen",
+  "viewbox_bbox": [
+   7.437,
+   46.941,
+   7.458,
+   46.955
+  ],
+  "note": "bounded search inside a Bern box: only a shop named after the city"
+ },
+ "results": [
+  {
+   "place_id": 92165641,
+   "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "way",
+   "osm_id": 379880514,
+   "lat": "46.9493123",
+   "lon": "7.4398677",
+   "category": "shop",
+   "type": "variety_store",
+   "place_rank": 30,
+   "importance": 7.734264133664481e-05,
+   "addresstype": "shop",
+   "name": "Flying Tiger Copenhagen",
+   "display_name": "Flying Tiger Copenhagen, 10, Bahnhofplatz, Rotes Quartier, Stadtteil I, Bern, Verwaltungskreis Bern-Mittelland, Verwaltungsregion Bern-Mittelland, Bern/Berne, 3011, Schweiz / Suisse / Svizzera / Svizra",
+   "boundingbox": [
+    "46.9492344",
+    "46.9493684",
+    "7.4397457",
+    "7.4399685"
+   ]
+  },
+  {
+   "place_id": 92316903,
+   "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "node",
+   "osm_id": 8698398706,
+   "lat": "46.9482017",
+   "lon": "7.4449753",
+   "category": "shop",
+   "type": "variety_store",
+   "place_rank": 30,
+   "importance": 7.734264133664481e-05,
+   "addresstype": "shop",
+   "name": "Flying Tiger Copenhagen",
+   "display_name": "Flying Tiger Copenhagen, Marktgasse, Gelbes Quartier, Stadtteil I, Bern, Verwaltungskreis Bern-Mittelland, Verwaltungsregion Bern-Mittelland, Bern/Berne, 3000, Schweiz / Suisse / Svizzera / Svizra",
+   "boundingbox": [
+    "46.9481517",
+    "46.9482517",
+    "7.4449253",
+    "7.4450253"
+   ]
+  },
+  {
+   "place_id": 92638111,
+   "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "node",
+   "osm_id": 10289457000,
+   "lat": "46.9480926",
+   "lon": "7.4493792",
+   "category": "shop",
+   "type": "clothes",
+   "place_rank": 30,
+   "importance": 7.734264133664481e-05,
+   "addresstype": "shop",
+   "name": "Little Copenhagen",
+   "display_name": "Little Copenhagen, Kramgasse, Altstadt, Gr\u00fcnes Quartier, Stadtteil I, Bern, Verwaltungskreis Bern-Mittelland, Verwaltungsregion Bern-Mittelland, Bern/Berne, 3000, Schweiz / Suisse / Svizzera / Svizra",
+   "boundingbox": [
+    "46.9480426",
+    "46.9481426",
+    "7.4493292",
+    "7.4494292"
+   ]
+  },
+  {
+   "place_id": 92637578,
+   "licence": "Data \u00a9 OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "node",
+   "osm_id": 3250824789,
+   "lat": "46.9482487",
+   "lon": "7.4428084",
+   "category": "shop",
+   "type": "jewelry",
+   "place_rank": 30,
+   "importance": 7.734264133664481e-05,
+   "addresstype": "shop",
+   "name": "Zigerli+Iff",
+   "display_name": "Zigerli+Iff, Spitalgass-Passage, Rotes Quartier, Stadtteil I, Bern, Verwaltungskreis Bern-Mittelland, Verwaltungsregion Bern-Mittelland, Bern/Berne, 3000, Schweiz / Suisse / Svizzera / Svizra",
+   "boundingbox": [
+    "46.9481987",
+    "46.9482987",
+    "7.4427584",
+    "7.4428584"
+   ]
+  }
+ ]
+}
