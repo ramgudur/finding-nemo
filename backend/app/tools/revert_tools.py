@@ -7,16 +7,24 @@ that wrote it, as ``actor="dev"``, and the new Change carries ``reverts=<id>``:
   Change per moved layer (the renormalized vector), so the whole vector is reverted together: every
   sibling (same t, actor, backtest_id and reason) must still hold its ``after`` value. A pin Change
   is reverted by pinning back (``pin_weight``).
-- trust: ``guards.apply_trust`` (so the +0.1 per 5 min increase cap holds).
+- trust: ``guards.apply_trust`` with ``dev_revert`` (no increase cap; trust stays in [0, 1]).
 - poi: ``retire_poi`` / ``update_poi``, or ``reactivate_poi`` to undo a retire.
 - connector: ``compiler_tools.set_connector`` (the path behind ``create_connector``, URL guard included).
 - spec_confirm / spec_edit: not revertible here (a pending spec is edited with another PUT /spec).
 
-What a dev revert does and does not skip: it needs no backtest and skips the evidence gates on
-weights (cold start, stiff authority evidence), because those exist to check a model's *proposal*
-and the dev is the human deciding (the ``pin_weight`` precedent). Every bound on how far and how fast
-state may move still holds: locked weights, pins, the flexible sum, the flexible +/-25% step, the
-stiff +/-10% per hour, trust in [0, 1] and the trust increase cap. Breaking one is a ``GuardError``.
+What a dev revert skips (lead decision on #193, rule 11: undoing a wrong agent change is one step):
+it needs no backtest, and it is exempt from the gates that exist to stop *agent drift*: the
+evidence gates on weights (cold start, stiff authority evidence), the stiff +/-10% per hour window
+and the trust increase cap (+0.1 per 5 min). The exemption is an explicit ``dev_revert`` flag on
+the guard path (``guards.check_weights`` / ``guards.apply_trust``), which refuses it unless
+``actor == "dev"``; no agent tool passes it. Hard bounds still hold: locked weights never move,
+pins are respected (unpin first), the flexible creation-time sum holds (the whole vector of one
+apply is reverted), trust stays in [0, 1].
+
+The flexible +/-25% per-step limit is kept. It is not covered by "the agent's step was within
+it": the bound is relative to the *current* weight, so undoing a decrease can exceed it. Example:
+an agent moves a flexible layer 0.5 -> 0.375 (-25%, allowed); reverting 0.375 -> 0.5 is +33% of
+0.375, more than 25%, so that revert is a 422 and the dev reverts in steps (or by a later change).
 
 Errors: ``RevertNotFound`` (404), ``RevertStale`` (409: the target no longer holds the Change's
 ``after``, so a revert would silently overwrite a later change), ``GuardError`` (422).
@@ -28,7 +36,6 @@ import math
 from typing import Any
 
 from app.core.models import Change, ConnectorConfig
-from app.engine import tiers
 from app.tools import compiler_tools, guards, poi_tools, scoring_tools
 from app.tools.context import ToolContext
 from app.tools.guards import GuardError
@@ -123,8 +130,8 @@ def _weight(ctx: ToolContext, change: Change) -> Change:
         if not _same(rt.weights[c.target], c.after["weight"]):
             raise _stale(c, {"weight": rt.weights[c.target]})
     proposed = {layer: float(c.before["weight"]) for layer, c in by_layer.items()}
-    # No backtest and no evidence gates for the dev; every movement bound still applies.
-    final = guards.check_weights(ctx, proposed, methods_with_data=tiers.MIN_METHODS_WITH_DATA, authority_evidence=True)
+    # dev_revert: no evidence gates, no stiff hourly window; locked, pins, flexible sum and step still hold.
+    final = guards.check_weights(ctx, proposed, methods_with_data=0, authority_evidence=False, dev_revert=True)
     moved = sorted(k for k in final if k not in proposed and abs(final[k] - rt.weights[k]) > _TOL)
     off = sorted(k for k, v in proposed.items() if abs(final[k] - v) > _TOL)
     if moved or off:
@@ -148,9 +155,15 @@ def _trust(ctx: ToolContext, change: Change) -> Change:
     now, _ = guards.current_trust(ctx, change.target)
     if not _same(now, change.after["trust"]):
         raise _stale(change, {"trust": now})
-    # apply_trust runs check_trust: lowering is free, raising stays within +0.1 per 5 min of Clock time.
+    # dev_revert: exempt from the +0.1 per 5 min increase cap; trust must still be in [0, 1].
     return guards.apply_trust(
-        ctx, change.target, float(change.before["trust"]), reason=_reason(change), backtest_id=None, reverts=change.id
+        ctx,
+        change.target,
+        float(change.before["trust"]),
+        reason=_reason(change),
+        backtest_id=None,
+        reverts=change.id,
+        dev_revert=True,
     )
 
 

@@ -184,12 +184,72 @@ def test_trust_revert_within_the_cap_and_back_again(env):
     assert back.reverts == new.id and guards.current_trust(ctx(), "u1")[0] == pytest.approx(0.95)
 
 
-def test_trust_revert_past_the_increase_cap_is_rejected(env):
+def test_trust_revert_is_one_step_past_the_increase_cap(env):
+    """Lead decision on #193: a dev revert is exempt from the +0.1 per 5 min rate cap (rule 11)."""
     _, _, _, ctx = env
     cid = _lower(ctx, "u2", 0.3)
-    with pytest.raises(GuardError, match="exceeds"):
-        revert_tools.revert_change(dev(ctx), cid)
-    assert guards.current_trust(ctx(), "u2")[0] == pytest.approx(0.3)
+    new = revert_tools.revert_change(dev(ctx), cid)
+    assert new.reverts == cid and new.actor == "dev"
+    assert guards.current_trust(ctx(), "u2")[0] == pytest.approx(1.0)
+
+
+def test_agents_cannot_use_the_dev_revert_exemption(env):
+    _, _, _, ctx = env
+    _lower(ctx, "u3", 0.3)
+    with pytest.raises(GuardError, match="dev-only"):
+        guards.apply_trust(ctx(), "u3", 1.0, reason="r", backtest_id=None, dev_revert=True)
+    with pytest.raises(GuardError, match="dev-only"):
+        guards.check_weights(
+            ctx(), {"docs.density": 0.9}, methods_with_data=3, authority_evidence=True, dev_revert=True
+        )
+    with pytest.raises(GuardError, match="exceeds"):  # the agent path still has the cap
+        guards.apply_trust(ctx(), "u3", 1.0, reason="r", backtest_id=None)
+    assert guards.current_trust(ctx(), "u3")[0] == pytest.approx(0.3)
+
+
+def test_stiff_revert_is_exempt_from_the_hourly_window(env):
+    clock, db, rt, ctx = env
+    # History whose hour-old reference (0.8) is far from the value being restored (0.5).
+    db.record_weight("rev-app", "docs.density", 0.8, "stiff", T0 - 7200, "agent", "earlier", None)
+    agent = ctx()
+    change = guards.apply_weights(agent, {"docs.density": 0.55}, reason="agent tuned docs", backtest_id="bt-s")[0]
+    clock.advance(10)
+    with pytest.raises(GuardError, match="out of bounds"):  # the agent path would refuse this move
+        guards.check_weights(agent, {"docs.density": 0.5}, methods_with_data=3, authority_evidence=True)
+    new = revert_tools.revert_change(dev(ctx), change.id)
+    assert new.reverts == change.id and rt.weights["docs.density"] == pytest.approx(0.5)
+
+
+def test_flexible_step_limit_still_binds_a_revert(env):
+    """Kept on purpose: +/-25% is relative to the current weight, so undoing a 25% cut can exceed it."""
+    _, _, rt, ctx = env
+    changes = agent_weights(ctx, {"crowd_a.density": 0.375, "crowd_b.density": 0.625})
+    assert rt.weights["crowd_a.density"] == pytest.approx(0.375)
+    snap = dict(rt.weights)
+    with pytest.raises(GuardError, match="out of bounds"):  # 0.375 -> 0.5 is +33% of 0.375
+        revert_tools.revert_change(dev(ctx), changes[0].id)
+    assert rt.weights == snap
+
+
+def test_locked_weight_never_moves_on_revert(env):
+    _, db, rt, ctx = env
+    # A forged Change claiming the locked layer moved: the revert still can't move it.
+    db.add_change(
+        Change(
+            id="forged",
+            app_id="rev-app",
+            kind="weight",
+            target="auth.density",
+            before={"weight": 0.9},
+            after={"weight": 1.0},
+            reason="forged",
+            actor="agent",
+            t=datetime.fromtimestamp(T0, UTC),
+        )
+    )
+    with pytest.raises(GuardError, match="locked"):
+        revert_tools.revert_change(dev(ctx), "forged")
+    assert rt.weights["auth.density"] == 1.0
 
 
 # -- POIs --------------------------------------------------------------------------
