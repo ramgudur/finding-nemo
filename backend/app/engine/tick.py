@@ -34,7 +34,8 @@ import numpy as np
 
 from app.core import clock as clock_mod
 from app.core.clock import Clock
-from app.core.models import AppSpec, Hotspot, Visibility
+from app.core.models import AppSpec, Candidate, Hotspot, Visibility
+from app.engine.candidates import registry as candidates
 from app.engine.combine import combine
 from app.engine.grid import Grid
 from app.engine.layer_cache import LayerCache
@@ -133,6 +134,7 @@ class TickResult:
     hotspots: list[Hotspot]
     extras: dict[str, dict[str, Any]]  # layer_id -> operator extras (point estimates, kind, ...)
     errors: list[str] = field(default_factory=list)
+    candidates: list[Candidate] = field(default_factory=list)  # code-made POI candidates (never labels)
     elapsed_ms: float = 0.0
 
 
@@ -167,6 +169,7 @@ class AppRuntime:
         self.cache = LayerCache(cache_ticks, self.weighted_ids, self.grid.shape)
         self.last: TickResult | None = None
         self._next_hotspot = 0
+        self.candidate_tracker = candidates.CandidateTracker()
 
     def input_lookback(self, input_id: str, default_s: float) -> float:
         """Read window for one input: the longest horizon among its layers (math.inf = all history)."""
@@ -396,6 +399,9 @@ def tick_app(
         rt.cache.push(now, normalized, ov)
 
     hotspots = find_hotspots(rt, score, normalized, w, override_layers=override_layers)
+    drafts, cand_errors = candidates.generate(extras, {li.layer_id: li.op for li in rt.layers}, grid)
+    errors.extend(cand_errors)
+    cands = rt.candidate_tracker.update(drafts, grid)
     result = TickResult(
         app_id=rt.spec.app_id,
         t=now,
@@ -408,6 +414,7 @@ def tick_app(
         extras=extras,
         errors=errors,
         elapsed_ms=(time.perf_counter() - started) * 1000.0,
+        candidates=cands,
     )
     rt.last = result
     return result
