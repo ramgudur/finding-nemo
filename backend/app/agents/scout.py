@@ -188,3 +188,15 @@ class ScoutRunner:
         if self._task is not None:
             await self._task
             self._task = None
+
+
+def article_extractor(db: Db, engine: TickEngine, llm: LlmRouter | None = None):
+    """Adapter for `connectors.engine.make_extract_locator`: (spec, input, title, text) ->
+    ArticleExtract | None, running `extract_article` in the app's context."""
+    router = llm or LlmRouter()
+
+    async def extract(spec, inp, title: str, text: str) -> ArticleExtract | None:
+        ctx = ToolContext(app_id=spec.app_id, db=db, engine=engine, agent="scout", clock=engine.clock)
+        return await extract_article(ctx, title, text, inp.meaning, router)
+
+    return extract
