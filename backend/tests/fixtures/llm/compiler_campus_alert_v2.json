@@ -1,0 +1,375 @@
+{
+  "scenario": "compiler_campus_alert_v2",
+  "description": "Live Compiler run (#137) on Campus Alert's raw inputs after the prompt and validate_spec fixes.",
+  "steps": [
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call-c962982c-0f86-40c3-a831-9627b34ce8dc",
+            "name": "list_operators",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call-b5597796-9cc0-45d1-8922-bb5e1c793ee7",
+            "name": "validate_spec",
+            "arguments": {
+              "spec": {
+                "app_id": "campus-alert",
+                "intent": "During an emergency on a large site, find where the danger is from panic-button phones, room alert buttons, police markers and local news, and tell people who are able to leave the safest way out.",
+                "grid": {
+                  "cell_m": 5,
+                  "bbox": {
+                    "min_lat": 32.777703,
+                    "min_lon": -96.762137,
+                    "max_lat": 32.781296,
+                    "max_lon": -96.757863
+                  }
+                },
+                "inputs": [
+                  {
+                    "id": "panic",
+                    "kind": "push",
+                    "shape": "track",
+                    "tier": "flexible",
+                    "visibility": "authority",
+                    "meaning": "When someone presses the panic button, their phone starts streaming its GPS position every couple of seconds. People who can, run away from the danger; people who can't, hide where they are.",
+                    "fields": [
+                      {
+                        "name": "press_id",
+                        "type": "string",
+                        "required": false,
+                        "description": "Identifies one press-and-stream session."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "flow_source",
+                        "weight": 0.8
+                      }
+                    ],
+                    "plausibility": {
+                      "max_speed_mps": 5.0,
+                      "jitter_m": 5.0,
+                      "flag_constant_speed": true,
+                      "flag_straight_line": true
+                    }
+                  },
+                  {
+                    "id": "room_button",
+                    "kind": "push",
+                    "shape": "fixed_point",
+                    "tier": "locked",
+                    "visibility": "authority",
+                    "meaning": "Staff pressed the alert button in their room: danger is confirmed at or near this room. The alert stays until it is cleared.",
+                    "fields": [
+                      {
+                        "name": "room",
+                        "type": "string",
+                        "required": true,
+                        "description": "Room identifier."
+                      },
+                      {
+                        "name": "cleared",
+                        "type": "boolean",
+                        "required": false,
+                        "description": "True clears an earlier alert from this room."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "override",
+                        "weight": 1.0,
+                        "radius_m": 30.0,
+                        "clear_field": "cleared"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "police_marker",
+                    "kind": "push",
+                    "shape": "fixed_point",
+                    "tier": "locked",
+                    "visibility": "authority",
+                    "meaning": "Police mark the threat's last known position. The marker stays until police clear it.",
+                    "fields": [
+                      {
+                        "name": "cleared",
+                        "type": "boolean",
+                        "required": false,
+                        "description": "True clears an earlier marker."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "override",
+                        "weight": 1.0,
+                        "radius_m": 50.0,
+                        "clear_field": "cleared"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "local_news",
+                    "kind": "pull",
+                    "shape": "document",
+                    "tier": "stiff",
+                    "visibility": "authority",
+                    "meaning": "Local news reports about incidents on or near the site.",
+                    "fields": [
+                      {
+                        "name": "doc_id",
+                        "type": "string",
+                        "required": false,
+                        "description": "Stable id of the article, so a re-polled article counts once."
+                      },
+                      {
+                        "name": "confidence",
+                        "type": "number",
+                        "required": false,
+                        "description": "How sure the extraction is that the article locates an incident, 0 to 1."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "event_points",
+                        "weight": 0.5,
+                        "confidence_field": "confidence",
+                        "doc_id_field": "doc_id"
+                      }
+                    ]
+                  }
+                ],
+                "verification": [
+                  {
+                    "method": "authority_confirmation",
+                    "priority": 1
+                  },
+                  {
+                    "method": "predictive_check",
+                    "priority": 2
+                  },
+                  {
+                    "method": "cross_input_agreement",
+                    "priority": 3
+                  }
+                ],
+                "outputs": {
+                  "layers": [
+                    {
+                      "id": "score",
+                      "visibility": "authority"
+                    }
+                  ],
+                  "poi_labels": {
+                    "mode": "on",
+                    "min_confidence": 0.6,
+                    "label_set": [
+                      {
+                        "label": "exit",
+                        "sensitive": false,
+                        "destination": true
+                      }
+                    ]
+                  }
+                },
+                "routing": {
+                  "enabled": true,
+                  "destination_points": []
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call-c663ba23-9738-4ec0-8b18-485e56ccb223",
+            "name": "finalize_app",
+            "arguments": {
+              "spec": {
+                "app_id": "campus-alert",
+                "intent": "During an emergency on a large site, find where the danger is from panic-button phones, room alert buttons, police markers and local news, and tell people who are able to leave the safest way out.",
+                "grid": {
+                  "cell_m": 5,
+                  "bbox": {
+                    "min_lat": 32.777703,
+                    "min_lon": -96.762137,
+                    "max_lat": 32.781296,
+                    "max_lon": -96.757863
+                  }
+                },
+                "inputs": [
+                  {
+                    "id": "panic",
+                    "kind": "push",
+                    "shape": "track",
+                    "tier": "flexible",
+                    "visibility": "authority",
+                    "meaning": "When someone presses the panic button, their phone starts streaming its GPS position every couple of seconds. People who can, run away from the danger; people who can't, hide where they are.",
+                    "fields": [
+                      {
+                        "name": "press_id",
+                        "type": "string",
+                        "required": false,
+                        "description": "Identifies one press-and-stream session."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "flow_source",
+                        "weight": 0.8
+                      }
+                    ],
+                    "plausibility": {
+                      "max_speed_mps": 5.0,
+                      "jitter_m": 5.0,
+                      "flag_constant_speed": true,
+                      "flag_straight_line": true
+                    }
+                  },
+                  {
+                    "id": "room_button",
+                    "kind": "push",
+                    "shape": "fixed_point",
+                    "tier": "locked",
+                    "visibility": "authority",
+                    "meaning": "Staff pressed the alert button in their room: danger is confirmed at or near this room. The alert stays until it is cleared.",
+                    "fields": [
+                      {
+                        "name": "room",
+                        "type": "string",
+                        "required": true,
+                        "description": "Room identifier."
+                      },
+                      {
+                        "name": "cleared",
+                        "type": "boolean",
+                        "required": false,
+                        "description": "True clears an earlier alert from this room."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "override",
+                        "weight": 1.0,
+                        "radius_m": 30.0,
+                        "clear_field": "cleared"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "police_marker",
+                    "kind": "push",
+                    "shape": "fixed_point",
+                    "tier": "locked",
+                    "visibility": "authority",
+                    "meaning": "Police mark the threat's last known position. The marker stays until police clear it.",
+                    "fields": [
+                      {
+                        "name": "cleared",
+                        "type": "boolean",
+                        "required": false,
+                        "description": "True clears an earlier marker."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "override",
+                        "weight": 1.0,
+                        "radius_m": 50.0,
+                        "clear_field": "cleared"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "local_news",
+                    "kind": "pull",
+                    "shape": "document",
+                    "tier": "stiff",
+                    "visibility": "authority",
+                    "meaning": "Local news reports about incidents on or near the site.",
+                    "fields": [
+                      {
+                        "name": "doc_id",
+                        "type": "string",
+                        "required": false,
+                        "description": "Stable id of the article, so a re-polled article counts once."
+                      },
+                      {
+                        "name": "confidence",
+                        "type": "number",
+                        "required": false,
+                        "description": "How sure the extraction is that the article locates an incident, 0 to 1."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "event_points",
+                        "weight": 0.5,
+                        "confidence_field": "confidence",
+                        "doc_id_field": "doc_id"
+                      }
+                    ]
+                  }
+                ],
+                "verification": [
+                  {
+                    "method": "authority_confirmation",
+                    "priority": 1
+                  },
+                  {
+                    "method": "predictive_check",
+                    "priority": 2
+                  },
+                  {
+                    "method": "cross_input_agreement",
+                    "priority": 3
+                  }
+                ],
+                "outputs": {
+                  "layers": [
+                    {
+                      "id": "score",
+                      "visibility": "authority"
+                    }
+                  ],
+                  "poi_labels": {
+                    "mode": "on",
+                    "min_confidence": 0.6,
+                    "label_set": [
+                      {
+                        "label": "exit",
+                        "sensitive": false,
+                        "destination": true
+                      }
+                    ]
+                  }
+                },
+                "routing": {
+                  "enabled": true,
+                  "destination_points": []
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "content": "The proposed spec is complete and validated, now set to **pending_confirmation** awaiting your review.\n\nSummary: The `campus-alert` app uses four inputs \u2014 panic phone tracks (flexible, `flow_source` to find where people are fleeing from), room alert buttons (locked, `override`), police markers (locked, `override`), and local news documents (stiff, `event_points`). All layers are authority-only since the raw data is sensitive. Verification starts with `authority_confirmation`, then `predictive_check` and `cross_input_agreement`. Because the intent directs people to a safe way out, POI labels are on with an `exit` destination label, and routing is enabled. Confirm when you're ready to activate.",
+        "finish_reason": "stop"
+      }
+    }
+  ]
+}
