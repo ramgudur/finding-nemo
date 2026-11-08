@@ -1,0 +1,89 @@
+[
+ {
+  "latitude": 39.9909,
+  "longitude": -105.40161,
+  "generationtime_ms": 0.05173683166503906,
+  "utc_offset_seconds": 0,
+  "timezone": "GMT",
+  "timezone_abbreviation": "GMT",
+  "elevation": 2266.0,
+  "current_units": {
+   "time": "iso8601",
+   "interval": "seconds",
+   "wind_speed_10m": "m/s",
+   "wind_direction_10m": "°"
+  },
+  "current": {
+   "time": "2026-11-08T16:00",
+   "interval": 900,
+   "wind_speed_10m": 0.81,
+   "wind_direction_10m": 258
+  }
+ },
+ {
+  "latitude": 39.988834,
+  "longitude": -105.01282,
+  "generationtime_ms": 0.031113624572753906,
+  "utc_offset_seconds": 0,
+  "timezone": "GMT",
+  "timezone_abbreviation": "GMT",
+  "elevation": 1592.0,
+  "location_id": 1,
+  "current_units": {
+   "time": "iso8601",
+   "interval": "seconds",
+   "wind_speed_10m": "m/s",
+   "wind_direction_10m": "°"
+  },
+  "current": {
+   "time": "2026-11-08T16:00",
+   "interval": 900,
+   "wind_speed_10m": 2.12,
+   "wind_direction_10m": 310
+  }
+ },
+ {
+  "latitude": 40.396214,
+  "longitude": -105.411865,
+  "generationtime_ms": 0.040650367736816406,
+  "utc_offset_seconds": 0,
+  "timezone": "GMT",
+  "timezone_abbreviation": "GMT",
+  "elevation": 2241.0,
+  "location_id": 2,
+  "current_units": {
+   "time": "iso8601",
+   "interval": "seconds",
+   "wind_speed_10m": "m/s",
+   "wind_direction_10m": "°"
+  },
+  "current": {
+   "time": "2026-11-08T16:00",
+   "interval": 900,
+   "wind_speed_10m": 1.91,
+   "wind_direction_10m": 259
+  }
+ },
+ {
+  "latitude": 40.396378,
+  "longitude": -104.985535,
+  "generationtime_ms": 0.030040740966796875,
+  "utc_offset_seconds": 0,
+  "timezone": "GMT",
+  "timezone_abbreviation": "GMT",
+  "elevation": 1495.0,
+  "location_id": 3,
+  "current_units": {
+   "time": "iso8601",
+   "interval": "seconds",
+   "wind_speed_10m": "m/s",
+   "wind_direction_10m": "°"
+  },
+  "current": {
+   "time": "2026-11-08T16:00",
+   "interval": 900,
+   "wind_speed_10m": 1.39,
+   "wind_direction_10m": 286
+  }
+ }
+]

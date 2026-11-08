@@ -146,13 +146,29 @@ def make_extract_locator(
     return locate
 
 
+def area_points(conn: ConnectorConfig, bbox: BBox | None) -> list[json_api.AreaPoint] | None:
+    """The points a `json_api` preset with `area_grid` samples across the app's bbox, or None
+    (no such preset, or no bbox known: the config's own lat/lon are then the one point)."""
+    if conn.type != "json_api" or conn.preset is None or bbox is None:
+        return None
+    grid = json_api.area_grid(json_api.resolve_preset(conn.preset, conn.config))
+    if grid is None:
+        return None
+    return json_api.area_points(bbox.min_lat, bbox.min_lon, bbox.max_lat, bbox.max_lon, grid)
+
+
 def _json_api_events(
-    raw_json: dict[str, Any], preset: str | None, config: dict[str, Any], now: float
+    raw_json: Any, preset: str | None, config: dict[str, Any], now: float, points: list[json_api.AreaPoint] | None
 ) -> list[dict[str, Any]]:
     spec = json_api.resolve_preset(preset, config)
-    event = json_api.extract_fields(raw_json, spec, config)
-    event["ts"] = datetime.fromtimestamp(now, tz=UTC)
-    return [event]
+    if points is not None:
+        events = json_api.extract_area_events(raw_json, spec, points)
+    else:
+        events = [json_api.extract_fields(raw_json, spec, config)]
+    ts = datetime.fromtimestamp(now, tz=UTC)
+    for event in events:
+        event["ts"] = ts
+    return events
 
 
 JSON_TYPES = ("json_api", "json_list")  # connector types whose response is read as JSON
@@ -172,11 +188,12 @@ def connector_url(conn: ConnectorConfig) -> str | None:
     return preset_url or conn.url or _list_url(conn)
 
 
-def _request(conn: ConnectorConfig) -> str:
+def _request(conn: ConnectorConfig, bbox: BBox | None = None) -> str:
     """The URL this connector fetches, with a preset's rendered query merged into whatever query
     the URL already has: a custom URL's own `?a=b` is kept, never replaced by an empty params
     dict. The connector type decides how to read the response, not what's in it (rule 10:
-    config, never code, drives the request itself)."""
+    config, never code, drives the request itself). A preset with `area_grid` asks for all of
+    its points across `bbox` in this one request."""
     spec = json_api.resolve_preset(conn.preset, conn.config) if conn.type == "json_api" else {}
     url = spec.get("url") or conn.url or _list_url(conn)
     if url is None:
@@ -185,7 +202,11 @@ def _request(conn: ConnectorConfig) -> str:
         json_api.check_custom_config(conn.config)  # data-only read config: refuse a bad one before fetching
     if conn.type == "json_list":
         json_list.check_config(conn.config)  # the same: an item mapping, data only (rule 10)
-    params = json_api.render_query(spec.get("query", {}), conn.config) if conn.type == "json_api" else {}
+    config = conn.config
+    points = area_points(conn, bbox)
+    if points is not None:
+        config = json_api.area_config(config, json_api.area_grid(spec) or {}, points)
+    params = json_api.render_query(spec.get("query", {}), config) if conn.type == "json_api" else {}
     return str(httpx.URL(url).copy_merge_params(params)) if params else url
 
 
@@ -194,8 +215,8 @@ def _headers() -> dict[str, str]:
     return {"User-Agent": get_settings().nominatim_user_agent or DEFAULT_USER_AGENT}
 
 
-async def fetch_raw(client: httpx.AsyncClient, conn: ConnectorConfig) -> Any:
-    url = _request(conn)
+async def fetch_raw(client: httpx.AsyncClient, conn: ConnectorConfig, bbox: BBox | None = None) -> Any:
+    url = _request(conn, bbox)
     url_guard.check_url(url)  # every poll: an agent may have chosen this URL
     headers = _headers()
     resp = await client.get(url, headers=headers, timeout=FETCH_TIMEOUT_S)  # redirects followed by hand below
@@ -208,10 +229,10 @@ async def fetch_raw(client: httpx.AsyncClient, conn: ConnectorConfig) -> Any:
     return resp.json() if conn.type in JSON_TYPES else resp.text
 
 
-def fetch_raw_sync(client: httpx.Client, conn: ConnectorConfig) -> Any:
+def fetch_raw_sync(client: httpx.Client, conn: ConnectorConfig, bbox: BBox | None = None) -> Any:
     """For a one-shot check (`tools.compiler_tools.test_connector`) outside the async
     poll loop -- tool handlers are synchronous (`tools/registry.py`)."""
-    url = _request(conn)
+    url = _request(conn, bbox)
     url_guard.check_url(url)
     headers = _headers()
     resp = client.get(url, headers=headers, timeout=FETCH_TIMEOUT_S)  # redirects followed by hand below
@@ -231,12 +252,13 @@ def events_from_raw(
     bbox: BBox | None = None,
     declared: list[InputField] | None = None,
 ) -> list[dict[str, Any]]:
-    """Event bodies from one fetched response. `bbox` and `declared` are read by `json_list` only
-    (items outside the area dropped, values coerced to their declared types; `json_list.parse`)."""
+    """Event bodies from one fetched response. `bbox` and `declared` are read by `json_list` (items
+    outside the area dropped, values coerced to their declared types; `json_list.parse`); `bbox`
+    also gives a `json_api` preset with `area_grid` its points (pass the bbox the fetch used)."""
     if conn.type == "rss":
         return _rss_events(raw, conn.config, now)
     if conn.type == "json_api":
-        return _json_api_events(raw, conn.preset, conn.config, now)
+        return _json_api_events(raw, conn.preset, conn.config, now, area_points(conn, bbox))
     if conn.type == "json_list":
         return json_list.parse(raw, conn.config, now, bbox=bbox, declared=declared).events
     raise ValueError(f"connector type {conn.type!r} has no fetcher")
@@ -333,7 +355,7 @@ def check_connector_sync(
     """Fetch once and parse, without writing anything -- what `test_connector` needs to
     honestly say it saw at least one item. With `bbox`, a `json_list` counts only items inside the
     area, and says why when none are."""
-    raw = fetch_raw_sync(client, conn)
+    raw = fetch_raw_sync(client, conn, bbox)
     if conn.type == "rss":
         # Count every parsed item, located or not: the live poller places items without a point via
         # the locator (extract + geocode), so a normal news feed with no coordinates is a working source.
@@ -345,7 +367,7 @@ def check_connector_sync(
         if not parsed.events and parsed.unmapped:
             raise ValueError(f"no item could be mapped ({parsed.unmapped} of {parsed.items}): {parsed.first_error}")
         return parsed.events
-    return events_from_raw(conn, raw, now)
+    return events_from_raw(conn, raw, now, bbox=bbox)
 
 
 async def poll_once(
@@ -361,14 +383,17 @@ async def poll_once(
     assert inp.connector is not None  # noqa: S101 - callers only pass pull inputs with a connector
     outside = 0
     try:
-        raw = await fetch_raw(client, inp.connector)
+        if spec is None and inp.connector.type == "json_api":
+            spec = db.get_app(app_id)  # its bbox: a preset with `area_grid` samples across it
+        bbox = spec.grid.bbox if spec is not None else None
+        raw = await fetch_raw(client, inp.connector, bbox)
         if locate is not None and spec is not None and inp.connector.type == "rss":
             raw_events = await _located_rss_events(db, spec, inp, raw, now, locate, attempted)
         elif inp.connector.type == "json_list":
             raw_events, parsed = _list_poll(db, app_id, inp, raw, now, spec if spec is not None else db.get_app(app_id))
             outside = parsed.outside
         else:
-            raw_events = events_from_raw(inp.connector, raw, now)
+            raw_events = events_from_raw(inp.connector, raw, now, bbox=bbox)
     except Exception as e:  # noqa: BLE001 - a bad feed must not crash the poll loop
         return PollResult(app_id, inp.id, ok=False, error=describe_error(e))
     result = write_events(db, app_id, inp, raw_events, now)

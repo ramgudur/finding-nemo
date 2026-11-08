@@ -17,7 +17,9 @@ Both are validated as data (`check_custom_config`), never evaluated.
 
 from __future__ import annotations
 
+import math
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from app.connectors.presets import PRESETS
@@ -26,6 +28,8 @@ FIELD_NAME = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")  # the same pattern as `Inp
 RESERVED = frozenset({"user_id", "lat", "lon", "ts"})  # set by the connector itself, never a field
 MAX_CUSTOM_FIELDS = 32
 MAX_PATH_CHARS = 200
+MAX_AREA_POINTS = 100  # hard ceiling on a preset's `area_grid.max_points` (one request per poll)
+_M_PER_DEG = 6_371_000.0 * math.pi / 180.0
 
 
 def resolve_preset(preset: str | None, config: dict[str, Any]) -> dict[str, Any]:
@@ -137,3 +141,75 @@ def extract_fields(data: Any, spec: dict[str, Any], config: dict[str, Any]) -> d
         event["lat"] = config["latitude"]
         event["lon"] = config["longitude"]
     return event
+
+
+# -- area grid (a preset's optional `area_grid`, data only) ----------------------------
+
+
+@dataclass(frozen=True)
+class AreaPoint:
+    row: int  # 0 = southmost
+    col: int  # 0 = westmost
+    lat: float
+    lon: float
+
+    @property
+    def point_id(self) -> str:
+        """A stable id per point, so the field operator keeps one latest reading per point."""
+        return f"grid-{self.row}-{self.col}"
+
+
+def area_grid(spec: dict[str, Any]) -> dict[str, Any] | None:
+    """A preset's `area_grid` declaration, or None (a custom source never has one)."""
+    grid = spec.get("area_grid")
+    return grid if isinstance(grid, dict) else None
+
+
+def area_points(
+    min_lat: float, min_lon: float, max_lat: float, max_lon: float, grid: dict[str, Any]
+) -> list[AreaPoint]:
+    """Cell centres of an n x n split of the bbox, row-major from the south-west. n is the largest
+    value with n^2 <= max_points (capped at MAX_AREA_POINTS) and spacing >= min_spacing_m along both
+    axes; a small area gets n = 1, its centre."""
+    max_points = max(1, min(int(grid.get("max_points", 1)), MAX_AREA_POINTS))
+    min_spacing_m = max(float(grid.get("min_spacing_m", 0.0)), 0.0)
+    height_m = max(max_lat - min_lat, 0.0) * _M_PER_DEG
+    width_m = max(max_lon - min_lon, 0.0) * _M_PER_DEG * math.cos(math.radians((min_lat + max_lat) / 2))
+    n = math.isqrt(max_points)
+    if min_spacing_m > 0:
+        n = min(n, int(min(height_m, width_m) // min_spacing_m))
+    n = max(n, 1)
+    dlat, dlon = (max_lat - min_lat) / n, (max_lon - min_lon) / n
+    return [
+        AreaPoint(r, c, round(min_lat + (r + 0.5) * dlat, 5), round(min_lon + (c + 0.5) * dlon, 5))
+        for r in range(n)
+        for c in range(n)
+    ]
+
+
+def area_config(config: dict[str, Any], grid: dict[str, Any], points: list[AreaPoint]) -> dict[str, Any]:
+    """`config` with the grid's lat/lon placeholders filled by the points (comma-joined lists, as
+    the preset declares the API accepts). One point stays a plain number."""
+    lat_key, lon_key = str(grid.get("lat_key", "latitude")), str(grid.get("lon_key", "longitude"))
+    join = str(grid.get("multi_param_join", ","))
+    out = dict(config)
+    if len(points) == 1:
+        out[lat_key], out[lon_key] = points[0].lat, points[0].lon
+    else:
+        out[lat_key] = join.join(f"{p.lat:.5f}" for p in points)
+        out[lon_key] = join.join(f"{p.lon:.5f}" for p in points)
+    return out
+
+
+def extract_area_events(data: Any, spec: dict[str, Any], points: list[AreaPoint]) -> list[dict[str, Any]]:
+    """One event per point from a multi-point response: a list with one response per point, in
+    order (a single point may come back as the bare object). Each event sits at its own point."""
+    items = data if isinstance(data, list) else [data]
+    if len(items) != len(points):
+        raise ValueError(f"expected {len(points)} point response(s), got {len(items)}")
+    events = []
+    for item, p in zip(items, points, strict=True):
+        event = extract_fields(item, spec, {})
+        event.update(user_id=p.point_id, lat=p.lat, lon=p.lon)
+        events.append(event)
+    return events
