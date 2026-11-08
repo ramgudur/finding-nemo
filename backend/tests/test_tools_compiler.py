@@ -119,6 +119,104 @@ def test_validate_spec_rejects_operator_shape_mismatch(ctx):
     assert "doesn't accept shape" in r["result"]["errors"][0]
 
 
+def test_validate_spec_rejects_a_typo_in_operator_params(ctx):
+    spec = {
+        **_draft().model_dump(mode="json"),
+        "inputs": [
+            {
+                "id": "pings",
+                "kind": "push",
+                "shape": "point",
+                "tier": "flexible",
+                "meaning": "a ping",
+                "operators": [{"op": "density", "weight": 1.0, "half_lfie_s": 60}],  # typo: half_life_s
+            }
+        ],
+    }
+    r = _call(ctx, "validate_spec", {"spec": spec})
+    assert r["result"]["valid"] is False
+    assert "pings" in r["result"]["errors"][0] and "params invalid" in r["result"]["errors"][0]
+
+
+def test_validate_spec_rejects_public_score_with_a_private_weighted_layer(ctx):
+    spec = {
+        **_draft().model_dump(mode="json"),
+        "inputs": [
+            {
+                "id": "pings",
+                "kind": "push",
+                "shape": "point",
+                "tier": "flexible",
+                "meaning": "a ping",
+                "operators": [{"op": "density", "weight": 1.0}],
+            }
+        ],
+        "outputs": {"layers": [{"id": "score", "visibility": "public"}]},  # pings.density stays authority
+    }
+    r = _call(ctx, "validate_spec", {"spec": spec})
+    assert r["result"]["valid"] is False
+    assert "pings.density" in r["result"]["errors"][0]
+
+
+def test_validate_spec_accepts_public_score_when_every_weighted_layer_is_public(ctx):
+    spec = {
+        **_draft().model_dump(mode="json"),
+        "inputs": [
+            {
+                "id": "pings",
+                "kind": "push",
+                "shape": "point",
+                "tier": "flexible",
+                "meaning": "a ping",
+                "operators": [{"op": "density", "weight": 1.0}],
+                "plausibility": {"max_speed_mps": 12},
+            }
+        ],
+        "outputs": {
+            "layers": [
+                {"id": "score", "visibility": "public"},
+                {"id": "pings.density", "visibility": "public"},
+            ]
+        },
+    }
+    r = _call(ctx, "validate_spec", {"spec": spec})
+    assert r["result"]["valid"] is True
+
+
+def test_validate_spec_public_score_ignores_override_layers(ctx):
+    # an override layer never enters the weighted sum, so it shouldn't block a public score
+    spec = {
+        **_draft().model_dump(mode="json"),
+        "inputs": [
+            {
+                "id": "pings",
+                "kind": "push",
+                "shape": "point",
+                "tier": "flexible",
+                "meaning": "a ping",
+                "operators": [{"op": "density", "weight": 1.0}],
+                "plausibility": {"max_speed_mps": 12},
+            },
+            {
+                "id": "marker",
+                "kind": "push",
+                "shape": "fixed_point",
+                "tier": "locked",
+                "meaning": "an authority marker",
+                "operators": [{"op": "override", "weight": 1.0, "radius_m": 10}],
+            },
+        ],
+        "outputs": {
+            "layers": [
+                {"id": "score", "visibility": "public"},
+                {"id": "pings.density", "visibility": "public"},
+            ]
+        },
+    }
+    r = _call(ctx, "validate_spec", {"spec": spec})
+    assert r["result"]["valid"] is True
+
+
 def test_validate_spec_rejects_proposing_active_status(ctx):
     spec = {**_draft().model_dump(mode="json"), "status": "active"}
     r = _call(ctx, "validate_spec", {"spec": spec})

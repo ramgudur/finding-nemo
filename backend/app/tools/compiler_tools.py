@@ -119,6 +119,16 @@ def _spec_warnings(spec: AppSpec) -> list[str]:
     return warnings
 
 
+def _weighted_layer_ids(spec: AppSpec) -> list[str]:
+    """Every layer_id whose operator is registered and isn't an override mask."""
+    return [
+        op.layer_id
+        for inp in spec.inputs
+        for op in inp.operators
+        if op.op in registry.OPERATORS and registry.get(op.op).role != "override"
+    ]
+
+
 def _spec_errors(spec: AppSpec) -> list[str]:
     errors: list[str] = []
     if spec.status == "active":
@@ -130,6 +140,18 @@ def _spec_errors(spec: AppSpec) -> list[str]:
                 continue
             if inp.shape not in registry.get(op.op).shapes:
                 errors.append(f"input {inp.id!r}: operator {op.op!r} doesn't accept shape {inp.shape!r}")
+            try:
+                registry.parse_params(op.op, op.params())
+            except Exception as e:  # noqa: BLE001 - reported to the agent, not raised
+                errors.append(f"input {inp.id!r}: operator {op.op!r} params invalid: {e}")
+    public_ids = {ol.id for ol in spec.outputs.layers if ol.visibility == "public"}
+    if "score" in public_ids:
+        private_weighted = [lid for lid in _weighted_layer_ids(spec) if lid not in public_ids]
+        if private_weighted:
+            errors.append(
+                f"'score' is public but weighted layer(s) {private_weighted} are not; "
+                "a public score would leak their values"
+            )
     return errors
 
 
