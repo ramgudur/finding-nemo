@@ -8,7 +8,7 @@
 // Recenter button) moves it. Phones stack the page; from 768 px up the map fills the screen and
 // the instruction card floats over it as a sheet on the left (the camera pads for it).
 import L from "leaflet";
-import { ChevronDown, ChevronUp, Crosshair, Info, LocateFixed, MoveUpRight, Navigation, Phone, TriangleAlert } from "lucide-react";
+import { ChevronUp, Crosshair, Info, LocateFixed, MoveUpRight, Navigation, Phone, TriangleAlert } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../api/client";
 import { openStream } from "../api/stream";
@@ -668,24 +668,17 @@ export function EndUser({ appId }: { appId: string }) {
       }`}
     >
       {collapsed && (
-        <div
-          ref={sheetRef}
-          className="order-1 flex items-center gap-3 self-start rounded-2xl bg-cream/95 py-2 pl-4 pr-2 shadow-[0_4px_18px_rgba(31,52,64,0.2)] backdrop-blur-sm md:absolute md:left-4 md:top-4 md:z-[1100] md:max-w-[calc(100%-140px)]"
-        >
-          <h1 className="m-0 truncate font-display text-[20px] font-semibold leading-tight text-slate">{title}</h1>
-          <span className="inline-flex shrink-0 items-center gap-1.5 text-[14px] font-semibold text-slate">
-            <span aria-hidden className={`inline-block h-2.5 w-2.5 rounded-full ${status.dot}`} />
-            {status.label}
-          </span>
+        <div ref={sheetRef} className="order-1 self-start md:absolute md:left-4 md:top-4 md:z-[1100]">
+          <h1 className="sr-only">{title}</h1>
           <button
             type="button"
             onClick={() => setUserCollapsed(false)}
             aria-expanded={false}
-            aria-label="Show details about this alert"
-            className="inline-flex min-h-[40px] shrink-0 items-center gap-1 rounded-xl px-2.5 text-[15px] font-bold text-primary transition-transform duration-150 ease-out active:scale-[0.97]"
+            aria-label={`About ${title}: show details`}
+            title="Details"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-cream/95 text-primary shadow-[0_4px_18px_rgba(31,52,64,0.2)] backdrop-blur-sm transition-transform duration-150 ease-out active:scale-[0.97]"
           >
-            Details
-            <ChevronDown aria-hidden className="h-[18px] w-[18px]" strokeWidth={2.25} />
+            <Info aria-hidden className="h-5 w-5" strokeWidth={2.25} />
           </button>
         </div>
       )}
