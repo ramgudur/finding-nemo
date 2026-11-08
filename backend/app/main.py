@@ -32,6 +32,7 @@ from app.connectors.engine import ConnectorEngine, make_extract_locator
 from app.core.config import get_settings
 from app.core.db import Db
 from app.engine.operators.base import Events
+from app.engine.retention import RetentionRunner
 from app.engine.tick import TickEngine, empty_events
 from app.tools.geo_tools import geocode_place
 
@@ -65,6 +66,7 @@ def create_app(
     connector_engine: ConnectorEngine | None = None,
     scout_runner: ScoutRunner | None = None,
     compile_gate: CompileGate | None = None,
+    retention_runner: RetentionRunner | None = None,
     autostart_engine: bool = True,
 ) -> FastAPI:
     db = db if db is not None else Db(get_settings().sqlite_path)
@@ -86,6 +88,15 @@ def create_app(
         else ConnectorEngine(db, locate=make_extract_locator(article_extractor(db, engine, llm=llm), geocode_place))
     )
     scout_runner = scout_runner if scout_runner is not None else ScoutRunner(db, engine, llm=llm)
+    if retention_runner is None:
+        settings = get_settings()
+        retention_runner = RetentionRunner(
+            db,
+            engine,
+            interval_s=settings.retention_interval_s,
+            event_floor_s=settings.event_retention_s,
+            trace_keep=settings.trace_keep_per_app,
+        )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -101,10 +112,18 @@ def create_app(
             poi_labeler_scheduler.start()
             connector_engine.start()
             scout_runner.start()
+            retention_runner.start()  # data retention (#213): a background pass, never in the tick
         yield
         if autostart_engine:
             # Reverse order; one loop failing to stop must not leave the others running.
-            for loop_ in (scout_runner, connector_engine, poi_labeler_scheduler, critic_scheduler, engine):
+            for loop_ in (
+                retention_runner,
+                scout_runner,
+                connector_engine,
+                poi_labeler_scheduler,
+                critic_scheduler,
+                engine,
+            ):
                 try:
                     await loop_.stop()
                 except Exception:  # noqa: BLE001
@@ -124,6 +143,7 @@ def create_app(
         compile_gate if compile_gate is not None else CompileGate(get_settings().compile_min_gap_s)
     )
     fastapi_app.state.instruction_trace_dedup = InstructionTraceDedup()  # per app instance (#169)
+    fastapi_app.state.retention_runner = retention_runner
     fastapi_app.include_router(apps_api.router)
     fastapi_app.include_router(ingest_api.router)
     fastapi_app.include_router(outputs_api.router)

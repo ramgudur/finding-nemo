@@ -287,6 +287,15 @@ class Db:
 
     # -- connectors ---------------------------------------------------------------
 
+    def prune_events(self, app_id: str, input_id: str, before_ts: float) -> int:
+        """Delete one input's events with ``ts < before_ts`` (data retention, #213). Returns rows deleted."""
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM events WHERE app_id = ? AND input_id = ? AND ts < ?", (app_id, input_id, before_ts)
+            )
+            self._conn.commit()
+            return cur.rowcount
+
     def upsert_connector(self, app_id: str, input_id: str, config: ConnectorConfig) -> None:
         with self._lock:
             self._conn.execute(
@@ -447,6 +456,23 @@ class Db:
             params.append(limit)
         rows = self._query(sql, params)
         return [TraceEntry.model_validate_json(r["entry_json"]) for r in rows]
+
+    def prune_trace(self, app_id: str, keep_newest: int, keep_since: float | None = None) -> int:
+        """Delete an app's oldest trace entries, keeping at least the newest ``keep_newest`` and every
+        entry with ``t >= keep_since`` (data retention, #213). Returns rows deleted."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT t FROM trace WHERE app_id = ? ORDER BY t DESC, row_id DESC LIMIT 1 OFFSET ?",
+                (app_id, max(int(keep_newest), 1) - 1),
+            ).fetchone()
+            if row is None:
+                return 0  # no more than keep_newest entries
+            cut = float(row[0])
+            if keep_since is not None:
+                cut = min(cut, keep_since)
+            cur = self._conn.execute("DELETE FROM trace WHERE app_id = ? AND t < ?", (app_id, cut))
+            self._conn.commit()
+            return cur.rowcount
 
     # -- changes --------------------------------------------------------------------
 

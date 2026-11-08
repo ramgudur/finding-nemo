@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     nominatim_user_agent: str = ""
 
     sqlite_path: str = "./data/app.db"
+    # Data retention (#213), all optional. Events of push inputs are kept for at least
+    # event_retention_s (more when an operator's horizon needs it); trace keeps the newest
+    # trace_keep_per_app entries per app; cleanup runs every retention_interval_s (0 = off).
+    event_retention_s: float = 86_400.0
+    trace_keep_per_app: int = 20_000
+    retention_interval_s: float = 300.0
     demo_mode: bool = False
 
     # Per-app gap between compiles (seconds; 0 disables the gap, one-in-flight still holds). Optional.
