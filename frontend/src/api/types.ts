@@ -9,7 +9,7 @@ export type InputShape = "point" | "track" | "fixed_point" | "field" | "document
 export type AppStatus = "draft" | "pending_confirmation" | "active";
 export type VerificationMethod = "authority_confirmation" | "predictive_check" | "cross_input_agreement";
 export type FieldType = "number" | "integer" | "string" | "boolean";
-export type ConnectorType = "rss" | "json_api" | "open_meteo";
+export type ConnectorType = "rss" | "json_api";
 export type PoiLabelMode = "auto" | "on" | "off";
 export type PoiStatus = "active" | "retired";
 export type AgentName = "compiler" | "scout" | "critic" | "poi_labeler" | "message_guard";
@@ -54,6 +54,15 @@ export interface ConnectorConfig {
   url?: string | null;
   poll_s?: number; // default 300
   config?: Record<string, unknown>;
+  preset?: string | null; // a ready-made config under connectors/presets/
+}
+
+/** Per-input bounds for spoof checks; omitted values use the engine defaults. */
+export interface Plausibility {
+  max_speed_mps?: number | null;
+  jitter_m?: number | null;
+  flag_constant_speed?: boolean | null;
+  flag_straight_line?: boolean | null;
 }
 
 export interface InputSpec {
@@ -66,6 +75,7 @@ export interface InputSpec {
   fields?: InputField[];
   connector?: ConnectorConfig | null;
   operators?: OperatorConfig[];
+  plausibility?: Plausibility | null;
 }
 
 export interface VerificationSpec {
@@ -93,6 +103,7 @@ export interface PoiLabelConfig {
 export interface Outputs {
   layers?: OutputLayer[];
   poi_labels?: PoiLabelConfig;
+  hotspot_threshold?: number; // default 0.5, in (0, 1]
 }
 
 export interface DestinationPoint {
@@ -106,7 +117,7 @@ export interface RoutingSpec {
   destination_points?: DestinationPoint[];
   impassable_score?: number; // default 0.8
   alpha?: number; // default 4.0
-  fallback_text?: string; // <= 360 chars
+  fallback_text?: string; // <= 360 chars; default "No route available."
   rephrase?: boolean; // default false
 }
 
