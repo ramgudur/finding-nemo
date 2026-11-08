@@ -103,11 +103,14 @@ def _top_threshold(score: np.ndarray, top_frac: float) -> float:
     return float(np.quantile(score, 1.0 - top_frac))
 
 
-def _peak_cell(grid_values: np.ndarray) -> tuple[int, int] | None:
-    if not grid_values.any():
+def _peak_dist_cells(grid_values: np.ndarray, r: int, c: int) -> float | None:
+    """Distance (cells) from (r, c) to the nearest peak cell. A clamped score can have a plateau
+    of equal maxima, so every cell at the max counts as the peak, not just the first one."""
+    top = grid_values.max()
+    if top <= 0:
         return None
-    i, j = np.unravel_index(np.argmax(grid_values), grid_values.shape)
-    return int(i), int(j)
+    pr, pc = np.nonzero(grid_values >= top - 1e-12)
+    return float(np.min(np.hypot(pr - r, pc - c)))
 
 
 # -- predictive_check -----------------------------------------------------------
@@ -162,8 +165,8 @@ def authority_confirmation(window: CacheWindow, weights: np.ndarray, ctx: Verifi
         # share of the lookback during which the score peak already sat within radius_m of the arrival
         near = 0
         for k in before:
-            pk = _peak_cell(scores[k])
-            near += pk is not None and np.hypot(pk[0] - r, pk[1] - c) <= radius_cells
+            d = _peak_dist_cells(scores[k], r, c)
+            near += d is not None and d <= radius_cells
         expected = max(1.0, p.lookback_s / _tick_s(window.t))
         per_event.append(min(1.0, near / expected))
 
@@ -171,10 +174,10 @@ def authority_confirmation(window: CacheWindow, weights: np.ndarray, ctx: Verifi
         for li, lid in enumerate(window.layer_ids):
             lead, dist = None, None
             for k in before:
-                pk = _peak_cell(window.layers[k, li])
-                if pk is None:
+                dc = _peak_dist_cells(window.layers[k, li], r, c)
+                if dc is None:
                     continue
-                d = float(np.hypot(pk[0] - r, pk[1] - c)) * ctx.cell_m
+                d = dc * ctx.cell_m
                 if lead is None and d <= p.radius_m:
                     lead = float(ta - window.t[k])
                 dist = d  # ends as the distance at the last tick before the arrival
