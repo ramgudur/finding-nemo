@@ -400,3 +400,87 @@ def test_a_failing_locator_drops_only_that_document():
     eng = engine.ConnectorEngine(db, client=_client(lambda r: httpx.Response(200, text=UNLOCATED_FEED)), locate=boom)
     (res,) = asyncio.run(eng.check_once(now=100.0))
     assert res.ok and res.events_written == 1  # the georss item still lands
+
+
+# -- #169: due polls run concurrently, bounded, each isolated ----------------------------
+
+
+def _feed_input(i: int, poll_s: float = 30) -> InputSpec:
+    inp = _rss_input(poll_s).model_dump(mode="json")
+    inp["id"] = f"feed_{i}"
+    inp["connector"]["url"] = f"http://localhost:8765/feed-{i}.xml"
+    return InputSpec.model_validate(inp)
+
+
+def test_a_slow_connector_does_not_hold_up_the_others():
+    db = _db_with_app("app", [_feed_input(0), _feed_input(1)])
+    fast_done = asyncio.Event()
+
+    async def handler(request):
+        if "feed-0" in str(request.url):
+            # waits for the other poll: polled one after another, this would time out
+            await asyncio.wait_for(fast_done.wait(), timeout=2.0)
+        else:
+            fast_done.set()
+        return httpx.Response(200, text=RSS_FEED)
+
+    async def go():
+        ce = engine.ConnectorEngine(db, client=_client(handler))
+        try:
+            return await ce.check_once(now=0.0)
+        finally:
+            await ce.stop()
+
+    results = asyncio.run(go())
+    assert [r.input_id for r in results] == ["feed_0", "feed_1"]  # input order kept
+    assert all(r.ok and r.events_written == 1 for r in results)
+
+
+def test_concurrent_polls_are_bounded():
+    db = _db_with_app("app", [_feed_input(i) for i in range(6)])
+    active, peak = 0, 0
+
+    async def handler(request):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return httpx.Response(200, text=RSS_FEED)
+
+    async def go():
+        ce = engine.ConnectorEngine(db, client=_client(handler), max_concurrent_polls=2)
+        try:
+            return await ce.check_once(now=0.0)
+        finally:
+            await ce.stop()
+
+    results = asyncio.run(go())
+    assert len(results) == 6 and all(r.ok for r in results)
+    assert peak == 2
+
+
+def test_one_connector_raising_never_breaks_the_others(monkeypatch):
+    db = _db_with_app("app", [_feed_input(0), _feed_input(1), _feed_input(2)])
+    real = engine.poll_once
+    stamps = []
+
+    async def flaky(client, db_, app_id, inp, now, **kw):
+        stamps.append(now)
+        if inp.id == "feed_1":
+            raise RuntimeError("unexpected")
+        return await real(client, db_, app_id, inp, now, **kw)
+
+    monkeypatch.setattr(engine, "poll_once", flaky)
+
+    async def go():
+        ce = engine.ConnectorEngine(db, client=_client(lambda r: httpx.Response(200, text=RSS_FEED)))
+        try:
+            return await ce.check_once(now=42.0)
+        finally:
+            await ce.stop()
+
+    results = asyncio.run(go())
+    assert [r.input_id for r in results] == ["feed_0", "feed_2"]
+    assert all(r.ok and r.events_written == 1 for r in results)
+    assert stamps == [42.0, 42.0, 42.0]  # every poll stamped with the same Clock time

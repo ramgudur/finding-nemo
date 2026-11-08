@@ -20,7 +20,8 @@ from pydantic import ValidationError
 from app.agents.compiler import CompilerCache, run_compiler
 from app.agents.llm import LlmRouter
 from app.agents.source_suggester import suggest_source
-from app.api.deps import authority_key_header, get_compiler_cache, get_db, get_engine, get_llm
+from app.api.compile_gate import CompileGate
+from app.api.deps import authority_key_header, get_compile_gate, get_compiler_cache, get_db, get_engine, get_llm
 from app.connectors import engine as connector_engine
 from app.connectors import url_guard
 from app.core import clock as clock_mod
@@ -193,6 +194,7 @@ async def compile_app(
     engine: TickEngine = Depends(get_engine),
     llm: LlmRouter = Depends(get_llm),
     cache: CompilerCache = Depends(get_compiler_cache),
+    gate: CompileGate = Depends(get_compile_gate),
 ) -> AppSpec:
     existing = db.get_app(app)
     if existing is not None and existing.status == "active":
@@ -206,26 +208,33 @@ async def compile_app(
             except url_guard.UnsafeUrl as e:
                 raise HTTPException(status_code=422, detail=f"{inp.id}: connector URL refused: {e}") from None
 
-    start_t = clock_mod.now()
-    ctx = ToolContext(app_id=app, db=db, engine=engine, actor="agent", agent="compiler")
-    spec = await run_compiler(
-        ctx,
-        app_id=app,
-        intent=body.intent,
-        grid=body.grid.model_dump(mode="json"),
-        inputs=[i.model_dump(mode="json") for i in body.inputs],
-        destination_points=[d.model_dump(mode="json") for d in body.destination_points],
-        llm=llm,
-        cache=cache,
-    )
-    if spec is not None:
-        return spec
+    # Only a compile that would actually reach the model spends a slot (#169): /compile has no key.
+    refused = gate.try_acquire(app)
+    if refused is not None:
+        raise HTTPException(status_code=429, detail=refused.detail, headers={"Retry-After": str(refused.retry_after_s)})
+    try:
+        start_t = clock_mod.now()
+        ctx = ToolContext(app_id=app, db=db, engine=engine, actor="agent", agent="compiler")
+        spec = await run_compiler(
+            ctx,
+            app_id=app,
+            intent=body.intent,
+            grid=body.grid.model_dump(mode="json"),
+            inputs=[i.model_dump(mode="json") for i in body.inputs],
+            destination_points=[d.model_dump(mode="json") for d in body.destination_points],
+            llm=llm,
+            cache=cache,
+        )
+        if spec is not None:
+            return spec
 
-    traces = [t for t in db.list_trace(app, since=start_t - 1e-6) if t.agent == "compiler"]
-    last = traces[-1] if traces else None
-    if last is not None and last.skipped_reason:
-        raise HTTPException(status_code=503, detail=last.skipped_reason)
-    raise HTTPException(status_code=422, detail=last.why if last is not None else "compile did not finalize")
+        traces = [t for t in db.list_trace(app, since=start_t - 1e-6) if t.agent == "compiler"]
+        last = traces[-1] if traces else None
+        if last is not None and last.skipped_reason:
+            raise HTTPException(status_code=503, detail=last.skipped_reason)
+        raise HTTPException(status_code=422, detail=last.why if last is not None else "compile did not finalize")
+    finally:
+        gate.release(app)
 
 
 @router.post("/{app}/sources/suggest", response_model=SourceSuggestion)

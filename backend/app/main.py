@@ -24,6 +24,8 @@ from app.api import outputs as outputs_api
 from app.api import trace as trace_api
 from app.api import webhooks as webhooks_api
 from app.api import ws as ws_api
+from app.api.compile_gate import CompileGate
+from app.api.instruction_trace import InstructionTraceDedup
 from app.connectors.engine import ConnectorEngine, make_extract_locator
 from app.core.config import get_settings
 from app.core.db import Db
@@ -60,6 +62,7 @@ def create_app(
     poi_labeler_scheduler: PoiLabelerScheduler | None = None,
     connector_engine: ConnectorEngine | None = None,
     scout_runner: ScoutRunner | None = None,
+    compile_gate: CompileGate | None = None,
     autostart_engine: bool = True,
 ) -> FastAPI:
     db = db if db is not None else Db(get_settings().sqlite_path)
@@ -114,6 +117,11 @@ def create_app(
     fastapi_app.state.poi_labeler_scheduler = poi_labeler_scheduler
     fastapi_app.state.connector_engine = connector_engine
     fastapi_app.state.scout_runner = scout_runner
+    # Per-app compile cooldown (#169): one in flight, COMPILE_MIN_GAP_S apart (optional, default 10 s).
+    fastapi_app.state.compile_gate = (
+        compile_gate if compile_gate is not None else CompileGate(get_settings().compile_min_gap_s)
+    )
+    fastapi_app.state.instruction_trace_dedup = InstructionTraceDedup()  # per app instance (#169)
     fastapi_app.include_router(apps_api.router)
     fastapi_app.include_router(ingest_api.router)
     fastapi_app.include_router(outputs_api.router)

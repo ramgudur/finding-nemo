@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     sqlite_path: str = "./data/app.db"
     demo_mode: bool = False
 
+    # Per-app gap between compiles (seconds; 0 disables the gap, one-in-flight still holds). Optional.
+    compile_min_gap_s: float = 10.0
+
     def agent_model(self, agent: AgentField) -> AgentModel:
         """The ``(provider, model_id)`` an agent should use, from its ``*_MODEL`` setting."""
         return _parse_agent_model(getattr(self, f"{agent}_model"))

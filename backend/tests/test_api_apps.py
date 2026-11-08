@@ -3,6 +3,7 @@ from fake_llm import FakeAsyncOpenAI
 from fastapi.testclient import TestClient
 
 from app.agents.llm import LlmRouter
+from app.api.compile_gate import CompileGate
 from app.core.config import Settings
 from app.core.db import Db
 from app.main import create_app
@@ -285,3 +286,82 @@ def test_compile_rejects_a_connector_on_a_push_input():
     with TestClient(app) as client:
         r = client.post("/v1/apps/some-app/compile", json=req)
     assert r.status_code == 422
+
+
+# -- #169: per-app compile cooldown ----------------------------------------------------------
+
+
+class _ManualTime:
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def _app_with_gate(script, gate: CompileGate):
+    return create_app(db=Db(":memory:"), llm=_router(script), compile_gate=gate, autostart_engine=False)
+
+
+def test_compile_gap_defaults_to_ten_seconds_and_is_optional():
+    assert Settings(_env_file=None).compile_min_gap_s == 10.0
+    assert create_app(db=Db(":memory:"), autostart_engine=False).state.compile_gate.min_gap_s == 10.0
+
+
+def test_a_second_compile_too_soon_is_a_429_with_retry_after():
+    clock = _ManualTime()
+    app = _app_with_gate("compiler_campus_alert", CompileGate(10.0, now=clock))
+    with TestClient(app) as client:
+        assert client.post("/v1/apps/campus-alert/compile", json=_compile_request()).status_code == 200
+        clock.t += 3.0
+        r = client.post("/v1/apps/campus-alert/compile", json=_compile_request())
+        assert r.status_code == 429
+        assert r.headers["Retry-After"] == "7"
+        assert "apart" in r.json()["detail"]
+        # another app is not affected
+        assert client.post("/v1/apps/campus-alert-2/compile", json=_compile_request()).status_code == 200
+        clock.t += 7.0
+        app.state.llm = _router("compiler_campus_alert")
+        assert client.post("/v1/apps/campus-alert/compile", json=_compile_request()).status_code == 200
+
+
+def test_a_failed_compile_still_starts_the_gap():
+    clock = _ManualTime()
+    script = {"scenario": "s", "description": "d", "steps": [{"response": {"content": "no good spec here"}}]}
+    app = _app_with_gate(script, CompileGate(10.0, now=clock))
+    with TestClient(app) as client:
+        assert client.post("/v1/apps/some-app/compile", json=_compile_request()).status_code == 422
+        assert client.post("/v1/apps/some-app/compile", json=_compile_request()).status_code == 429
+
+
+def test_a_compile_already_in_flight_is_a_429():
+    gate = CompileGate(0.0)
+    app = _app_with_gate({"scenario": "s", "description": "d", "steps": []}, gate)
+    assert gate.try_acquire("some-app") is None  # another request is compiling this app
+    with TestClient(app) as client:
+        r = client.post("/v1/apps/some-app/compile", json=_compile_request())
+        assert r.status_code == 429 and r.headers["Retry-After"] == "1"
+        assert "already running" in r.json()["detail"]
+        gate.release("some-app")
+        assert gate.try_acquire("some-app") is None  # gap disabled: free again at once
+
+
+def test_refusals_before_the_model_do_not_spend_the_cooldown():
+    gate = CompileGate(10.0, now=_ManualTime())
+    app = _app_with_gate("compiler_campus_alert", gate)
+    with TestClient(app) as client:
+        client.post("/v1/apps/campus-alert/compile", json=_compile_request())
+        client.post("/v1/apps/campus-alert/activate")
+        assert client.post("/v1/apps/campus-alert/compile", json=_compile_request()).status_code == 409
+    assert gate.try_acquire("never-compiled") is None
+
+
+def test_compile_gate_forgets_old_entries():
+    clock = _ManualTime()
+    gate = CompileGate(5.0, now=clock)
+    for i in range(50):
+        assert gate.try_acquire(f"app-{i}") is None
+        gate.release(f"app-{i}")
+    clock.t += 5.0
+    assert gate.try_acquire("other") is None
+    assert gate._finished_at == {}
