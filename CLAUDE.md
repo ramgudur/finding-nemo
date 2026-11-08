@@ -203,6 +203,12 @@ Ingest keys and authority keys are generated per app at activation and stored in
 - `outputs.poi_labels`: `{mode: auto|on|off, label_set: [{label, sensitive, destination}], min_confidence}`. A `sensitive` label is authority-only. A `destination` label is a routing target and must not also be `sensitive`.
 - `routing`: `{enabled, destination_points[{lat, lon, label}], impassable_score, alpha, fallback_text (≤ 360 chars), rephrase: false}`
 
+**Building an app (dev, no key until activation):**
+- `POST /v1/apps/{app}/sources/suggest`, body `{intent, description}`, returns `SourceSuggestion {kind, shape, options[{type, label, why, config?}], meaning}`. A model (EXTRACT, structured output with one repair retry) infers push or pull, the shape and ranked options from the dev's description. `meaning` is the description verbatim. It always returns 200, falling back to the full unranked catalogue. Option types: `post_api`, `webhook` (the same endpoint), `rss`, `json_api` presets and custom `json_api`; no HTML scraping. SMS comes later.
+- `POST /v1/apps/{app}/compile`, body `CompileRequest {intent, grid, inputs: CompileInput[], destination_points?}`. `CompileInput` is `{id, kind, shape, meaning, fields, connector?}`; `connector` is pull only, checked by the URL guard. Connectors and `destination_points` are the dev's words: `finalize_app` copies them verbatim (a connector writes a `Change`, kind `connector`, actor `dev`). Returns the `AppSpec` at `pending_confirmation`; `409` if the app is active, `422` if it never finalizes, `503` on rate budget.
+- `PUT /v1/apps/{app}/spec`: the dev edits a `pending_confirmation` spec (full `AppSpec`; `409` otherwise, `422` with every error). It writes a `Change`, kind `spec_edit`, actor `dev`.
+- `POST /v1/apps/{app}/activate` is the only dev confirmation.
+
 **Event (push):** `POST /v1/apps/{app}/inputs/{input}/events`
 - Header `X-Ingest-Key`; body `{user_id?, lat, lon, ts, ...input fields}`.
 - Validated against the input's `fields`. Rejected unless the app is `active`.
@@ -212,7 +218,7 @@ Ingest keys and authority keys are generated per app at activation and stored in
 - **POI:** `{id, candidate_id, lat, lon, radius_m, label, confidence, evidence[], visibility, status, created_at, updated_at}`
 - **Backtest:** `{id, kind: single|batch, candidates_tested, candidates_valid, train_scores, holdout_scores, passed, device: cpu|gpu, elapsed_ms, t}`
 - **TraceEntry:** `{t, app_id, agent, model, saw, hypothesis, tested, result, action, why, tool_calls[], skipped_reason?}`
-- **Change:** `{id, app_id, kind: weight|trust|poi|connector|spec_confirm, target, before, after, reason, backtest_id?, actor: agent|dev, t}`
+- **Change:** `{id, app_id, kind: weight|trust|poi|connector|spec_edit|spec_confirm, target, before, after, reason, backtest_id?, actor: agent|dev, t}`
 - **Instruction:** `{text, destination{lat, lon, label}, route[[lat, lon]], distance_m, computed_at, guard{passed, checks[]}}`
 - **Hotspot:** `{id, lat, lon, radius_m, score, mean, area_m2, n_cells, persisted_ticks, contributing_layers[], visibility}`. `score` is the peak cell score; `radius_m = sqrt(area_m2 / π)`. The tick produces it; `/hotspots` and the Critic/POI tools read it.
 - **MapResponse** (`GET /map?format=geojson`): `{app_id, t, cell_m, bbox: [min_lon, min_lat, max_lon, max_lat], layers: {<layer_id> | "score": FeatureCollection}}`. One Polygon feature per cell with `properties: {value, row, col}` (a single `value` field). Cells with `value < 0.01` are omitted to keep the payload small. Without the authority key, only `public` layers are included.
@@ -451,3 +457,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-08:** Demo scripting is a human task after the platform is finished; it doubles as the test of the platform. Removed `tools/demo` and `docs/DEMO.md`, and cut the per-demo plans from the Demo apps section. #108 closed; #153 (wildfire sim) on hold until humans script the demos. `tools/phone_check.py` stays: it checks the platform's end-user page at phone width.
 - **2026-11-08:** POI candidates for every app (#160): `persistent_hotspots` (from the tick's hotspots) and `event_clusters` (from `event_points` documents, which now carry a capped `docs` list of positions in their extras) are registered. An app without tracks used to get no candidates, so the POI Labeler could name nothing. Hotspot candidates are skipped where an operator candidate already covers the place, and are tracked by position. Scope updated.
 - **2026-11-08:** The demo and Devpost (video, write-up, judging pitch) belong to the humans, after the platform works. Agents work on the platform only and don't raise demo or Devpost questions. Remaining platform work: #152 Add a source (Allen); Compiler reliability (Ram's machine; tested with neutral examples); edit-before-confirm, since the review screen can only recompile (Allen, after #152).
+- **2026-11-08:** Contracts approved: `POST /sources/suggest` (`SourceSuggestion`, #165), `CompileInput.connector` (pull only, copied verbatim, URL-guarded, #165), and `PUT /v1/apps/{app}/spec` with Change kind `spec_edit` (#166). They are written into Core contracts.
