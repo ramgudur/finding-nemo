@@ -7,14 +7,14 @@ import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { recordProject, saveSpecSnapshot } from "../../api/authorityKey";
 import { ApiError, api } from "../../api/client";
-import type { CompileRequest, CompileStatus } from "../../api/types";
+import type { CompileRequest, CompileStatus, WebhookMapping } from "../../api/types";
 import { FailurePanel, toFailure } from "../../components/builder/Failure";
 import { StepFooter } from "../../components/builder/StepFooter";
 import type { Failure } from "../../components/builder/Failure";
 import { KindBadge } from "../../components/sources/SourceSuggestionCard";
 import { useActiveIds, useDraft } from "../../components/builder/useDraft";
 import { areaSize } from "../../components/sources/AreaPicker";
-import { SHAPE_INFO, gridCells, stepProblems } from "../../components/sources/sourceUtils";
+import { SHAPE_INFO, gridCells, stepProblems, webhookForCompile } from "../../components/sources/sourceUtils";
 import { useBuilderStore } from "../../store/useBuilderStore";
 
 function Section({ title, edit, children }: { title: string; edit: string; children: ReactNode }) {
@@ -44,6 +44,24 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** Plain-language narration of the Compiler from the public status (no trace text is exposed there). */
+/** One line per mapped value of a webhook source, as the compile body carries it. */
+function WebhookSummary({ w }: { w: WebhookMapping }) {
+  const parts: [string, string][] = [
+    ["items", w.items_path || "the body"],
+    ["lat", w.lat],
+    ["lon", w.lon],
+    ["time", w.ts ? `${w.ts} (${w.ts_format ?? "iso"})` : "when it arrives"],
+    ...(w.user_id ? ([["sender", w.user_id]] as [string, string][]) : []),
+    ...Object.entries(w.fields ?? {}),
+  ];
+  return (
+    <span className="flex flex-col gap-0.5 text-[11px] text-ink">
+      <span className="font-semibold text-slate">Receives another service's webhook</span>
+      <span className="font-mono break-words">{parts.map(([k, v]) => `${k} ← ${v}`).join(" · ")}</span>
+    </span>
+  );
+}
+
 function narrate(st: CompileStatus | null, elapsed: number): { line: string; detail: string } {
   const errs = st?.last_validate?.errors.length ?? 0;
   const warns = st?.last_validate?.warnings.length ?? 0;
@@ -143,7 +161,7 @@ export function ReviewStep() {
         meaning: x.meaning,
         fields: x.fields ?? [],
         ...(x.kind === "pull" && x.connector ? { connector: x.connector } : {}),
-        ...(x.kind === "push" && x.webhook ? { webhook: x.webhook } : {}),
+        ...(x.kind === "push" && x.webhook ? { webhook: webhookForCompile(x.webhook, x.fields) } : {}),
       })),
       destination_points: draft.destinationPoints.map((p) => ({ ...p, label: p.label.trim() })),
     };
@@ -239,6 +257,7 @@ export function ReviewStep() {
                       + {x.fields!.map((f) => `${f.name}:${f.type}${f.required === false ? "?" : ""}`).join(", ")}
                     </span>
                   )}
+                  {x.kind === "push" && x.webhook && <WebhookSummary w={webhookForCompile(x.webhook, x.fields)} />}
                 </li>
               ))}
             </ul>
