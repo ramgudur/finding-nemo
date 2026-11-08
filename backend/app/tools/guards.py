@@ -19,10 +19,9 @@ from collections.abc import Mapping, Sequence
 
 from app.core.models import Change
 from app.engine import tiers
+from app.engine import trust as trust_mod
 from app.tools.context import TestedCandidate, ToolContext
 
-TRUST_MAX_INCREASE = 0.1
-TRUST_INCREASE_WINDOW_S = 300.0
 BACKTEST_MAX_AGE_S = 600.0
 
 
@@ -152,17 +151,11 @@ def apply_weights(ctx: ToolContext, new: Mapping[str, float], *, reason: str, ba
 # -- trust -----------------------------------------------------------------------
 
 
-def check_trust(before: float, after: float, last_increase_at: float | None, now: float) -> None:
-    """Lowering is free. An increase is at most +0.1 and at most one per user per 5 min of Clock time."""
-    if not (0.0 <= after <= 1.0):
-        raise GuardError(f"trust must be in [0, 1], got {after}")
-    if after <= before:
-        return
-    if after - before > TRUST_MAX_INCREASE + 1e-12:
-        raise GuardError(f"trust increase {after - before:+.3f} exceeds the +{TRUST_MAX_INCREASE} cap")
-    if last_increase_at is not None and now - last_increase_at < TRUST_INCREASE_WINDOW_S:
-        wait = TRUST_INCREASE_WINDOW_S - (now - last_increase_at)
-        raise GuardError(f"trust was raised {now - last_increase_at:.0f} s ago; next increase allowed in {wait:.0f} s")
+def check_trust(before: float, after: float, last_increase_at: float | None, now: float, reason: str) -> None:
+    """Lowering is free (with a reason). Increases: engine/trust.py bounds (+0.1, one per 5 min of Clock time)."""
+    res = trust_mod.check_trust_change(before, after, now=now, last_increase_at=last_increase_at, reason=reason)
+    if not res.ok:
+        raise GuardError(res.reason)
 
 
 def current_trust(ctx: ToolContext, user_id: str) -> tuple[float, float | None]:
@@ -181,7 +174,7 @@ def current_trust(ctx: ToolContext, user_id: str) -> tuple[float, float | None]:
 
 def apply_trust(ctx: ToolContext, user_id: str, after: float, *, reason: str, backtest_id: str | None) -> Change:
     before, last_inc = current_trust(ctx, user_id)
-    check_trust(before, after, last_inc, ctx.now())
+    check_trust(before, after, last_inc, ctx.now(), reason)
     ctx.db.set_trust(ctx.app_id, user_id, after, ctx.now())
     c = Change(
         id=new_change_id(),

@@ -189,11 +189,11 @@ def test_trust_lowering_free_increase_capped(env, scripted):
     clock, db, _, _, ctx = env
     assert call(ctx(), "set_user_trust", user_id="u1", trust=0.2, reason="duplicate coords")["ok"]
     r = call(ctx(), "set_user_trust", user_id="u1", trust=0.5, reason="seems fine")
-    assert not r["ok"] and "cap" in r["error"]
+    assert not r["ok"] and "exceeds +0.1" in r["error"]
     assert call(ctx(), "set_user_trust", user_id="u1", trust=0.3, reason="recovering")["ok"]
     clock.advance(60)
     r = call(ctx(), "set_user_trust", user_id="u1", trust=0.35, reason="more")
-    assert not r["ok"] and "next increase allowed" in r["error"]
+    assert not r["ok"] and "next increase in" in r["error"]
     clock.advance(241)
     assert call(ctx(), "set_user_trust", user_id="u1", trust=0.4, reason="more")["ok"]
     assert call(ctx(), "set_user_trust", user_id="u1", trust=0.0, reason="spoof burst")["ok"]  # lowering anytime
