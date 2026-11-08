@@ -1,0 +1,209 @@
+{
+  "scenario": "compiler_flyway_contrast",
+  "description": "Live Compiler run (Nemotron Super, build.nvidia.com) on the Flyway tags input with a flee meaning, recorded for the demo compile cache (#108).",
+  "input": {
+    "app_id": "flyway-contrast",
+    "intent": "Find where a danger is from people moving away from it.",
+    "grid": {
+      "cell_m": 50,
+      "bbox": {
+        "min_lat": 32.807034,
+        "min_lon": -96.743877,
+        "max_lat": 32.842966,
+        "max_lon": -96.701123
+      }
+    },
+    "inputs": [
+      {
+        "id": "tags",
+        "kind": "push",
+        "shape": "track",
+        "meaning": "Each tag is a phone that streams its GPS every few seconds while its owner moves away from a danger; people flee outward from where it is.",
+        "fields": [
+          {
+            "name": "tag_id",
+            "type": "string",
+            "required": false,
+            "description": "Hardware tag identifier."
+          }
+        ]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call-32ac1267-857c-41d1-80cb-b94ca0bf4139",
+            "name": "list_operators",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call-da89d068-b83b-43a9-a86c-42a794bdae37",
+            "name": "validate_spec",
+            "arguments": {
+              "spec": {
+                "app_id": "flyway-contrast",
+                "intent": "Find where a danger is from people moving away from it.",
+                "grid": {
+                  "cell_m": 50,
+                  "bbox": {
+                    "min_lat": 32.807034,
+                    "min_lon": -96.743877,
+                    "max_lat": 32.842966,
+                    "max_lon": -96.701123
+                  }
+                },
+                "inputs": [
+                  {
+                    "id": "tags",
+                    "kind": "push",
+                    "shape": "track",
+                    "tier": "flexible",
+                    "visibility": "authority",
+                    "meaning": "Each tag is a phone that streams its GPS every few seconds while its owner moves away from a danger; people flee outward from where it is.",
+                    "fields": [
+                      {
+                        "name": "tag_id",
+                        "type": "string",
+                        "required": false,
+                        "description": "Hardware tag identifier."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "flow_source",
+                        "weight": 0.8,
+                        "polarity": "source"
+                      }
+                    ],
+                    "plausibility": {
+                      "max_speed_mps": 6.0,
+                      "jitter_m": 10.0,
+                      "flag_constant_speed": true,
+                      "flag_straight_line": true
+                    }
+                  }
+                ],
+                "verification": [
+                  {
+                    "method": "predictive_check",
+                    "priority": 1
+                  }
+                ],
+                "outputs": {
+                  "layers": [
+                    {
+                      "id": "score",
+                      "visibility": "authority"
+                    }
+                  ],
+                  "poi_labels": {
+                    "mode": "off",
+                    "min_confidence": 0.5,
+                    "label_set": []
+                  }
+                },
+                "routing": {
+                  "enabled": false,
+                  "destination_points": []
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "tool_calls": [
+          {
+            "id": "call-f9eee9a3-fd79-40a3-a98b-6a68405e0e6b",
+            "name": "finalize_app",
+            "arguments": {
+              "spec": {
+                "app_id": "flyway-contrast",
+                "intent": "Find where a danger is from people moving away from it.",
+                "grid": {
+                  "cell_m": 50,
+                  "bbox": {
+                    "min_lat": 32.807034,
+                    "min_lon": -96.743877,
+                    "max_lat": 32.842966,
+                    "max_lon": -96.701123
+                  }
+                },
+                "inputs": [
+                  {
+                    "id": "tags",
+                    "kind": "push",
+                    "shape": "track",
+                    "tier": "flexible",
+                    "visibility": "authority",
+                    "meaning": "Each tag is a phone that streams its GPS every few seconds while its owner moves away from a danger; people flee outward from where it is.",
+                    "fields": [
+                      {
+                        "name": "tag_id",
+                        "type": "string",
+                        "required": false,
+                        "description": "Hardware tag identifier."
+                      }
+                    ],
+                    "operators": [
+                      {
+                        "op": "flow_source",
+                        "weight": 0.8,
+                        "polarity": "source"
+                      }
+                    ],
+                    "plausibility": {
+                      "max_speed_mps": 6.0,
+                      "jitter_m": 10.0,
+                      "flag_constant_speed": true,
+                      "flag_straight_line": true
+                    }
+                  }
+                ],
+                "verification": [
+                  {
+                    "method": "predictive_check",
+                    "priority": 1
+                  }
+                ],
+                "outputs": {
+                  "layers": [
+                    {
+                      "id": "score",
+                      "visibility": "authority"
+                    }
+                  ],
+                  "poi_labels": {
+                    "mode": "off",
+                    "min_confidence": 0.5,
+                    "label_set": []
+                  }
+                },
+                "routing": {
+                  "enabled": false,
+                  "destination_points": []
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "response": {
+        "content": "The proposed spec for **flyway-contrast** is complete and set to `pending_confirmation`. Summary:\n\n- **Input `tags`** (push/track): phones streaming GPS while owners flee a danger — **flexible** tier (many independent devices), **authority** visibility (raw flee traces shouldn't be public). One operator: **`flow_source`** (polarity `source`, weight 0.8) to detect net outward flow away from the danger. Plausibility: max 6 m/s walking speed, 10 m jitter, both constant-speed and straight-line flagged (fleeing people don't normally move steadily or straight).\n- **Verification**: no authority/locked inputs, so `predictive_check` runs first.\n- **Outputs**: `score` layer authority; POI labels off; routing disabled (the intent is to locate the danger, not direct users to a destination).\n\nAwaiting your confirmation to activate."
+      }
+    }
+  ]
+}
