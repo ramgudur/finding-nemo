@@ -9,6 +9,8 @@ def test_open_meteo_preset_is_registered():
     spec = PRESETS["open_meteo"]
     assert spec["response_path"] == "current"
     assert set(spec["fields"]) == {"wind_speed_10m", "wind_direction_10m"}
+    # Open-Meteo defaults to km/h; vector magnitudes are m/s everywhere in the engine
+    assert spec["query"]["wind_speed_unit"] == "ms"
 
 
 def test_resolve_preset_unknown_raises():
