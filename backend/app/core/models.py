@@ -555,3 +555,22 @@ class HotspotsResponse(Model):
     app_id: str
     t: UtcDatetime
     hotspots: list[Hotspot] = Field(default_factory=list)
+
+
+# --- Dev-requested Scout (POST /v1/apps/{app}/scout) ----------------------------------
+
+
+class ScoutRequest(Model):
+    """Body of `POST /v1/apps/{app}/scout` (authority key): ask the Scout to find sources for one
+    pull input. The text goes only into the authority-only trace and is never echoed."""
+
+    input_id: str = Field(min_length=1)
+    request: str = Field(min_length=1, max_length=500, description="Plain-text request to the Scout.")
+
+
+class ScoutJobAccepted(Model):
+    """202 response: the request is queued; the Scout runs asynchronously on the shared rate budget."""
+
+    job_id: str
+    app_id: str
+    input_id: str

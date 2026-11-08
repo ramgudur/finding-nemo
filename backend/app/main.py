@@ -21,6 +21,7 @@ from app.api import debug as debug_api
 from app.api import ingest as ingest_api
 from app.api import instructions as instructions_api
 from app.api import outputs as outputs_api
+from app.api import scout as scout_api
 from app.api import trace as trace_api
 from app.api import webhooks as webhooks_api
 from app.api import ws as ws_api
@@ -120,6 +121,7 @@ def create_app(
     fastapi_app.include_router(ws_api.router)
     fastapi_app.include_router(instructions_api.router)  # public end-user instructions
     fastapi_app.include_router(trace_api.router)  # authority-only console reads + dev pin
+    fastapi_app.include_router(scout_api.router)  # dev-requested Scout runs (authority only)
     fastapi_app.include_router(webhooks_api.router)  # 501 stub (CLAUDE.md Scope)
     fastapi_app.include_router(catalog_api.router)  # public operator catalogue
     if get_settings().demo_mode:  # /v1/debug/* exists only in demo mode; it alone reads sim ground truth (rule 9)
