@@ -57,10 +57,6 @@ def _events_for_backtest(ctx: ToolContext, params: bt_mod.BacktestParams) -> dic
     return {inp.id: ctx.engine.source.events(ctx.app_id, inp.id, since, now) for inp in ctx.spec.inputs}
 
 
-def _live_trust(ctx: ToolContext) -> dict[str, float]:
-    return dict(ctx.engine.trust(ctx.app_id)) if ctx.engine.trust else {}
-
-
 def run_backtest(ctx: ToolContext, args: RunBacktestArgs) -> dict[str, Any]:
     reason = guards.require_reason(args.reason)
     if not args.weights and not args.trust:
@@ -71,7 +67,7 @@ def run_backtest(ctx: ToolContext, args: RunBacktestArgs) -> dict[str, Any]:
     baseline = dict(rt.weights)
     params = bt_mod.BacktestParams()
     events = _events_for_backtest(ctx, params)
-    trust = _live_trust(ctx)
+    trust = guards.live_trust_map(ctx)
     now = ctx.now()
 
     final = baseline
@@ -133,6 +129,7 @@ def run_backtest(ctx: ToolContext, args: RunBacktestArgs) -> dict[str, Any]:
             passed=out.backtest.passed,
             t=now,
             baseline_weights=baseline,
+            baseline_trust=dict(trust),
             weights=final,
             trust_changes=trust_changes,
             methods_with_data=len(with_data),

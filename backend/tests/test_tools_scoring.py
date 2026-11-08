@@ -262,3 +262,28 @@ def test_real_backtest_plumbing(env):
     assert r["ok"], r
     assert db.get_backtest("tools-app", r["result"]["backtest_id"]) is not None
     assert isinstance(r["result"]["passed"], bool) and r["result"]["reason"]
+
+
+def test_apply_rejects_trust_drift_for_weight_backtest(env, scripted):
+    clock, db, eng, _, ctx = env
+    live: dict[str, float] = {}
+    eng.trust = lambda app_id: live  # stands in for main.py's db-backed trust provider
+    r = call(ctx(), "run_backtest", weights={"crowd_a.density": 0.6}, reason="try")
+    assert r["ok"]
+    assert call(ctx(), "set_user_trust", user_id="u9", trust=0.1, reason="spoof")["ok"]
+    live["u9"] = 0.1  # the tick now replays with different trust than the backtest did
+    a = call(ctx(), "apply_changes", backtest_id=r["result"]["backtest_id"], reason="x")
+    assert not a["ok"] and "trust changed" in a["error"] and "u9" in a["error"]
+    assert eng.apps["tools-app"].weights["crowd_a.density"] == 0.5
+
+
+def test_apply_rejects_trust_candidate_whose_start_moved(env, scripted):
+    clock, db, _, _, ctx = env
+    call(ctx(), "set_user_trust", user_id="u2", trust=0.5, reason="suspicious")
+    clock.advance(400)
+    r = call(ctx(), "run_backtest", trust={"u2": 0.6}, reason="recovering")
+    assert r["ok"]
+    call(ctx(), "set_user_trust", user_id="u2", trust=0.3, reason="new duplicate coords")
+    a = call(ctx(), "apply_changes", backtest_id=r["result"]["backtest_id"], reason="x")
+    assert not a["ok"] and "trust changed" in a["error"]
+    assert db.get_trust("tools-app", "u2").score == 0.3
