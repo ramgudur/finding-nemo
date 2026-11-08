@@ -14,7 +14,7 @@ On Windows, run the scripts from Git Bash.
 **Environment.** Copy `backend/.env.example` to `backend/.env`. It is gitignored, so never commit it.
 
 - **The core demo needs no keys.** The map, hotspots, overrides, spoof flags, error chart and sim controls are all deterministic code.
-- **Agents need keys.** Set `NVIDIA_API_KEY` for the Critic and Compiler, and `OPENROUTER_API_KEY` for the Lightning models. Without them, agents skip their runs and write a `rate budget` / skipped entry to the trace.
+- **Agents need a key.** Every agent model runs on build.nvidia.com, so `NVIDIA_API_KEY` is the only one needed (`OPENROUTER_API_KEY` is optional). Copy the `*_MODEL` lines from `backend/.env.example`; the old Super ID returns 404. Without a key, agents skip their runs and write a `rate budget` / skipped entry to the trace.
 - **Don't set `DEMO_MODE` in `.env`.** `tools/demo` turns it on for its own backend.
 - **Never paste keys into the board, a PR or a screenshot.**
 
@@ -98,7 +98,7 @@ The end-user page must work on a phone over a tunnel.
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| Agent runs show `skipped: rate budget` in the trace | NVIDIA (about 40 RPM shared) or OpenRouter limits | Keep going: map, hotspots, overrides and spoof flags don't need the LLM. **OpenRouter free models cap at 50 requests/day** (unless the account has ever bought $10+ of credit), and failed requests count. Don't restart agents in a loop before the demo. |
+| Agent runs show `skipped: rate budget` in the trace | NVIDIA's limit (about 40 requests/min, shared by every agent) | Keep going: map, hotspots, overrides and spoof flags don't need the LLM. The Critic and POI Labeler share one rate budget; don't restart agents in a loop before the demo. If OpenRouter is configured as an optional extra, its free models cap at 50 requests/day and failed requests count. |
 | Console says "polling" instead of "live" | WebSocket blocked (tunnel, proxy, Wi-Fi) | Nothing. The console falls back to REST every 2 s and keeps retrying the WS (backoff up to 15 s). |
 | Console shows `500 Internal Server Error for /apps/...` | Backend down; the frontend proxy answers 500 | Check `data/demo-backend.log`; restart `tools/demo`. |
 | `demo: ... is active but its keys aren't in data/...` | The demo DB was reused but its keys file was deleted | `tools/demo <app> --fresh` (new keys). |

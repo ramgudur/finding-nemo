@@ -17,6 +17,7 @@ from app.agents.poi_labeler import PoiLabelerScheduler
 from app.api import apps as apps_api
 from app.api import debug as debug_api
 from app.api import ingest as ingest_api
+from app.api import instructions as instructions_api
 from app.api import outputs as outputs_api
 from app.api import trace as trace_api
 from app.api import ws as ws_api
@@ -104,6 +105,7 @@ def create_app(
     fastapi_app.include_router(ingest_api.router)
     fastapi_app.include_router(outputs_api.router)
     fastapi_app.include_router(ws_api.router)
+    fastapi_app.include_router(instructions_api.router)  # public end-user instructions
     fastapi_app.include_router(trace_api.router)  # authority-only console reads + dev pin
     if get_settings().demo_mode:  # /v1/debug/* exists only in demo mode; it alone reads sim ground truth (rule 9)
         debug_api.install(fastapi_app, engine)

@@ -23,7 +23,7 @@
         { "name": "press_id", "type": "string", "required": false, "description": "Identifies one press-and-stream session." }
       ],
       "operators": [
-        { "op": "flow_source", "weight": 0.6, "polarity": "source", "window_s": 20 },
+        { "op": "flow_source", "weight": 0.6, "polarity": "source", "window_s": 20, "source_speed_mps": 0.7 },
         { "op": "density", "weight": 0.4, "half_life_s": 60, "sigma_m": 15 }
       ],
       "plausibility": { "max_speed_mps": 12, "flag_constant_speed": true, "flag_straight_line": true }
