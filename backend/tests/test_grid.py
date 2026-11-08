@@ -105,6 +105,18 @@ def test_point_helpers_swap_order():
 def test_from_spec_and_validation():
     g = Grid.from_spec({"cell_m": 50, "bbox": list(BBOX)})
     assert g.cell_m == 50.0 and g.bbox == BBOX
+    named = {"min_lat": BBOX[1], "min_lon": BBOX[0], "max_lat": BBOX[3], "max_lon": BBOX[2]}
+    assert Grid.from_spec({"cell_m": 50, "bbox": named}).bbox == BBOX
+
+    class _BBox:  # stands in for core.models.BBox
+        def as_geojson(self):
+            return BBOX
+
+    class _GridSpec:
+        bbox = _BBox()
+        cell_m = 50
+
+    assert Grid.from_spec(_GridSpec()).bbox == BBOX
     with pytest.raises(ValueError):
         Grid(bbox=(10.0, 45.0, 9.0, 46.0), cell_m=10)
     with pytest.raises(ValueError):

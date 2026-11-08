@@ -64,10 +64,16 @@ class Grid:
 
     @classmethod
     def from_spec(cls, spec: Any) -> Grid:
-        """Build from an AppSpec ``grid`` section: a mapping or object with ``cell_m`` and ``bbox``."""
+        """Build from an AppSpec ``grid`` section: a mapping or object with ``cell_m`` and ``bbox``.
+
+        ``bbox`` may be a GeoJSON-order sequence, a mapping with ``min_lat/min_lon/max_lat/max_lon``,
+        or an object with ``as_geojson()`` (the ``BBox`` model in ``core/models.py``).
+        """
         if isinstance(spec, dict):
-            return cls(bbox=tuple(spec["bbox"]), cell_m=spec["cell_m"])  # type: ignore[arg-type]
-        return cls(bbox=tuple(spec.bbox), cell_m=spec.cell_m)
+            bbox, cell_m = spec["bbox"], spec["cell_m"]
+        else:
+            bbox, cell_m = spec.bbox, spec.cell_m
+        return cls(bbox=_bbox_tuple(bbox), cell_m=cell_m)
 
     # -- shape -----------------------------------------------------------
 
@@ -194,6 +200,17 @@ class Grid:
             for r, c in zip(rows, cols, strict=True)
         ]
         return {"type": "FeatureCollection", "bbox": list(self.bbox), "features": features}
+
+
+def _bbox_tuple(bbox: Any) -> tuple[float, float, float, float]:
+    if hasattr(bbox, "as_geojson"):
+        bbox = bbox.as_geojson()
+    elif isinstance(bbox, dict):
+        bbox = (bbox["min_lon"], bbox["min_lat"], bbox["max_lon"], bbox["max_lat"])
+    t = tuple(float(v) for v in bbox)
+    if len(t) != 4:
+        raise ValueError("bbox must be (min_lon, min_lat, max_lon, max_lat)")
+    return t  # type: ignore[return-value]
 
 
 # -- point helpers ----------------------------------------------------------
