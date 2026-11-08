@@ -400,3 +400,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-07:** The lead's `flowsource.py` lives at `reference/flowsource.py` as a reference only (its `simulate()` holds demo values, so it stays out of `backend/`). Kida seat b ports it into `engine/operators/flow_source.py`.
 - **2026-11-07:** Line endings are LF for everyone via `.gitattributes`.
 - **2026-11-07:** Operator signature is `(events, params, trust, clock, grid)` (adds `grid`, PR #11). Grid and clock interfaces are agreed between Kida's seats: grid exposes `cell_m`, shape `(H, W)` and `to_xy`/`to_latlon` in local meters from the SW corner; `clock.now()` returns float seconds.
+- **2026-11-07:** The engine `Grid` takes `bbox` as a tuple in GeoJSON order `(min_lon, min_lat, max_lon, max_lat)` (PR #12). The `Tier` type is defined once, in `core/models.py`; `engine/tiers.py` imports it and does not define its own.
