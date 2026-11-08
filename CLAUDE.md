@@ -39,7 +39,11 @@ If a task seems to require breaking one of these, stop and ask.
 2. **No LLM in the hot path.**
    - The engine tick (every 2 s) is pure numpy. Agents run asynchronously.
    - If the rate budget is empty, the agent skips its run and writes a trace entry. It never blocks the tick.
-3. **Platform code is app-agnostic.** No app-specific IDs, coordinates, label names, thresholds or "if campus/birds" branches in `backend/`. App-specific things live in the `AppSpec`. Demo material lives in `sim/` and `specs/`.
+3. **Platform code is app-agnostic and domain-neutral ("one size fits all").**
+   - No app-specific IDs, coordinates, label names, thresholds or "if campus/birds" branches in `backend/`.
+   - Nothing in `backend/` assumes what the entities or data are (people, animals, vehicles, sensors, weather, news). Operator names, params, defaults, docstrings and the descriptions the Compiler reads use neutral words: "entities", "vector field", "documents", "authority fixed points".
+   - Any physical limit or threshold that depends on the domain (speeds, distances, hotspot thresholds) comes from the `AppSpec`, with a neutral default. Fixed distances scale with `cell_m`.
+   - Domain knowledge enters only through the spec, which the Compiler writes from the dev's words. Demo material lives in `sim/` and `specs/`.
 4. **Locked stays locked.** The Compiler only *proposes* tiers, verification methods and their priority. They take effect only after the dev confirms the spec. After that, nothing an agent does can change verification methods, input tiers or locked weights.
 5. **Tier and trust bounds** (enforced in `engine/tiers.py`, `engine/trust.py` and `tools/guards.py`):
 

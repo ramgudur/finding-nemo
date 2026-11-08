@@ -81,6 +81,7 @@ Assigned by the lead on 2026-11-07. Paths are under `backend/app/` unless they s
 The goal: stay on the core idea in `CLAUDE.md`, and keep decisions with humans.
 
 1. **Scope check before every task.** The task must trace to something in `CLAUDE.md`. If it doesn't, post `NEEDS-LEAD @ramgudur <what and why>` and wait.
+   **Generality check before every PR** (CLAUDE.md rule 3): does anything in your diff assume what the entities or data are, or hardcode a domain limit? If so, make it neutral or spec-driven. If you can't, post `NEEDS-LEAD`.
 2. **Must go to the lead** (`NEEDS-LEAD`, then wait):
    - contract changes: `core/models.py`, `frontend/src/api/types.ts`, `specs/*.json`, API routes, env vars
    - new dependencies, services or external APIs
