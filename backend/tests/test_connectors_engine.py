@@ -1,10 +1,21 @@
 import asyncio
 
 import httpx
+import pytest
 
 from app.connectors import engine
 from app.core.db import Db
 from app.core.models import AppSpec, ConnectorConfig, InputSpec
+
+
+@pytest.fixture(autouse=True)
+def _permissive_url_guard(monkeypatch):
+    """These tests cover connector behaviour against a local/mock feed; the SSRF guard has its own
+    tests (test_url_guard.py)."""
+    from app.connectors import url_guard
+
+    monkeypatch.setattr(url_guard, "check_url", lambda url, **kw: url)
+
 
 RSS_FEED = (
     '<rss version="2.0" xmlns:georss="http://www.georss.org/georss"><channel>'

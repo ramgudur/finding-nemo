@@ -1,9 +1,7 @@
 """Scout tools for vetting sources: fetch_url, probe_feed, geocode, set_source_reliability.
 
-- URLs come from the model, so `fetch_url` and `probe_feed` guard against server-side request forgery:
-  http(s) only; link-local and cloud-metadata addresses always blocked; private and loopback
-  addresses blocked unless DEMO_MODE (the demo serves its scripted feed on localhost). Size and
-  time are capped and only text is returned, so a tool call can't pull a large or binary body.
+- URLs come from the model, so `fetch_url` and `probe_feed` go through the shared SSRF guard
+  (connectors/url_guard.py). Size and time are capped and only text is returned.
 - `probe_feed` parses with the connector parsers (rss / json) and returns a compact summary.
 - `set_source_reliability` sets an rss source's trust, which `event_points` uses as reliability. It
   only lowers (with a reason), through the same trust guard as `set_user_trust`; raising needs the
@@ -13,17 +11,14 @@ Tests inject an `httpx.Client` on a MockTransport through `ctx.extra["http_clien
 
 from __future__ import annotations
 
-import ipaddress
 import json
 import re
-import socket
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.connectors import rss
+from app.connectors import rss, url_guard
 from app.tools import geo_tools, guards
 from app.tools.context import ToolContext
 from app.tools.guards import GuardError
@@ -32,7 +27,6 @@ MAX_BYTES = 512_000
 FETCH_TIMEOUT_S = 10.0
 TEXT_CHARS = 4000
 TEXT_TYPES = ("text/", "application/xml", "application/rss", "application/atom", "application/json", "+xml", "+json")
-_METADATA_HOSTS = {"metadata.google.internal", "metadata"}
 
 
 class _Args(BaseModel):
@@ -53,35 +47,16 @@ class SourceReliabilityArgs(_Args):
     reason: str
 
 
-def _demo_mode() -> bool:
-    from app.core.config import get_settings
-
-    return bool(get_settings().demo_mode)
-
-
 def check_url(url: str, *, allow_private: bool) -> str:
-    """Raise GuardError unless `url` is http(s) and resolves only to addresses we may contact."""
-    u = urlparse(url)
-    if u.scheme not in ("http", "https") or not u.hostname:
-        raise GuardError("only http(s) URLs with a host can be fetched")
-    host = u.hostname.lower()
-    if host in _METADATA_HOSTS:
-        raise GuardError("that host is not allowed")
+    """The shared SSRF guard (connectors/url_guard.py), reported as a guard rejection."""
     try:
-        infos = socket.getaddrinfo(host, u.port or (443 if u.scheme == "https" else 80), proto=socket.IPPROTO_TCP)
-    except socket.gaierror as e:
-        raise GuardError(f"cannot resolve {host}") from e
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if ip.is_link_local or ip.is_multicast or ip.is_unspecified or ip.is_reserved:
-            raise GuardError("that address is not allowed")
-        if (ip.is_private or ip.is_loopback) and not allow_private:
-            raise GuardError("private and local addresses can't be fetched (outside demo mode)")
-    return url
+        return url_guard.check_url(url, allow_private=allow_private)
+    except url_guard.UnsafeUrl as e:
+        raise GuardError(str(e)) from e
 
 
 def _get(ctx: ToolContext, url: str) -> httpx.Response:
-    check_url(url, allow_private=ctx.extra.get("allow_private_urls", _demo_mode()))
+    check_url(url, allow_private=ctx.extra.get("allow_private_urls", url_guard.demo_allows_private()))
     client = ctx.extra.get("http_client")
     own = client is None
     client = client or httpx.Client(timeout=FETCH_TIMEOUT_S, follow_redirects=False)

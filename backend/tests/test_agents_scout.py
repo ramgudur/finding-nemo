@@ -174,10 +174,14 @@ def test_prompt_is_domain_neutral():
 SCOUT_TOOLS = {"web_search", "probe_feed", "create_connector", "test_connector"}
 
 
-def test_scout_rss_episode_configures_and_tests_a_connector():
+def test_scout_rss_episode_configures_and_tests_a_connector(monkeypatch):
     offered = {s["function"]["name"] for s in registry.tool_schemas("scout")}
     if not SCOUT_TOOLS <= offered:
         pytest.skip(f"Scout tools not registered yet: {sorted(SCOUT_TOOLS - offered)}")
+    from app.connectors import url_guard
+
+    # the recording's feed is the demo's scripted feed on localhost: private URLs are allowed only in demo mode
+    monkeypatch.setattr(url_guard, "demo_allows_private", lambda: True)
     ctx, _ = _ctx()
     out = asyncio.run(run_scout(ctx, "local_news", "find a feed", _router("scout_rss")))
     assert out and "connector" in out.lower()
