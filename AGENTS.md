@@ -33,7 +33,7 @@ Humans over agents. The team lead is `@ramgudur`. Only the team lead reassigns w
 
 **One idea, kept in one place.** `CLAUDE.md` is the single source of truth for what we are building. Only the lead edits it, including its **Decisions log**. Agents propose changes on the board; they never edit `CLAUDE.md` or treat a board thread as overriding it. Before acting on an older board thread, check the Decisions log.
 
-The lead's machine routes issues, approves contracts and checks that work stays on the core idea. Since 2026-11-07 it also takes a few small build tasks (see Areas).
+The lead's machine routes issues, approves contracts and checks that work stays on the core idea. Build tasks go to teammates (see Areas).
 
 ## 3. Workflow
 
@@ -70,13 +70,13 @@ Assigned by the lead on 2026-11-07. Paths are under `backend/app/` unless they s
 
 | Area | Owner | Folders | Notes |
 |---|---|---|---|
-| Lead: scope, routing, contracts | `@ramgudur` | `CLAUDE.md`, `AGENTS.md`; approves every change to `core/models.py`, `frontend/src/api/types.ts`, `specs/*.json` | Routes issues and checks PR scope. Also builds `api/instructions.py` + `frontend/src/pages/EndUser.tsx` (#107) and the step-7 live path (#108). |
-| Scoring model (physics-informed / physics-based ML) | `@kida-k:b` (temporary while Allen is away, 2026-11-07) | `engine/operators/` (incl. `flow_source.py`), `engine/combine.py`, `engine/layer_cache.py`, `engine/verification.py`, `engine/backtest.py`, `engine/trust.py`, `reference/` | Back with seat b, its original owner. |
-| Frontend, sim, specs, fixtures | `@ramgudur` (temporary while Allen is away, 2026-11-07) | `frontend/`, `sim/`, `specs/`, `backend/tests/fixtures/` | Allen (`@AllenZheng-05`) is unavailable until he posts that he's back: no tasks, no reviews, don't mention him. |
-| Engine runtime + tool layer | `@kida-k:a` (temporary while Allen is away, 2026-11-07); `tools/compiler_tools.py`: `@Navmi-Srithaj` | `engine/tick.py`, `engine/grid.py`, `engine/tiers.py`, `core/clock.py`, `tools/` (incl. `guards.py`, `message_guard.py`, `poi_tools.py`) | Back with seat a, its original owner. If seat a is unavailable, seat b reviews tick.py changes. |
-| Routing | `@kida-k:a` | `engine/routing.py` | Issues #94, #95. |
-| Candidate generators, GPU path, POI Labeler | `@kida-k:b` | `engine/candidates/`, `agents/poi_labeler.py` + its prompt | Issues #102, #106, #86. |
-| API, data, connectors, Nemotron agents | `@Navmi-Srithaj` | `api/` (incl. `debug.py`, `trace.py`; except `instructions.py`), `main.py`, `core/db.py`, `core/config.py`, `core/access.py`, `connectors/`, `agents/` (except `poi_labeler.py`) | `debug.py`/`trace.py` back while Allen is away. |
+| Lead: scope, routing, contracts | `@ramgudur` | `CLAUDE.md`, `AGENTS.md`; approves every change to `core/models.py`, `frontend/src/api/types.ts`, `specs/*.json` | Routes issues and checks PR scope. |
+| Scoring model (physics-informed / physics-based ML) | `@kida-k:b` | `engine/operators/` (incl. `flow_source.py`), `engine/combine.py`, `engine/layer_cache.py`, `engine/verification.py`, `engine/backtest.py`, `engine/trust.py`, `reference/` | |
+| Frontend, sim, specs, fixtures, end-user path | `@AllenZheng-05` | `frontend/`, `sim/`, `specs/`, `backend/tests/fixtures/`, `api/instructions.py`, `api/debug.py`, `api/trace.py` | Back 2026-11-08. Issues #107 (instructions API + end-user page), #108 (step-7 live path). `specs/` changes still need lead approval. |
+| Engine runtime + tool layer | `@kida-k:a`; `tools/compiler_tools.py`: `@Navmi-Srithaj` | `engine/tick.py`, `engine/grid.py`, `engine/tiers.py`, `core/clock.py`, `tools/` (incl. `guards.py`, `message_guard.py`, `poi_tools.py`) | If seat a is unavailable, seat b reviews tick.py changes. |
+| Routing, GPU path check | `@kida-k:a` | `engine/routing.py` | Issues #94, #95 (done); #86 (CuPy batch check, moved from seat b; touches `engine/backtest.py` only to fix GPU bugs, coordinate with seat b). |
+| Candidate generators, POI Labeler | `@kida-k:b` | `engine/candidates/`, `agents/poi_labeler.py` + its prompt | Issues #102, #106. |
+| API, data, connectors, Nemotron agents | `@Navmi-Srithaj` | `api/` (except `instructions.py`, `debug.py`, `trace.py`), `main.py`, `core/db.py`, `core/config.py`, `core/access.py`, `connectors/`, `agents/` (except `poi_labeler.py`) | |
 
 ## 5. Escalation: when to stop and ask
 
