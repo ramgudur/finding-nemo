@@ -8,6 +8,9 @@ Guards (CLAUDE.md rules 7, 8, 11):
   for the dev. Only the dev's ``accept_label_proposal`` (dev-only tool, behind the authority-only
   console route) adds it to the active spec's ``label_set``; it re-runs the ``AppSpec`` validation,
   updates the stored spec and the running one, and records a ``spec_edit`` Change.
+- A ``destination`` label goes only on a low-score place: never on a hotspot-made candidate, and
+  never where the current score reaches the routing destination threshold
+  (``guards.check_destination_label``, the same limit routing uses).
 - ``poi_labels.mode == "off"`` blocks all writes, proposals included. Confidence below
   ``min_confidence`` is rejected.
 - Visibility: a sensitive label is always authority; a destination label is public (the public
@@ -316,6 +319,7 @@ def create_poi(ctx: ToolContext, args: CreatePoiArgs) -> dict[str, Any]:
     cand = _candidate(ctx, args.candidate_id)
     _check_label(ctx, args.label)
     _check_confidence(ctx, args.confidence)
+    guards.check_destination_label(ctx, args.label, cand.lat, cand.lon, cand.source)
     if any(p.candidate_id == cand.id for p in _active_pois(ctx)):
         raise GuardError(f"candidate {cand.id} already has an active POI; use update_poi to relabel it")
     now = ctx.now_dt()
@@ -357,6 +361,10 @@ def update_poi(
     conf = args.confidence if args.confidence is not None else p.confidence
     _check_confidence(ctx, conf)
     cand = _candidates(ctx).get(p.candidate_id)
+    if cand is not None:
+        guards.check_destination_label(ctx, label, cand.lat, cand.lon, cand.source)
+    else:  # candidate gone: judge the POI's own (candidate-copied) position
+        guards.check_destination_label(ctx, label, p.lat, p.lon, None)
     update: dict[str, Any] = {"label": label, "confidence": conf, "updated_at": ctx.now_dt()}
     if args.evidence is not None:
         update["evidence"] = _evidence(args.evidence)
@@ -404,6 +412,7 @@ def reactivate_poi(
         raise GuardError(f"candidate {cand.id} already has an active POI")
     _check_label(ctx, label)
     _check_confidence(ctx, confidence)
+    guards.check_destination_label(ctx, label, cand.lat, cand.lon, cand.source)
     new = p.model_copy(
         update={
             "status": "active",

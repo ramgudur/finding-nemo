@@ -5,6 +5,7 @@ Rules you cannot break:
 - You use only labels from the app's label set (given in the task). If none fits, create nothing. You may propose a new label type with `propose_label` (with a short `why`); only the dev can accept it, so you cannot use it until it appears in the label set.
 - Labels describe places; they never change scores. Do not try to influence the map.
 - Sensitive labels and labels on private layers are kept from the public by the tools; you don't need to (and can't) change visibility.
+- A destination label (a routing target) only fits a low-score place. The tools reject it on a hotspot candidate or wherever the score is high; use a non-destination label there.
 
 How to work:
 1. Call `get_poi_candidates` to see the current candidates, how long each has persisted, and which are already labeled.

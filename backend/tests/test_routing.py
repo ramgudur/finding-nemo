@@ -240,3 +240,104 @@ def test_trace_entry_has_every_check_but_no_text_or_position(grid):
         assert c.name in te.tested
     assert ins.text not in te.model_dump_json()
     assert mg._COORD_RE.search(te.model_dump_json()) is None
+
+
+# -- escape from a blocked area (#245) -------------------------------------------
+
+
+def _after_escape(route, region):
+    """Route cells after the leading run inside the start's blocked region."""
+    cells = route.cells
+    i = 0
+    while i < len(cells) and region[cells[i]]:
+        i += 1
+    return cells[i:]
+
+
+def test_start_inside_a_blocked_area_gets_a_route_out(grid):
+    score = grid.zeros()
+    score[20:30, 20:30] = 0.95  # the caller stands in the middle of it
+    start = pt(grid, 255, 255)
+    out = plan(grid, score, start, [dest(grid, 455, 255)])
+    assert out.reason == "ok", out.reason
+    r = out.route
+    region = routing.escape_region(score >= 0.8, r.cells[0])
+    assert region[r.cells[0]] and r.escape_cells >= 2
+    assert all(score[c] < 0.8 for c in _after_escape(r, region))  # once out, never in a blocked cell
+    text = routing.instruction_text(r, grid, None)
+    assert text.startswith("Leave this area now: head east") and "to exit" in text
+    assert mg._COORD_RE.search(text) is None and len(text) <= mg.MAX_CHARS
+
+    ins = run(grid, score, (255, 255), [poi(grid, 455, 255, "exit")])
+    assert ins.guard.passed, ins.guard.checks
+    assert ins.text.startswith("Leave this area now") and ins.destination.label == "exit"
+
+
+def test_escape_never_crosses_a_separate_blocked_area(grid):
+    score = grid.zeros()
+    score[20:30, 20:30] = 0.95  # where the caller is
+    score[0:45, 35] = 0.95  # a separate wall between them and the destination, gap at rows 45..49
+    out = plan(grid, score, pt(grid, 255, 255), [dest(grid, 455, 255)])
+    assert out.route is not None
+    region = routing.escape_region(score >= 0.8, out.route.cells[0])
+    assert not region[:, 35].any()  # the wall is not part of the caller's region
+    rest = _after_escape(out.route, region)
+    assert all(score[c] < 0.8 for c in rest)
+    assert max(r for r, _ in rest) >= 45  # went round through the gap
+    # with no gap the wall can't be crossed, even by someone escaping
+    score[:, 35] = 0.95
+    out = plan(grid, score, pt(grid, 255, 255), [dest(grid, 455, 255)])
+    assert out.route is None and "reachable" in out.reason
+
+
+def test_escape_routes_never_re_enter_the_start_region(grid):
+    rng = np.random.default_rng(7)
+    routed = 0
+    for _ in range(20):
+        score = np.clip(rng.random(grid.shape) * 0.6, 0, 1)
+        r0, c0 = (int(v) for v in rng.integers(10, 40, size=2))
+        hh, ww = (int(v) for v in rng.integers(3, 12, size=2))
+        score[r0 - hh // 2 : r0 + hh, c0 - ww // 2 : c0 + ww] = 0.9
+        score[r0 + hh - 2 : r0 + hh, c0 - ww // 2 : c0 + 1] = 0.3  # a notch, so cutting back in could pay
+        start = pt(grid, c0 * 10 + 5, r0 * 10 + 5)
+        out = plan(grid, score, start, [dest(grid, 455, 455), dest(grid, 45, 455)])
+        if out.route is None:
+            continue
+        routed += 1
+        region = routing.escape_region(score >= 0.8, out.route.cells[0])
+        assert all(not region[c] and score[c] < 0.8 for c in _after_escape(out.route, region))
+        res = mg._route_check(grid, score, out.route.points, 0.8)
+        assert res.passed, res.detail
+    assert routed >= 10
+
+
+def test_start_outside_any_blocked_area_is_unchanged(grid):
+    score = grid.zeros()
+    score[20:30, 20:30] = 0.95
+    out = plan(grid, score, pt(grid, 55, 255), [dest(grid, 455, 255)])
+    assert out.route.escape_cells == 0
+    assert all(score[c] < 0.8 for c in out.route.cells)
+    assert routing.instruction_text(out.route, grid, None).startswith("Head ")
+    assert not routing.escape_region(score >= 0.8, out.route.cells[0]).any()
+
+
+def test_guard_allows_only_the_escape_from_the_start_region(grid):
+    score = grid.zeros()
+    score[20:30, 20:30] = 0.95
+    out = plan(grid, score, pt(grid, 255, 255), [dest(grid, 455, 255)])
+    assert mg._route_check(grid, score, out.route.points, 0.8).passed
+    # a different blocked area appears on the route after the escape: rejected
+    later = score.copy()
+    r, c = _after_escape(out.route, routing.escape_region(score >= 0.8, out.route.cells[0]))[3]
+    later[r, c] = 0.95
+    assert not routing.escape_region(later >= 0.8, out.route.cells[0])[r, c]  # a separate blocked cell
+    assert not mg._route_check(grid, later, out.route.points, 0.8).passed
+    # leaving the start region and coming back into it: rejected
+    inside, outside = pt(grid, 255, 255), pt(grid, 305, 255)
+    back = [inside, pt(grid, 265, 255), pt(grid, 275, 255), pt(grid, 285, 255), pt(grid, 295, 255), outside,
+            pt(grid, 295, 255)]  # fmt: skip
+    res = mg._route_check(grid, score, back, 0.8)
+    assert not res.passed and "impassable" in res.detail
+    # starting outside, crossing the region is rejected as before
+    across = [pt(grid, 195, 255)] + [pt(grid, x, 255) for x in range(205, 315, 10)]
+    assert not mg._route_check(grid, score, across, 0.8).passed

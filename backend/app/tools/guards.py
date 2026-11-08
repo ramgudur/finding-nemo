@@ -7,6 +7,9 @@ CLAUDE.md rules enforced here:
    agents (there is no tool for the first two; ``engine/tiers.py`` freezes locked weights).
 5. Tier bounds, renormalization, cold start, pins (``engine/tiers.py``) and the trust cap
    (+0.1 per user per 5 min of Clock time; lowering is free with a reason).
+7. A ``destination`` label (a routing target) never goes on a high-score place: not on a
+   candidate made from a hotspot, and not where the current score is at or above the routing
+   destination threshold (``check_destination_label``).
 11. Every applied change writes a ``Change`` with before/after so the dev can roll it back.
 
 A failed check raises ``GuardError`` with reasons meant for the trace.
@@ -19,8 +22,9 @@ import uuid
 from collections.abc import Mapping, Sequence
 
 from app.core.models import Change
-from app.engine import tiers
+from app.engine import routing, tiers
 from app.engine import trust as trust_mod
+from app.engine.candidates.persistent_hotspots import SOURCE as HOTSPOT_SOURCE
 from app.tools.context import TestedCandidate, ToolContext
 
 BACKTEST_MAX_AGE_S = 600.0
@@ -266,3 +270,39 @@ def apply_trust(
 
 def new_change_id() -> str:
     return uuid.uuid4().hex
+
+
+# -- POI destinations ---------------------------------------------------------------
+
+
+def check_destination_label(ctx: ToolContext, label: str, lat: float, lon: float, source: str | None) -> None:
+    """Reject a ``destination`` label on a place routing could never send anyone to.
+
+    Uses the same limit as routing (``routing.destination_threshold``: below both the impassable
+    score and the hotspot threshold), read at the place's cell on the latest tick. A candidate made
+    from a hotspot is a high-score area by construction, so it is rejected whatever its score now.
+    Non-destination labels pass unchecked.
+    """
+    spec = ctx.spec
+    lbl = next((lb for lb in spec.outputs.poi_labels.label_set if lb.label == label), None)
+    if lbl is None or not lbl.destination:
+        return
+    if source == HOTSPOT_SOURCE:
+        raise GuardError(
+            f"label {label!r} is a destination label (a routing target) and this candidate is a high-score "
+            "area (made from a hotspot); a destination must be a low-score place. Use a non-destination label"
+        )
+    rt = ctx.runtime
+    if rt.last is None:
+        raise GuardError("no tick has run yet for this app")
+    r, c, inside = rt.grid.cell_of(lat, lon)
+    if not bool(inside):
+        raise GuardError(f"label {label!r} is a destination label and this place is outside the grid")
+    score = float(rt.last.score[int(r), int(c)])
+    limit = routing.destination_threshold(spec)
+    if not math.isfinite(score) or score >= limit:
+        raise GuardError(
+            f"label {label!r} is a destination label (a routing target) but this place scores {score:.2f}, "
+            f"at or above the destination limit {limit:.2f} (min of impassable_score and hotspot_threshold); "
+            "routing would never use it. Use a non-destination label"
+        )
