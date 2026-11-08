@@ -1,10 +1,12 @@
 // Area step body: the Leaflet map (always open), "use this view" as the area, optional fixed destinations
-// placed by clicking, and the cell size behind "Advanced" with the live cell count vs MAX_GRID_CELLS.
+// placed by clicking (warned and blocked when outside the area), and the cell size behind "Map detail" with the live cell count vs MAX_GRID_CELLS.
 import L from "leaflet";
-import { ChevronDown, Crosshair, MapPin, Scan, X } from "lucide-react";
+import { ChevronDown, Crosshair, MapPin, Scan, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MAX_GRID_CELLS } from "../../api/types";
 import type { BBox, DestinationPoint } from "../../api/types";
+import { useHelp } from "../builder/Help";
+import { CELL_SIZE_DETAIL, DESTINATION_DETAIL } from "../builder/explain";
 import { gridCells, round6 } from "./sourceUtils";
 
 interface Props {
@@ -98,6 +100,8 @@ export function AreaPicker(props: Props) {
   const [placing, setPlacing] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const mapRef = useRef<L.Map | null>(null);
+  const destHelp = useHelp("fixed destinations", DESTINATION_DETAIL);
+  const cellHelp = useHelp("cell size", CELL_SIZE_DETAIL);
 
   const dims = bbox && cellM > 0 ? gridCells(bbox, cellM) : null;
   const cells = dims ? dims[0] * dims[1] : 0;
@@ -120,12 +124,15 @@ export function AreaPicker(props: Props) {
     });
   };
 
+  const outsideCount = points.filter(outside).length;
+  const them = outsideCount === 1 ? "it" : "them";
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       <section aria-label="Area map" className="flex flex-col gap-3">
         <LeafletArea bbox={bbox} points={points} onPick={placing ? onPick : null} mapRef={mapRef} />
-        <div className="flex flex-wrap items-center gap-3">
-          <button type="button" onClick={useView} className="pill-btn pill-primary">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <button type="button" onClick={useView} className={`bld-btn tap ${bbox ? "bld-btn-secondary" : "bld-btn-primary"}`}>
             <Scan size={15} aria-hidden /> {bbox ? "Use this view instead" : "Use this view as the area"}
           </button>
           <p className="text-sm text-ink" aria-live="polite">
@@ -145,44 +152,44 @@ export function AreaPicker(props: Props) {
         )}
       </section>
 
-      <section
-        aria-labelledby="dest-h"
-        className="flex flex-col gap-3 rounded-3xl border border-white/60 bg-cream/55 px-5 py-4"
-      >
+      <section aria-labelledby="dest-h" className="bld-card flex flex-col gap-3 px-5 py-4">
         <div className="flex flex-wrap items-start gap-3">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <h2 id="dest-h" className="text-[15px] font-semibold text-slate">
-              Fixed destinations <span className="font-normal text-ink">(optional)</span>
-            </h2>
-            <p className="text-[13px] text-ink">
-              Places end users can be routed to, such as a meeting point. They are used exactly as you place them.
-            </p>
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <div className="flex items-center gap-1.5">
+              <h2 id="dest-h" className="bld-h3">
+                Fixed destinations <span className="font-normal text-ink">optional</span>
+              </h2>
+              {destHelp.button}
+            </div>
+            <p className="bld-hint">Places end users can be sent to, such as a meeting point. They are used exactly where you put them.</p>
           </div>
           <button
             type="button"
             onClick={() => setPlacing((p) => !p)}
             aria-pressed={placing}
-            className={`pill-btn ${placing ? "pill-active" : "pill-quiet"}`}
+            className={`bld-btn bld-btn-sm tap ${placing ? "bld-btn-primary" : "bld-btn-secondary"}`}
           >
             <Crosshair size={15} aria-hidden /> {placing ? "Done placing" : "Place on the map"}
           </button>
         </div>
-        {placing && <p className="text-[13px] font-semibold text-slate">Click the map to drop a destination.</p>}
+        {destHelp.panel}
+        {placing && (
+          <p className="bld-note font-semibold">Click or tap the map to drop a destination. Choose Done placing when you have them all.</p>
+        )}
         {points.length > 0 && (
           <ul className="flex flex-col gap-2">
             {points.map((p, k) => (
               <li key={k} className="flex flex-wrap items-center gap-2">
-                <MapPin size={15} className="text-mutedTeal" aria-hidden />
+                <MapPin size={15} className={outside(p) ? "text-danger" : "text-mutedTeal"} aria-hidden />
                 <input
                   aria-label={`Label for destination ${k + 1}`}
-                  placeholder="Label, e.g. the name of the place"
+                  aria-invalid={!p.label.trim()}
+                  placeholder="e.g. North gate"
                   value={p.label}
                   onChange={(e) => onUpdatePoint(k, { label: e.target.value })}
-                  className={`phone-16 min-w-0 flex-1 rounded-xl border bg-white/55 px-3 py-1.5 text-sm max-sm:min-h-11 text-slate placeholder:text-inkSoft focus:bg-white/85 ${
-                    p.label.trim() ? "border-white/70" : "border-danger/50"
-                  }`}
+                  className="bld-field is-sm min-w-0 flex-1"
                 />
-                <span className={`font-mono text-[11px] ${outside(p) ? "text-danger" : "text-ink"}`}>
+                <span className={`font-mono text-[11px] ${outside(p) ? "font-semibold text-danger" : "text-ink"}`}>
                   {p.lat}, {p.lon}
                   {outside(p) && " · outside the area"}
                 </span>
@@ -190,13 +197,22 @@ export function AreaPicker(props: Props) {
                   type="button"
                   onClick={() => onRemovePoint(k)}
                   aria-label={`Remove destination ${p.label || k + 1}`}
-                  className="tap flex items-center justify-center rounded-full p-1.5 text-ink transition-colors duration-150 hover:bg-white/60"
+                  className="tap flex items-center justify-center rounded-full p-1.5 text-ink transition-colors duration-150 hover:bg-white/60 hover:text-slate"
                 >
                   <X size={14} aria-hidden />
                 </button>
               </li>
             ))}
           </ul>
+        )}
+        {outsideCount > 0 && (
+          <p role="alert" className="bld-warn flex items-start gap-2">
+            <TriangleAlert size={15} className="mt-0.5 shrink-0" aria-hidden />
+            <span>
+              {outsideCount === 1 ? "One destination is" : `${outsideCount} destinations are`} outside the area, so the
+              platform would reject {them}. Remove {them}, or frame a bigger area that includes {them}.
+            </span>
+          </p>
         )}
       </section>
 
@@ -206,44 +222,52 @@ export function AreaPicker(props: Props) {
           onClick={() => setAdvanced((a) => !a)}
           aria-expanded={showAdvanced}
           aria-controls="area-advanced"
-          className="tap flex items-center gap-1.5 self-start rounded-full px-2 py-1 text-left text-sm font-semibold text-ink transition-colors duration-150 hover:bg-white/45 hover:text-slate"
+          className="tap flex items-center gap-1.5 self-start rounded-full px-2 py-1 text-left text-sm font-bold text-slate transition-colors duration-150 hover:bg-white/45"
         >
           <ChevronDown
             size={16}
             aria-hidden
             className={`transition-transform duration-200 ${showAdvanced ? "rotate-180" : ""}`}
           />
-          Advanced
+          Map detail
           {!showAdvanced && (
-            <span className="font-normal">
+            <span className="font-normal text-ink">
               · cells of {cellM} m{dims ? `, ${cells.toLocaleString()} in all` : ""}
             </span>
           )}
         </button>
         {showAdvanced && (
-          <div id="area-advanced" className="flex flex-col gap-2 rounded-2xl border border-white/60 bg-cream/45 px-5 py-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="flex items-center gap-2 text-sm text-slate">
+          <div id="area-advanced" className="bld-card-quiet flex flex-col gap-2 px-5 py-4">
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="cell-m" className="bld-label">
                 Cell size
+              </label>
+              {cellHelp.button}
+            </div>
+            {cellHelp.panel}
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="flex items-center gap-2">
                 <input
+                  id="cell-m"
                   type="number"
                   min={1}
                   value={Number.isFinite(cellM) ? cellM : ""}
+                  aria-invalid={over || !(cellM > 0)}
                   onChange={(e) => onCellM(Number(e.target.value))}
-                  className="phone-16 w-24 rounded-xl border border-white/70 bg-white/55 px-2.5 py-1 font-mono text-sm max-sm:min-h-11 text-slate focus:bg-white/85"
+                  className="bld-field is-mono is-sm w-24"
                 />
-                <span className="text-ink">metres</span>
-              </label>
+                <span className="text-sm text-ink">metres per side</span>
+              </span>
               {dims && (
-                <span className={`font-mono text-xs ${over ? "text-danger" : "text-ink"}`}>
+                <span className={`font-mono text-xs ${over ? "font-semibold text-danger" : "text-ink"}`}>
                   {dims[0]} × {dims[1]} = {cells.toLocaleString()} of {MAX_GRID_CELLS.toLocaleString()} cells
                 </span>
               )}
             </div>
-            <p className={`text-xs ${over ? "text-danger" : "text-ink"}`}>
+            <p className={`bld-hint ${over ? "font-semibold text-danger" : ""}`}>
               {over
-                ? "Too many cells: use a smaller area or bigger cells."
-                : "The map is scored on a grid of square cells. Smaller cells show more detail and cost more work each tick."}
+                ? "Too many cells: use bigger cells or a smaller area."
+                : "Smaller cells give sharper hotspots; a bigger area needs bigger cells."}
             </p>
           </div>
         )}

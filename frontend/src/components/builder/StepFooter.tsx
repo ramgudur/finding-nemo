@@ -38,7 +38,7 @@ export function StepFooter({ back, summary, problems, readyText, action, next, l
       }}
     >
       {showList && (
-        <div className="mx-auto mb-2 max-w-3xl rounded-[18px] border border-white/70 bg-cream/95 px-4 py-3 shadow-[0_18px_50px_-24px_rgba(53,89,107,0.7)] backdrop-blur-md">
+        <div className="mx-auto mb-2 max-w-3xl rounded-2xl bg-[#F6F3EA]/95 px-4 py-3 shadow-[0_18px_44px_-22px_rgba(53,89,107,0.65)] backdrop-blur-md">
           <p className="text-xs font-semibold text-slate">Still to fix before you continue</p>
           <ul id={listId} className="mt-1.5 max-h-[40vh] list-disc space-y-1 overflow-y-auto pl-4 text-[13px] text-ink marker:text-inkSoft">
             {problems.map((x) => (
@@ -49,11 +49,11 @@ export function StepFooter({ back, summary, problems, readyText, action, next, l
           </ul>
         </div>
       )}
-      <div className="mx-auto flex max-w-3xl items-center gap-3 rounded-[24px] border border-white/70 bg-cream/90 px-2 py-2 sm:px-3 sm:py-2.5 shadow-[0_18px_50px_-24px_rgba(53,89,107,0.7)] backdrop-blur-md sm:px-4">
+      <div className="mx-auto flex max-w-3xl items-center gap-3 rounded-[20px] bg-[#F6F3EA]/95 px-2 py-2 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset,0_18px_44px_-22px_rgba(53,89,107,0.65)] backdrop-blur-md sm:px-3 sm:py-2.5">
         {back ? (
           <Link
             to={back.to}
-            className="tap flex shrink-0 items-center justify-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold text-slate transition-colors duration-150 hover:bg-white/60"
+            className="bld-btn bld-btn-quiet tap shrink-0"
           >
             <ArrowLeft size={16} aria-hidden /> <span className="hidden sm:inline">{back.label}</span>
             <span className="sr-only sm:hidden">{back.label}</span>
@@ -93,7 +93,7 @@ export function StepFooter({ back, summary, problems, readyText, action, next, l
             type="button"
             disabled={blocked}
             onClick={next.onClick}
-            className="tap flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-white/60 bg-primary px-5 py-2.5 max-sm:px-4 text-sm font-semibold text-cream shadow-[0_8px_22px_-10px_rgba(47,88,114,0.9)] transition-[background-color,transform] duration-150 hover:-translate-y-px hover:bg-primaryHover disabled:translate-y-0 disabled:cursor-not-allowed disabled:bg-ink/45 disabled:shadow-none motion-reduce:hover:translate-y-0"
+            className="bld-btn bld-btn-primary tap shrink-0 px-5 py-2.5 max-sm:px-4"
           >
             {next.label} <ArrowRight size={16} aria-hidden />
           </button>

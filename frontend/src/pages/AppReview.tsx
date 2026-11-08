@@ -21,6 +21,7 @@ import {
 } from "../components/architecture/ReviewSections";
 import { specLayers } from "../components/architecture/specLayers";
 import { TierBadge } from "../components/architecture/TierBadge";
+import { VERIFICATION_PLAIN } from "../components/builder/explain";
 import { useBuilderStore } from "../store/useBuilderStore";
 import { isProposed } from "../components/app/appState";
 
@@ -174,13 +175,18 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
 
   return (
     <AppShell wide>
+      <div className="bld flex flex-col gap-6">
       <header className="space-y-2">
         <Breadcrumb appId={appId} />
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-[26px] font-bold leading-tight text-slate">Review proposal</h1>
+          <h1 className="bld-title">Review the proposal</h1>
           <StatusChip live={false} />
         </div>
-        <p className="max-w-[70ch] text-[15px] text-ink">{spec.intent}</p>
+        <p className="bld-lead max-w-[70ch]">
+          Nemotron read your intent and sources and proposed the plan below. Check each setting, change anything you
+          like, save, then confirm. Nothing runs until you confirm.
+        </p>
+        <p className="max-w-[70ch] text-[14px] italic text-ink">“{spec.intent}”</p>
         <p className="font-mono text-[12px] text-ink">
           {plural(inputs.length, "input")} · {plural(nLayers, "layer")} · {spec.grid.cell_m} m cells
         </p>
@@ -197,13 +203,16 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
         )}
       </header>
 
-      <section aria-labelledby="rv-how" className="rounded-3xl bg-washedSky/60 p-4 shadow-[0_6px_24px_-12px_rgba(53,89,107,0.25)] sm:p-5">
+      <section aria-labelledby="rv-how" className="bld-card p-4 sm:p-5">
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
           <div>
-            <h2 id="rv-how" className="text-[15px] font-bold text-slate">
-              How your score is built
+            <h2 id="rv-how" className="bld-h2">
+              How your map's score is built
             </h2>
-            <p className="text-[13px] text-ink">Each input feeds operators; their layers are weighted and summed. Select a layer to trace it.</p>
+            <p className="bld-hint max-w-[70ch] text-[13px]">
+              Each source is read in one or more ways, and each way makes a layer. The layers are added up by weight
+              into a score from 0 to 1; confirmed zones always win on top. Select a layer to follow it.
+            </p>
           </div>
           <p className="font-mono text-[12px] text-slate">
             score = clamp(Σ wᵢ · norm(layerᵢ), 0, 1) <span className="text-ink">→ then authority overrides</span>
@@ -213,7 +222,7 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
       </section>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="min-w-0 space-y-6 rounded-3xl bg-cream/50 p-4 sm:p-6">
+        <div className="bld-card min-w-0 space-y-6 p-4 sm:p-6">
           <ReviewMessages d={d} />
           <InputsSection d={d} />
           <VerificationSection d={d} />
@@ -221,9 +230,10 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
           <RoutingSection d={d} />
         </div>
         <aside aria-labelledby="rv-grid" className="min-w-0 lg:sticky lg:top-24 lg:self-start">
-          <h2 id="rv-grid" className="mb-2 text-[15px] font-bold text-slate">
+          <h2 id="rv-grid" className="bld-h3 mb-1">
             Grid preview
           </h2>
+          <p className="bld-hint mb-2">The area split into cells. It fills with real values once the app is live.</p>
           <ProposedSchematic spec={d.draft} selectedLayerId={selectedLayerId} />
         </aside>
       </div>
@@ -240,7 +250,7 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
               </span>
             ) : (
               <>
-                <span className="font-semibold">Confirming locks:</span> {summary}.
+                <span className="font-semibold">Confirming makes permanent:</span> {summary}.
               </>
             )}
           </span>
@@ -298,7 +308,7 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
             </p>
           </div>
           <div className="space-y-1.5">
-            <h3 className="text-[13px] font-semibold">Input tiers</h3>
+            <h3 className="text-[13px] font-semibold">How far the AI may change each source</h3>
             <ul className="space-y-1">
               {inputs.map((i) => (
                 <li key={i.id} className="flex items-center justify-between gap-3 text-[13px]">
@@ -324,13 +334,16 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
             )}
           </div>
           <div className="space-y-1.5">
-            <h3 className="text-[13px] font-semibold">Verification order</h3>
+            <h3 className="text-[13px] font-semibold">How changes are checked, in order</h3>
             {verification.length === 0 ? (
               <p className="text-[13px] text-ink">None: the Critic will never be able to change a weight.</p>
             ) : (
               <ol className="list-decimal space-y-0.5 pl-5 font-mono text-[13px]">
                 {verification.map((v) => (
-                  <li key={v.method}>{v.method}</li>
+                  <li key={v.method}>
+                    <span className="font-sans font-semibold">{VERIFICATION_PLAIN[v.method]?.name ?? v.method}</span>{" "}
+                    <span className="text-ink">({v.method})</span>
+                  </li>
                 ))}
               </ol>
             )}
@@ -348,6 +361,7 @@ function Review({ spec, onSaved }: { spec: AppSpec; onSaved: (spec: AppSpec) => 
           </div>
         </div>
       </dialog>
+      </div>
     </AppShell>
   );
 }

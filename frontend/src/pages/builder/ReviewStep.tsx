@@ -9,24 +9,29 @@ import { recordProject, saveSpecSnapshot } from "../../api/authorityKey";
 import { ApiError, api } from "../../api/client";
 import type { CompileRequest, CompileStatus } from "../../api/types";
 import { FailurePanel, toFailure } from "../../components/builder/Failure";
+import { StepIntro } from "../../components/builder/Help";
 import { StepFooter } from "../../components/builder/StepFooter";
 import type { Failure } from "../../components/builder/Failure";
 import { KindBadge } from "../../components/sources/SourceSuggestionCard";
 import { WebhookSummary } from "../../components/sources/WebhookSummary";
 import { useActiveIds, useDraft } from "../../components/builder/useDraft";
 import { areaSize } from "../../components/sources/AreaPicker";
-import { SHAPE_INFO, gridCells, stepProblems, webhookForCompile } from "../../components/sources/sourceUtils";
+import {
+  SHAPE_INFO,
+  connectorForCompile,
+  gridCells,
+  listMappingOf,
+  stepProblems,
+  webhookForCompile,
+} from "../../components/sources/sourceUtils";
 import { useBuilderStore } from "../../store/useBuilderStore";
 
 function Section({ title, edit, children }: { title: string; edit: string; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-2 border-t border-inkSoft/25 pt-4 first:border-t-0 first:pt-0">
+    <section className="flex flex-col gap-2.5 border-t border-[rgba(99,143,145,0.25)] pt-5 first:border-t-0 first:pt-0">
       <div className="flex items-baseline gap-3">
-        <h2 className="text-[15px] font-semibold text-slate">{title}</h2>
-        <Link
-          to={edit}
-          className="hit relative ml-auto rounded-md px-1 text-sm font-semibold text-primary underline underline-offset-[3px] hover:text-primaryHover"
-        >
+        <h2 className="bld-h3">{title}</h2>
+        <Link to={edit} className="bld-link hit relative ml-auto rounded-md px-1 text-sm">
           Edit<span className="sr-only"> {title.toLowerCase()}</span>
         </Link>
       </div>
@@ -143,7 +148,7 @@ export function ReviewStep() {
         shape: x.shape,
         meaning: x.meaning,
         fields: x.fields ?? [],
-        ...(x.kind === "pull" && x.connector ? { connector: x.connector } : {}),
+        ...(x.kind === "pull" && x.connector ? { connector: connectorForCompile(x.connector, x.fields) } : {}),
         ...(x.kind === "push" && x.webhook ? { webhook: webhookForCompile(x.webhook, x.fields) } : {}),
       })),
       destination_points: draft.destinationPoints.map((p) => ({ ...p, label: p.label.trim() })),
@@ -187,15 +192,13 @@ export function ReviewStep() {
 
   return (
     <>
-      <header className="flex flex-col gap-1.5">
-        <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.02em] text-slate">Review & compile</h1>
-        <p className="max-w-[62ch] text-[15px] text-ink">
-          Check your draft. Compiling asks Nemotron to propose a plan; nothing goes live until you confirm it on the
-          next page.
-        </p>
-      </header>
+      <StepIntro
+        step={4}
+        title="Review & compile"
+        lead="Check your draft, then compile. Nemotron proposes a plan: how each source becomes map layers, how much each counts, and how changes are checked. Nothing goes live until you confirm it on the next page."
+      />
 
-      <div className="flex flex-col gap-4 rounded-3xl border border-white/60 bg-cream/65 px-5 py-5 shadow-[0_14px_40px_-28px_rgba(53,89,107,0.6)] sm:px-6">
+      <div className="bld-card flex flex-col gap-5 px-5 py-5 sm:px-6">
         <Section title="About" edit="/new/about">
           <dl className="flex flex-col gap-2">
             <Row label="Name">{draft.name || "—"}</Row>
@@ -241,6 +244,12 @@ export function ReviewStep() {
                     </span>
                   )}
                   {x.kind === "push" && x.webhook && <WebhookSummary w={webhookForCompile(x.webhook, x.fields)} />}
+                  {x.connector?.type === "json_list" && (
+                    <WebhookSummary
+                      title={`Fetches a JSON list from ${x.connector.url ?? ""}`}
+                      w={webhookForCompile(listMappingOf(x.connector), x.fields)}
+                    />
+                  )}
                 </li>
               ))}
             </ul>
@@ -254,7 +263,7 @@ export function ReviewStep() {
           tabIndex={-1}
           role="status"
           aria-live="polite"
-          className="flex scroll-mb-32 scroll-mt-28 flex-col gap-3 rounded-3xl border border-white/70 bg-washedSky/70 px-5 py-5 sm:px-6"
+          className="bld-card flex scroll-mb-32 scroll-mt-28 flex-col gap-3 px-5 py-5 sm:px-6"
         >
           <div className="flex items-center gap-3">
             <LoaderCircle size={20} className="shrink-0 animate-spin text-primary motion-reduce:animate-none" aria-hidden />
@@ -270,16 +279,16 @@ export function ReviewStep() {
             type="button"
             onClick={() => void compile()}
             disabled={blocked}
-            className="flex items-center gap-2 rounded-full border border-white/60 bg-primary px-6 py-3 text-[15px] font-semibold text-cream shadow-[0_10px_26px_-12px_rgba(47,88,114,0.9)] transition-[background-color,transform] duration-150 hover:-translate-y-px hover:bg-primaryHover disabled:translate-y-0 disabled:cursor-not-allowed disabled:bg-ink/45 disabled:shadow-none motion-reduce:hover:translate-y-0"
+            className="bld-btn bld-btn-primary tap px-6 py-3 text-[15px]"
           >
             <Sparkles size={17} aria-hidden /> Compile with Nemotron
           </button>
-          <p className="text-xs text-ink">
+          <p className="bld-hint">
             {cooldownS > 0
               ? `The model is busy. You can try again in ${cooldownS} s.`
               : problems.length
                 ? problems[0]
-                : "This proposes a plan only. The app is not activated."}
+                : "This only proposes a plan, usually in 30 s to 2 minutes. The app is not activated."}
           </p>
         </div>
       )}

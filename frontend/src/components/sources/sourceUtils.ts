@@ -35,14 +35,30 @@ export const OPTION_KIND: Record<SourceOptionType, InputKind> = {
   webhook: "push",
   rss: "pull",
   json_api: "pull",
+  json_list: "pull",
 };
+
+/** Shown in the "We fetch it" column even when the suggester (an older server) doesn't list it. */
+export const JSON_LIST_OPTION: SourceOption = {
+  type: "json_list",
+  label: "JSON list / GeoJSON feed (we fetch it)",
+  why: "A web address that returns a list of items with coordinates. We fetch it on a schedule and map each item.",
+};
+
+/** How often a fetched source is checked. */
+export const POLL_CHOICES: { s: number; label: string }[] = [
+  { s: 60, label: "every minute" },
+  { s: 300, label: "every 5 minutes" },
+  { s: 900, label: "every 15 minutes" },
+  { s: 3600, label: "every hour" },
+];
 
 export const optionKey = (o: SourceOption) => `${o.type}:${String(o.config?.preset ?? "")}`;
 export const presetOf = (o: SourceOption | null | undefined) =>
   typeof o?.config?.preset === "string" ? o.config.preset : null;
 
-/** A pull option that must have a URL before it can be added (custom json_api). RSS may stay empty (Scout). */
-export const urlRequired = (o: SourceOption) => o.type === "json_api" && !presetOf(o);
+/** A pull option that must have a URL before it can be added (custom json_api, json_list). RSS may stay empty (Scout). */
+export const urlRequired = (o: SourceOption) => (o.type === "json_api" && !presetOf(o)) || o.type === "json_list";
 
 export function parseConfig(text: string): Record<string, unknown> | null {
   if (!text.trim()) return {};
@@ -62,6 +78,12 @@ export function areaCentre(b: BBox | null) {
 export interface ConnectorDraft {
   url: string;
   configText: string;
+  /** json_list only: where each item keeps its place, time and fields (same keys as a webhook mapping). */
+  mapping?: WebhookMapping;
+  /** json_list only: seconds between fetches. */
+  pollS?: number;
+  /** json_list only: a sample body for the path preview (stays in this browser, never compiled). */
+  sample?: string;
 }
 
 export function connectorDraftFor(o: SourceOption, bbox: BBox | null): ConnectorDraft {
@@ -69,14 +91,19 @@ export function connectorDraftFor(o: SourceOption, bbox: BBox | null): Connector
   return {
     url: typeof o.config?.url === "string" ? o.config.url : "",
     configText: o.type === "json_api" && c ? JSON.stringify(c) : "",
+    ...(o.type === "json_list" ? { mapping: emptyWebhook(), pollS: 300 } : {}),
   };
 }
 
 /** Why this draft can't be added yet, or null. */
 export function connectorProblem(o: SourceOption, d: ConnectorDraft): string | null {
-  if (urlRequired(o) && !d.url.trim()) return "A custom JSON API source needs its URL.";
+  if (urlRequired(o) && !d.url.trim()) return o.type === "json_list" ? "Add the web address of the JSON list." : "A custom JSON API source needs its URL.";
   if (d.url.trim() && !/^https?:\/\//i.test(d.url.trim())) return "The URL must start with http:// or https://.";
   if (o.type === "json_api" && parseConfig(d.configText) === null) return "Connector config must be a JSON object.";
+  if (o.type === "json_list") {
+    const first = webhookProblems(d.mapping ?? emptyWebhook(), [])[0];
+    if (first) return `Item mapping: ${first}.`;
+  }
   return null;
 }
 
@@ -84,6 +111,15 @@ export function connectorProblem(o: SourceOption, d: ConnectorDraft): string | n
  *  Compiler can ask the Scout for one). */
 export function connectorOf(o: SourceOption, d: ConnectorDraft): ConnectorConfig | undefined {
   if (OPTION_KIND[o.type] !== "pull") return undefined;
+  if (o.type === "json_list") {
+    return {
+      type: "json_list",
+      url: d.url.trim(),
+      preset: null,
+      poll_s: d.pollS ?? 300,
+      config: listConfigOf(d.mapping ?? emptyWebhook()),
+    };
+  }
   const type = o.type === "rss" ? "rss" : "json_api";
   const preset = presetOf(o);
   if (!preset && !d.url.trim()) return undefined;
@@ -225,6 +261,12 @@ export function sourcesProblems(d: SourcesDraft): string[] {
     d.sources.some((s) => s.kind === "push" && s.connector) && "A source your app sends can't also be polled.",
     d.sources.some((s) => s.connector?.type === "json_api" && !s.connector.preset && !s.connector.url) &&
       "A custom JSON source needs its URL.",
+    d.sources.some((s) => s.connector?.type === "json_list" && !s.connector.url) && "A JSON list source needs its web address.",
+    ...d.sources.flatMap((s) =>
+      s.connector?.type === "json_list"
+        ? webhookProblems(listMappingOf(s.connector), s.fields).map((p) => `${s.id} item mapping: ${p}.`)
+        : [],
+    ),
     d.sources.some((s) => s.kind === "pull" && s.webhook) && "A source we fetch can't also receive a webhook.",
     ...d.sources.flatMap((s) =>
       s.kind === "push" && s.webhook ? webhookProblems(s.webhook, s.fields).map((p) => `${s.id} webhook: ${p}.`) : [],
@@ -429,4 +471,42 @@ export function previewWebhook(w: WebhookMapping, fields: InputField[] | undefin
     );
   }
   return { state: "ok", itemCount: items.length, rows };
+}
+
+// --- json_list connector: the same mapping keys as a webhook, kept in connector.config (contract E) ---
+
+/** The mapping held in a json_list connector's config, as the shared editor edits it. */
+export function listMappingOf(c: ConnectorConfig): WebhookMapping {
+  const cfg = c.config ?? {};
+  const str = (k: string) => (typeof cfg[k] === "string" ? (cfg[k] as string) : "");
+  const fields = cfg.fields && typeof cfg.fields === "object" && !Array.isArray(cfg.fields) ? (cfg.fields as Record<string, string>) : {};
+  const fmt = str("ts_format");
+  return {
+    items_path: str("items_path"),
+    lat: str("lat"),
+    lon: str("lon"),
+    ts: str("ts") || null,
+    ts_format: fmt === "epoch_s" || fmt === "epoch_ms" ? fmt : "iso",
+    user_id: str("user_id") || null,
+    fields: { ...fields },
+  };
+}
+
+/** A json_list config from a mapping: {items_path, lat, lon, ts?, ts_format, user_id?, fields}. */
+export function listConfigOf(m: WebhookMapping): Record<string, unknown> {
+  return {
+    items_path: m.items_path ?? "",
+    lat: m.lat,
+    lon: m.lon,
+    ...(m.ts ? { ts: m.ts } : {}),
+    ts_format: m.ts_format ?? "iso",
+    ...(m.user_id ? { user_id: m.user_id } : {}),
+    fields: m.fields ?? {},
+  };
+}
+
+/** The connector as the compile body carries it: a json_list mapping trimmed to the declared fields. */
+export function connectorForCompile(c: ConnectorConfig, fields: InputField[] | undefined): ConnectorConfig {
+  if (c.type !== "json_list") return c;
+  return { ...c, url: (c.url ?? "").trim(), config: listConfigOf(webhookForCompile(listMappingOf(c), fields)) };
 }

@@ -26,9 +26,9 @@ export function NewEntry() {
   };
 
   return (
-    <section aria-labelledby="resume-h" className="flex flex-col gap-5 rounded-3xl border border-white/60 bg-cream/70 px-6 py-6 shadow-[0_14px_40px_-28px_rgba(53,89,107,0.6)]">
+    <section aria-labelledby="resume-h" className="bld-card flex flex-col gap-5 px-6 py-6">
       <div className="flex flex-col gap-1.5">
-        <h1 id="resume-h" className="text-[26px] font-semibold leading-tight tracking-[-0.02em] text-slate">
+        <h1 id="resume-h" className="bld-title">
           {live ? `${title} is already live` : `Resume ${title}?`}
         </h1>
         <p className="max-w-[60ch] text-[15px] text-ink">
@@ -42,7 +42,7 @@ export function NewEntry() {
         {live ? (
           <Link
             to={appPath}
-            className="flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-cream shadow-[0_8px_22px_-10px_rgba(47,88,114,0.9)] transition-colors duration-150 hover:bg-primaryHover"
+            className="bld-btn bld-btn-primary tap"
           >
             Open {title} <ArrowRight size={16} aria-hidden />
           </Link>
@@ -50,13 +50,13 @@ export function NewEntry() {
           <>
             <Link
               to="/new/review"
-              className="flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-cream shadow-[0_8px_22px_-10px_rgba(47,88,114,0.9)] transition-colors duration-150 hover:bg-primaryHover"
+              className="bld-btn bld-btn-primary tap"
             >
               Resume draft <ArrowRight size={16} aria-hidden />
             </Link>
             <Link
               to={`${appPath}/review`}
-              className="rounded-full px-4 py-2.5 text-sm font-semibold text-slate underline underline-offset-[3px] transition-colors duration-150 hover:bg-white/50"
+              className="bld-btn bld-btn-quiet tap underline underline-offset-[3px]"
             >
               See its proposal
             </Link>
@@ -65,7 +65,7 @@ export function NewEntry() {
         <button
           type="button"
           onClick={startNew}
-          className="flex items-center gap-2 rounded-full border border-white/70 bg-cream/80 px-5 py-2.5 text-sm font-semibold text-slate transition-colors duration-150 hover:bg-cream"
+          className="bld-btn bld-btn-secondary tap"
         >
           <Plus size={16} aria-hidden /> Start new
         </button>
