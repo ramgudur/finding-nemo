@@ -236,6 +236,25 @@ def test_body_over_1mb_is_413(client, keys):
     assert r.status_code == 413
 
 
+def test_body_over_1mb_is_413_even_without_a_content_length_header(client, keys):
+    # a generator body is sent chunked, with no Content-Length -- the cap must still be enforced
+    # on the stream itself, not only by trusting the header
+    huge = _payload(*([_report()] * 1))
+    huge["padding"] = "x" * 1_100_000
+    data = json.dumps(huge).encode()
+
+    def chunks():
+        for i in range(0, len(data), 4096):
+            yield data[i : i + 4096]
+
+    r = client.post(
+        "/v1/apps/test-app/webhooks/pings",
+        content=chunks(),
+        headers={"X-Ingest-Key": keys["ingest_key"], "Content-Type": "application/json"},
+    )
+    assert r.status_code == 413
+
+
 def test_over_500_items_is_413(client, keys):
     r = _post(client, keys["ingest_key"], _payload(*([_report()] * 501)))
     assert r.status_code == 413

@@ -98,9 +98,18 @@ async def post_webhook(
     if inp.kind != "push" or inp.webhook is None:
         raise HTTPException(status_code=409, detail="input is not a push input with a webhook mapping")
 
-    raw = await request.body()
-    if len(raw) > MAX_BODY_BYTES:
+    content_length = request.headers.get("content-length")
+    if content_length is not None and content_length.isdigit() and int(content_length) > MAX_BODY_BYTES:
         raise HTTPException(status_code=413, detail=f"body over {MAX_BODY_BYTES} bytes")
+    # Content-Length can be absent (chunked transfer) or understate the real size, so the real
+    # limit is enforced on the stream itself -- a sender can't force the full body into memory
+    # by lying about or omitting the header.
+    chunks = bytearray()
+    async for chunk in request.stream():
+        chunks.extend(chunk)
+        if len(chunks) > MAX_BODY_BYTES:
+            raise HTTPException(status_code=413, detail=f"body over {MAX_BODY_BYTES} bytes")
+    raw = bytes(chunks)
     try:
         body = json.loads(raw)
     except json.JSONDecodeError as e:
