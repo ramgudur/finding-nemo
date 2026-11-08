@@ -76,6 +76,7 @@ export const VIA_LABEL: Record<NonNullable<SourceStatus["via"]>, string> = {
   rss: "RSS feed",
   json_api: "JSON API",
   json_list: "JSON list",
+  local_file: "Local file",
 };
 
 /** Dot colour per tone; error text is always written out too, never colour alone. */

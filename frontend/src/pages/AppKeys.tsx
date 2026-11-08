@@ -17,6 +17,7 @@ import { PushInputGuide } from "../components/keys/PushInputGuide";
 import { TryIt } from "../components/keys/TryIt";
 import { LANGS, type Lang } from "../components/keys/snippets";
 import { GuideStep, RefTable } from "../components/keys/ui";
+import { localFileLabel, localFileOf } from "../components/sources/sourceUtils";
 import { useBuilderStore } from "../store/useBuilderStore";
 
 const INGEST_PLACEHOLDER = "<your ingest key>";
@@ -64,6 +65,12 @@ const every = (s: number) => (s < 120 ? `${s} s` : s % 3600 === 0 ? `${s / 3600}
 function connectorWhat(i: InputSpec) {
   const c = i.connector;
   if (!c) return "No source is set, so nothing is fetched yet.";
+  if (c.type === "local_file")
+    return (
+      <>
+        {localFileLabel(c)} <span className="break-all font-mono text-[13px] text-slate">backend/data/feeds/{localFileOf(c)}</span>
+      </>
+    );
   const kind = c.type === "rss" ? "RSS feed" : c.type === "json_list" ? "JSON list" : c.preset ? `JSON API (${c.preset} preset)` : "JSON API";
   return (
     <>

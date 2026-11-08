@@ -38,7 +38,7 @@ import {
   operatorPlain,
 } from "../builder/explain";
 import { WebhookSummary } from "../sources/WebhookSummary";
-import { listMappingOf } from "../sources/sourceUtils";
+import { listMappingOf, localFileLabel } from "../sources/sourceUtils";
 import { TIER_SURFACE } from "./TierBadge";
 import { TIER_HELP, TIERS, layerIdOf, operatorChoices, useOperatorCatalog } from "./specLayers";
 
@@ -310,6 +310,7 @@ function arrival(input: InputSpec): string {
   if (c.preset) return `Fetched${every} with the ready-made ${c.preset} setup`;
   if (c.type === "rss") return `Fetched${every} from a news feed`;
   if (c.type === "json_list") return `Fetched${every} from a JSON list`;
+  if (c.type === "local_file") return localFileLabel(c);
   return `Fetched${every} from a JSON address`;
 }
 

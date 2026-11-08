@@ -10,6 +10,7 @@ import type { CompileInput, ConnectorConfig, InputField, WebhookMapping } from "
 import { KindBadge } from "../sources/SourceSuggestionCard";
 import { WebhookEditor } from "../sources/WebhookEditor";
 import {
+  LOCAL_FILE_NAME,
   POLL_CHOICES,
   SHAPE_INFO,
   SLUG,
@@ -17,6 +18,8 @@ import {
   fieldsToText,
   listConfigOf,
   listMappingOf,
+  localFileLabel,
+  localFileOf,
   parseFields,
   webhookProblems,
 } from "../sources/sourceUtils";
@@ -52,6 +55,7 @@ function optionsProblem(source: CompileInput, fieldsProblem: string | null): str
   if (fieldsProblem) return fieldsProblem;
   const c = source.connector;
   if (c?.type === "json_api" && !c.preset && !c.url) return NEEDS_URL;
+  if (c?.type === "local_file" && !LOCAL_FILE_NAME.test(localFileOf(c))) return "This source needs a bare file name ending in .txt.";
   if (c?.type === "json_list") {
     if (!c.url) return NEEDS_URL;
     const p = webhookProblems(listMappingOf(c), source.fields)[0];
@@ -113,6 +117,8 @@ export const SourceRow = forwardRef<HTMLLIElement, Props>(function SourceRow(
       ? `Ready-made setup: ${source.connector.preset}`
       : list
         ? `${source.connector.url ?? ""} · ${every(list.poll_s)}`
+        : source.connector.type === "local_file"
+          ? `${localFileLabel(source.connector)} · backend/data/feeds/${localFileOf(source.connector)}`
         : (source.connector.url ?? null)
     : source.kind === "pull"
       ? "No feed yet; we'll look for one when you compile."
