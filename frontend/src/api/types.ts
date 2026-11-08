@@ -1,5 +1,6 @@
 // Mirrors backend/app/core/models.py. Update both together (lead approves contract changes).
-// Datetimes are UTC ISO-8601 strings. A bare coordinate pair is [lat, lon].
+// Datetimes are ISO-8601 strings with a timezone (naive times are rejected; the server returns UTC).
+// A bare coordinate pair is [lat, lon].
 
 export type Visibility = "public" | "authority";
 export type Tier = "locked" | "stiff" | "flexible";
@@ -69,7 +70,7 @@ export interface InputSpec {
 
 export interface VerificationSpec {
   method: VerificationMethod;
-  priority: number; // 1 is highest
+  priority: number; // 1 is highest; unique within a spec
 }
 
 export interface OutputLayer {
@@ -105,7 +106,7 @@ export interface RoutingSpec {
   destination_points?: DestinationPoint[];
   impassable_score?: number; // default 0.8
   alpha?: number; // default 4.0
-  fallback_text?: string;
+  fallback_text?: string; // <= 360 chars
   rephrase?: boolean; // default false
 }
 

@@ -9,10 +9,10 @@ Conventions: meters, seconds, UTC ISO-8601 datetimes. Coordinates are always nam
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Literal
+from datetime import UTC, datetime
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 Lat = float
 Lon = float
@@ -33,6 +33,14 @@ Actor = Literal["agent", "dev"]
 Device = Literal["cpu", "gpu"]
 
 SLUG = r"^[a-z0-9][a-z0-9_-]{0,63}$"
+
+
+def _to_utc(d: datetime) -> datetime:
+    return d.astimezone(UTC)
+
+
+# Naive datetimes are rejected; aware ones are normalized to UTC.
+UtcDatetime = Annotated[AwareDatetime, AfterValidator(_to_utc)]
 
 
 class Model(BaseModel):
@@ -127,7 +135,7 @@ class InputSpec(Model):
 
 class VerificationSpec(Model):
     method: VerificationMethod
-    priority: int = Field(ge=1, description="1 is the highest priority.")
+    priority: int = Field(ge=1, description="1 is the highest priority; unique within a spec.")
 
 
 class OutputLayer(Model):
@@ -169,7 +177,9 @@ class RoutingSpec(Model):
     destination_points: list[DestinationPoint] = Field(default_factory=list)
     impassable_score: float = Field(default=0.8, gt=0, le=1)
     alpha: float = Field(default=4.0, ge=0)
-    fallback_text: str = "No safe route found. Stay where you are and follow official instructions."
+    fallback_text: str = Field(
+        default="No safe route found. Stay where you are and follow official instructions.", max_length=360
+    )
     rephrase: bool = False
 
 
@@ -201,6 +211,9 @@ class AppSpec(Model):
         methods = [v.method for v in self.verification]
         if len(methods) != len(set(methods)):
             raise ValueError("verification methods must be unique")
+        priorities = [v.priority for v in self.verification]
+        if len(priorities) != len(set(priorities)):
+            raise ValueError("verification priorities must be unique")
         labels = [p.label for p in self.outputs.poi_labels.label_set]
         if len(labels) != len(set(labels)):
             raise ValueError("POI labels must be unique")
@@ -219,7 +232,7 @@ class Event(BaseModel):
     user_id: str | None = None
     lat: Lat = Field(ge=-90, le=90)
     lon: Lon = Field(ge=-180, le=180)
-    ts: datetime
+    ts: UtcDatetime
 
 
 # --- Engine outputs --------------------------------------------------------------
@@ -253,8 +266,8 @@ class POI(Model):
     evidence: list[Evidence] = Field(default_factory=list)
     visibility: Visibility = "authority"
     status: PoiStatus = "active"
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
 
 
 class Backtest(Model):
@@ -267,7 +280,7 @@ class Backtest(Model):
     passed: bool
     device: Device
     elapsed_ms: float = Field(ge=0)
-    t: datetime
+    t: UtcDatetime
 
 
 class ToolCall(Model):
@@ -278,7 +291,7 @@ class ToolCall(Model):
 
 
 class TraceEntry(Model):
-    t: datetime
+    t: UtcDatetime
     app_id: str
     agent: AgentName
     model: str | None = None
@@ -302,7 +315,7 @@ class Change(Model):
     reason: str
     backtest_id: str | None = None
     actor: Actor
-    t: datetime
+    t: UtcDatetime
 
 
 # --- End-user instructions -------------------------------------------------------
@@ -331,5 +344,5 @@ class Instruction(Model):
     destination: DestinationPoint | None = Field(default=None, description="None on fallback.")
     route: list[tuple[Lat, Lon]] = Field(default_factory=list, description="[lat, lon] pairs.")
     distance_m: float = Field(default=0, ge=0)
-    computed_at: datetime
+    computed_at: UtcDatetime
     guard: GuardResult

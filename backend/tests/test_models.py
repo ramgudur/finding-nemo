@@ -99,6 +99,29 @@ def test_event_keeps_input_fields_as_extras():
     assert e.user_id is None
 
 
+def test_verification_priorities_must_be_unique():
+    bad = _spec(
+        verification=[
+            {"method": "predictive_check", "priority": 1},
+            {"method": "cross_input_agreement", "priority": 1},
+        ]
+    )
+    with pytest.raises(ValidationError, match="priorities must be unique"):
+        AppSpec.model_validate(bad)
+
+
+def test_fallback_text_capped_at_360():
+    with pytest.raises(ValidationError):
+        AppSpec.model_validate(_spec(routing={"fallback_text": "x" * 361}))
+
+
+def test_naive_datetimes_rejected_and_aware_ones_normalized_to_utc():
+    with pytest.raises(ValidationError):
+        Event.model_validate({"lat": 1.0, "lon": 2.0, "ts": "2026-01-01T00:00:00"})
+    e = Event.model_validate({"lat": 1.0, "lon": 2.0, "ts": "2026-01-01T02:00:00+02:00"})
+    assert e.ts == NOW and e.ts.utcoffset().total_seconds() == 0
+
+
 def test_instruction_text_capped_at_360():
     with pytest.raises(ValidationError):
         Instruction(text="x" * 361, computed_at=NOW, guard={"passed": True})
