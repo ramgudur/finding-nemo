@@ -213,12 +213,21 @@ def suspicious_users_by_input(
     events_by_input: Mapping[str, Events],
     plausibility_by_input: Mapping[str, object | None] | None = None,
     base: SpoofParams | None = None,
+    shape_by_input: Mapping[str, str] | None = None,
 ) -> list[UserSuspicion]:
     """Run `suspicious_users` per input with that input's plausibility limits, then merge per user
-    (union of flags, max score). Use this instead of concatenating inputs with different limits."""
+    (union of flags, max score). Use this instead of concatenating inputs with different limits.
+
+    `shape_by_input` (input id -> AppSpec shape): the constant-speed and straight-line checks assume a
+    continuous track (pings seconds apart, where noise bends a real path), so they are turned off for
+    any input whose shape isn't "track". A user's separate point reports can legitimately line up.
+    impossible_speed and the cross-account checks still run for every shape."""
     merged: dict[str, UserSuspicion] = {}
     for inp, ev in events_by_input.items():
         params = SpoofParams.from_plausibility((plausibility_by_input or {}).get(inp), base)
+        shape = (shape_by_input or {}).get(inp)
+        if shape is not None and shape != "track":
+            params = replace(params, flag_constant_speed=False, flag_straight_line=False)
         for s in suspicious_users(ev, params):
             cur = merged.get(s.user_id)
             if cur is None:
