@@ -1,10 +1,6 @@
 // WS /v1/apps/{app}/stream. The browser can't set headers on a WebSocket, so the authority key goes
 // in the first frame: {type: "auth", key}. Until a valid key arrives the server sends public-only frames.
-import type { HotspotsResponse, MapResponse } from "./types";
-
-export type StreamFrame =
-  | { type: "auth_ok"; authority: boolean }
-  | { type: "tick"; t: string; map?: MapResponse; hotspots?: HotspotsResponse };
+import type { StreamAuthFrame, StreamFrame } from "./types";
 
 export type StreamState = "connecting" | "open" | "closed";
 
@@ -28,7 +24,7 @@ export function openStream(appId: string, authorityKey: string, { onFrame, onSta
     ws = new WebSocket(`${proto}://${location.host}/v1/apps/${encodeURIComponent(appId)}/stream`);
     ws.onopen = () => {
       backoff = 1000;
-      if (authorityKey) ws?.send(JSON.stringify({ type: "auth", key: authorityKey }));
+      if (authorityKey) ws?.send(JSON.stringify({ type: "auth", key: authorityKey } satisfies StreamAuthFrame));
       onState("open");
     };
     ws.onmessage = (e) => {

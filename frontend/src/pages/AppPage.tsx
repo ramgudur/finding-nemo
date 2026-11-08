@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { forgetKey, loadKey, saveKey } from "../api/authorityKey";
 import { ApiError, api } from "../api/client";
-import { openStream, type StreamFrame, type StreamState } from "../api/stream";
-import type { CellCollection, GeoJsonBBox, Hotspot, HotspotsResponse, MapResponse } from "../api/types";
+import { openStream, type StreamState } from "../api/stream";
+import type { CellCollection, GeoJsonBBox, Hotspot, HotspotsResponse, MapResponse, StreamFrame } from "../api/types";
 import { LayerToggles } from "../components/LayerToggles/LayerToggles";
 import { Map } from "../components/Map/Map";
 
@@ -63,7 +63,7 @@ export function AppPage({ appId }: { appId: string }) {
     };
   }, []);
 
-  // Live stream: use a tick frame's payload when it has one, otherwise refetch over REST.
+  // Live stream: each tick frame carries the filtered map and hotspots.
   useEffect(() => {
     void refresh();
     return openStream(appId, activeKey, {
@@ -71,8 +71,7 @@ export function AppPage({ appId }: { appId: string }) {
       onFrame: (f: StreamFrame) => {
         if (f.type === "auth_ok") {
           if (activeKey && !f.authority) setKeyRejected(true);
-        } else if (f.map && f.hotspots) apply(f.map, f.hotspots);
-        else void refresh();
+        } else apply(f.map, f.hotspots);
       },
     });
   }, [appId, activeKey, refresh, apply]);
