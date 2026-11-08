@@ -22,7 +22,8 @@ from pydantic import ValidationError
 from app.agents.compiler import CompilerCache, run_compiler
 from app.agents.llm import LlmRouter
 from app.agents.source_suggester import suggest_source
-from app.api.deps import authority_key_header, get_compiler_cache, get_db, get_engine, get_llm
+from app.api.compile_gate import CompileGate
+from app.api.deps import authority_key_header, get_compile_gate, get_compiler_cache, get_db, get_engine, get_llm
 from app.connectors import engine as connector_engine
 from app.connectors import url_guard
 from app.core import clock as clock_mod
@@ -275,6 +276,7 @@ async def compile_app(
     engine: TickEngine = Depends(get_engine),
     llm: LlmRouter = Depends(get_llm),
     cache: CompilerCache = Depends(get_compiler_cache),
+    gate: CompileGate = Depends(get_compile_gate),
 ) -> AppSpec:
     existing = db.get_app(app)
     if existing is not None and existing.status == "active":
@@ -288,6 +290,10 @@ async def compile_app(
             except url_guard.UnsafeUrl as e:
                 raise HTTPException(status_code=422, detail=f"{inp.id}: connector URL refused: {e}") from None
 
+    # Only a compile that would actually reach the model spends a slot (#169): /compile has no key.
+    refused = gate.try_acquire(app)
+    if refused is not None:
+        raise HTTPException(status_code=429, detail=refused.detail, headers={"Retry-After": str(refused.retry_after_s)})
     start_t = clock_mod.now()
     run = _CompileRun(started_at=start_t)
     _compile_runs(request)[app] = run
@@ -305,6 +311,7 @@ async def compile_app(
         )
     finally:
         run.running = False
+        gate.release(app)
     if spec is not None:
         return spec
 
