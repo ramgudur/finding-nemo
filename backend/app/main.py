@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api import apps as apps_api
+from app.api import debug as debug_api
 from app.api import ingest as ingest_api
 from app.api import outputs as outputs_api
 from app.api import ws as ws_api
@@ -57,6 +58,8 @@ def create_app(*, db: Db | None = None, engine: TickEngine | None = None, autost
     fastapi_app.include_router(ingest_api.router)
     fastapi_app.include_router(outputs_api.router)
     fastapi_app.include_router(ws_api.router)
+    if get_settings().demo_mode:  # /v1/debug/* exists only in demo mode; it alone reads sim ground truth (rule 9)
+        debug_api.install(fastapi_app, engine)
 
     @fastapi_app.get("/v1/health")
     def health() -> dict[str, str]:

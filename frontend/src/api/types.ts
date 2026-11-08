@@ -310,4 +310,42 @@ export interface StreamAuthFrame {
 
 export type StreamFrame =
   | { type: "auth_ok"; authority: boolean }
-  | { type: "tick"; t: IsoDateTime; map: MapResponse; hotspots: HotspotsResponse };
+  | { type: "tick"; t: IsoDateTime; map: MapResponse; hotspots: HotspotsResponse }
+  | { type: "error"; reason: string };
+
+// --- Debug (DEMO_MODE only; 404 otherwise) ---
+
+export interface ClockState {
+  now: IsoDateTime;
+  now_s: number;
+  paused: boolean;
+  speed: number | null; // sim seconds per wall second; null when paused
+  controllable: boolean; // a SimClock is installed
+}
+
+export interface ClockControl {
+  paused?: boolean;
+  speed?: number; // (0, 20]
+}
+
+export interface ErrorPoint {
+  t: IsoDateTime;
+  hotspot_error_m: number | null; // top hotspot to the true source
+  point_error_m: number | null; // best operator point estimate to the true source
+}
+
+export interface ChangeMarker {
+  t: IsoDateTime;
+  id: string;
+  kind: string;
+  target: string;
+  actor: string;
+  reason: string;
+}
+
+export interface ErrorSeries {
+  app_id: string;
+  truth_file: string | null;
+  series: ErrorPoint[];
+  changes: ChangeMarker[];
+}

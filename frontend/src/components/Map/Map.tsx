@@ -61,5 +61,5 @@ export function Map({ bbox, layers, visible, hotspots }: Props) {
     }
   }, [layers, visible, hotspots]);
 
-  return <div ref={el} style={{ height: "70vh", minHeight: 320, width: "100%", borderRadius: 4 }} />;
+  return <div ref={el} style={{ height: "min(70vh, 560px)", minHeight: 320, width: "100%", borderRadius: 4 }} />;
 }

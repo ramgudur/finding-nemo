@@ -25,6 +25,7 @@ import os
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,7 +34,18 @@ from xml.sax.saxutils import escape
 
 import numpy as np
 
-from sim.common import IngestError, LocalFrame, Post, Poster, iso, load_spec, replay, write_ground_truth
+from sim.common import (
+    IngestError,
+    LocalFrame,
+    Post,
+    Poster,
+    ServerClock,
+    iso,
+    load_spec,
+    replay,
+    replay_following,
+    write_ground_truth,
+)
 
 SPEC = "campus-alert"
 
@@ -198,7 +210,8 @@ def ground_truth_lines(sc: Scenario, t0: float, seed: int, speed: float) -> list
     tr = sc.truth
     meta = {k: v for k, v in tr.items() if k != "threat"}
     lines: list[dict[str, Any]] = [{"type": "meta", "app": SPEC, "seed": seed, "t0": iso(t0), "speed": speed, **meta}]
-    lines += [{"type": "threat", "ts": iso(t0 + p["sim_t"]), **p} for p in tr["threat"]]
+    # neutral line type: api/debug.py reads {"type": "source"} as the true source position over time
+    lines += [{"type": "source", "ts": iso(t0 + p["sim_t"]), **p} for p in tr["threat"]]
     return lines
 
 
@@ -220,15 +233,15 @@ def rss_xml(sc: Scenario, t0: float, sim_now: float) -> str:
     )
 
 
-def serve_rss(sc: Scenario, t0: float, speed: float, port: int) -> ThreadingHTTPServer:
-    wall0 = time.monotonic()
+def serve_rss(sc: Scenario, t0: float, sim_now: Callable[[], float], port: int) -> ThreadingHTTPServer:
+    """Serve the scripted feed; `sim_now()` gives the current sim second (the article appears at NEWS_T)."""
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
             if self.path.split("?")[0] != "/campus-news.xml":
                 self.send_error(404)
                 return
-            body = rss_xml(sc, t0, (time.monotonic() - wall0) * speed).encode()
+            body = rss_xml(sc, t0, sim_now()).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/rss+xml; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -253,12 +266,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--duration", type=float, default=DURATION)
     ap.add_argument("--rss-port", type=int, default=8765, help="0 disables the scripted RSS feed")
     ap.add_argument("--dry-run", action="store_true", help="print events as JSONL and exit; no posting")
+    ap.add_argument(
+        "--follow-clock",
+        action="store_true",
+        help="pace by the server clock (GET /v1/debug/clock, DEMO_MODE) so console SimControls pause/speed the sim",
+    )
     args = ap.parse_args(argv)
     if args.speed <= 0:
         ap.error("--speed must be > 0")
 
     sc = build(args.seed, args.duration)
-    t0 = time.time()
+    server_clock = ServerClock(args.api) if args.follow_clock and not args.dry_run else None
+    t0 = server_clock.now() if server_clock else time.time()
     if args.dry_run:
         for p in sc.posts:
             print(json.dumps({"sim_t": p.sim_t, "input": p.input_id, "body": p.stamped(t0)}))
@@ -268,12 +287,17 @@ def main(argv: list[str] | None = None) -> int:
 
     gt = write_ground_truth(SPEC, ground_truth_lines(sc, t0, args.seed, args.speed))
     print(f"campus-alert sim: {len(sc.posts)} events over {args.duration:.0f}s at {args.speed}x; ground truth {gt}")
-    server = serve_rss(sc, t0, args.speed, args.rss_port) if args.rss_port else None
+    wall0 = time.monotonic()
+    sim_now = (lambda: server_clock.now() - t0) if server_clock else (lambda: (time.monotonic() - wall0) * args.speed)
+    server = serve_rss(sc, t0, sim_now, args.rss_port) if args.rss_port else None
     if server:
         print(f"  scripted RSS feed: http://127.0.0.1:{args.rss_port}/campus-news.xml (article at t={NEWS_T:.0f}s)")
     poster = Poster(args.api, args.app, args.ingest_key)
     try:
-        replay(sc.posts, t0, args.speed, poster)
+        if server_clock:
+            replay_following(sc.posts, t0, server_clock, poster)
+        else:
+            replay(sc.posts, t0, args.speed, poster)
         poster.close()
     except IngestError as e:
         poster.close(cancel=True)
