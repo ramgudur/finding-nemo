@@ -19,8 +19,9 @@ from __future__ import annotations
 import secrets
 import sqlite3
 import threading
+from collections.abc import Sequence
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from app.core.models import (
     POI as PoiModel,
@@ -163,6 +164,16 @@ class Keys(NamedTuple):
     authority_key: str
 
 
+def _key_matches(stored: str, provided: Any) -> bool:
+    """Constant-time comparison that never raises: anything that isn't a non-empty
+    string is just a wrong key (a caller may send anything over the wire). Compared as
+    UTF-8 bytes, since ``secrets.compare_digest`` on ``str`` requires ASCII and would
+    otherwise raise on a non-ASCII key."""
+    if not isinstance(provided, str) or not provided:
+        return False
+    return secrets.compare_digest(stored.encode(), provided.encode())
+
+
 class Db:
     """One SQLite database. Not thread-safe across connections; this class serializes
     writes on a lock so a single instance can be shared across threads."""
@@ -172,13 +183,26 @@ class Db:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
+        # RLock: a locked method (e.g. set_trust) may call another locked method
+        # (get_trust) on the same thread without deadlocking.
+        self._lock = threading.RLock()
         with self._lock:
             self._conn.executescript(_SCHEMA)
             self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
+
+    def _query(self, sql: str, params: Sequence[Any] = ()) -> list[sqlite3.Row]:
+        """A locked SELECT returning every row. FastAPI runs sync endpoints in a
+        threadpool and the tick reads from its own worker thread, so every access to
+        the shared connection -- reads included -- goes through this lock."""
+        with self._lock:
+            return self._conn.execute(sql, params).fetchall()
+
+    def _query_one(self, sql: str, params: Sequence[Any] = ()) -> sqlite3.Row | None:
+        with self._lock:
+            return self._conn.execute(sql, params).fetchone()
 
     # -- apps -----------------------------------------------------------------
 
@@ -199,25 +223,21 @@ class Db:
             self._conn.commit()
 
     def get_app(self, app_id: str) -> AppSpec | None:
-        row = self._conn.execute("SELECT spec_json FROM apps WHERE app_id = ?", (app_id,)).fetchone()
+        row = self._query_one("SELECT spec_json FROM apps WHERE app_id = ?", (app_id,))
         return AppSpec.model_validate_json(row["spec_json"]) if row else None
 
     def list_apps(self) -> list[AppSpec]:
-        rows = self._conn.execute("SELECT spec_json FROM apps ORDER BY created_at").fetchall()
+        rows = self._query("SELECT spec_json FROM apps ORDER BY created_at")
         return [AppSpec.model_validate_json(r["spec_json"]) for r in rows]
 
     # -- inputs -----------------------------------------------------------------
 
     def get_input(self, app_id: str, input_id: str) -> InputSpec | None:
-        row = self._conn.execute(
-            "SELECT spec_json FROM inputs WHERE app_id = ? AND input_id = ?", (app_id, input_id)
-        ).fetchone()
+        row = self._query_one("SELECT spec_json FROM inputs WHERE app_id = ? AND input_id = ?", (app_id, input_id))
         return InputSpec.model_validate_json(row["spec_json"]) if row else None
 
     def list_inputs(self, app_id: str) -> list[InputSpec]:
-        rows = self._conn.execute(
-            "SELECT spec_json FROM inputs WHERE app_id = ? ORDER BY input_id", (app_id,)
-        ).fetchall()
+        rows = self._query("SELECT spec_json FROM inputs WHERE app_id = ? ORDER BY input_id", (app_id,))
         return [InputSpec.model_validate_json(r["spec_json"]) for r in rows]
 
     # -- events -----------------------------------------------------------------
@@ -239,9 +259,7 @@ class Db:
         if since is not None:
             clauses.append("ts > ?")
             params.append(since)
-        rows = self._conn.execute(
-            f"SELECT event_json FROM events WHERE {' AND '.join(clauses)} ORDER BY ts", params
-        ).fetchall()
+        rows = self._query(f"SELECT event_json FROM events WHERE {' AND '.join(clauses)} ORDER BY ts", params)
         return [Event.model_validate_json(r["event_json"]) for r in rows]
 
     # -- connectors ---------------------------------------------------------------
@@ -257,15 +275,15 @@ class Db:
             self._conn.commit()
 
     def get_connector(self, app_id: str, input_id: str) -> ConnectorConfig | None:
-        row = self._conn.execute(
+        row = self._query_one(
             "SELECT config_json FROM connectors WHERE app_id = ? AND input_id = ?", (app_id, input_id)
-        ).fetchone()
+        )
         return ConnectorConfig.model_validate_json(row["config_json"]) if row else None
 
     def list_connectors(self, app_id: str) -> list[tuple[str, ConnectorConfig]]:
-        rows = self._conn.execute(
+        rows = self._query(
             "SELECT input_id, config_json FROM connectors WHERE app_id = ? ORDER BY input_id", (app_id,)
-        ).fetchall()
+        )
         return [(r["input_id"], ConnectorConfig.model_validate_json(r["config_json"])) for r in rows]
 
     def record_connector_poll(self, app_id: str, input_id: str, polled_at: float, status: str) -> None:
@@ -298,37 +316,37 @@ class Db:
             self._conn.commit()
 
     def current_weight(self, app_id: str, layer_id: str) -> WeightRecord | None:
-        row = self._conn.execute(
+        row = self._query_one(
             "SELECT layer_id, weight, tier, t, actor, reason, backtest_id FROM weights_history "
             "WHERE app_id = ? AND layer_id = ? ORDER BY t DESC LIMIT 1",
             (app_id, layer_id),
-        ).fetchone()
+        )
         return WeightRecord(*row) if row else None
 
     def current_weights(self, app_id: str) -> dict[str, WeightRecord]:
-        rows = self._conn.execute(
+        rows = self._query(
             "SELECT layer_id, weight, tier, t, actor, reason, backtest_id FROM weights_history "
             "WHERE app_id = ? AND row_id IN "
             "(SELECT MAX(row_id) FROM weights_history WHERE app_id = ? GROUP BY layer_id)",
             (app_id, app_id),
-        ).fetchall()
+        )
         return {r["layer_id"]: WeightRecord(*r) for r in rows}
 
     def weight_history_since(self, app_id: str, layer_id: str, since: float) -> list[WeightRecord]:
-        rows = self._conn.execute(
+        rows = self._query(
             "SELECT layer_id, weight, tier, t, actor, reason, backtest_id FROM weights_history "
             "WHERE app_id = ? AND layer_id = ? AND t >= ? ORDER BY t",
             (app_id, layer_id, since),
-        ).fetchall()
+        )
         return [WeightRecord(*r) for r in rows]
 
     # -- trust --------------------------------------------------------------------
 
     def get_trust(self, app_id: str, user_id: str) -> TrustRecord | None:
-        row = self._conn.execute(
+        row = self._query_one(
             "SELECT user_id, score, updated_at, last_increase_at FROM trust WHERE app_id = ? AND user_id = ?",
             (app_id, user_id),
-        ).fetchone()
+        )
         return TrustRecord(*row) if row else None
 
     def set_trust(self, app_id: str, user_id: str, score: float, t: float) -> TrustRecord:
@@ -354,7 +372,7 @@ class Db:
     def list_trust(self, app_id: str) -> dict[str, float]:
         """Current trust per user who has a record for this app. A missing user has the
         implicit default (1.0, per `engine/trust.py`); callers merge that in themselves."""
-        rows = self._conn.execute("SELECT user_id, score FROM trust WHERE app_id = ?", (app_id,)).fetchall()
+        rows = self._query("SELECT user_id, score FROM trust WHERE app_id = ?", (app_id,))
         return {r["user_id"]: r["score"] for r in rows}
 
     # -- pois -----------------------------------------------------------------------
@@ -371,9 +389,7 @@ class Db:
             self._conn.commit()
 
     def get_poi(self, app_id: str, poi_id: str) -> PoiModel | None:
-        row = self._conn.execute(
-            "SELECT poi_json FROM pois WHERE app_id = ? AND poi_id = ?", (app_id, poi_id)
-        ).fetchone()
+        row = self._query_one("SELECT poi_json FROM pois WHERE app_id = ? AND poi_id = ?", (app_id, poi_id))
         return PoiModel.model_validate_json(row["poi_json"]) if row else None
 
     def list_pois(
@@ -386,9 +402,7 @@ class Db:
         if status is not None:
             clauses.append("status = ?")
             params.append(status)
-        rows = self._conn.execute(
-            f"SELECT poi_json FROM pois WHERE {' AND '.join(clauses)} ORDER BY updated_at", params
-        ).fetchall()
+        rows = self._query(f"SELECT poi_json FROM pois WHERE {' AND '.join(clauses)} ORDER BY updated_at", params)
         return [PoiModel.model_validate_json(r["poi_json"]) for r in rows]
 
     # -- trace ----------------------------------------------------------------------
@@ -410,7 +424,7 @@ class Db:
         if limit is not None:
             sql += " LIMIT ?"
             params.append(limit)
-        rows = self._conn.execute(sql, params).fetchall()
+        rows = self._query(sql, params)
         return [TraceEntry.model_validate_json(r["entry_json"]) for r in rows]
 
     # -- changes --------------------------------------------------------------------
@@ -424,7 +438,7 @@ class Db:
             self._conn.commit()
 
     def get_change(self, change_id: str) -> Change | None:
-        row = self._conn.execute("SELECT change_json FROM changes WHERE id = ?", (change_id,)).fetchone()
+        row = self._query_one("SELECT change_json FROM changes WHERE id = ?", (change_id,))
         return Change.model_validate_json(row["change_json"]) if row else None
 
     def list_changes(self, app_id: str, kind: str | None = None, since: float | None = None) -> list[Change]:
@@ -435,9 +449,7 @@ class Db:
         if since is not None:
             clauses.append("t > ?")
             params.append(since)
-        rows = self._conn.execute(
-            f"SELECT change_json FROM changes WHERE {' AND '.join(clauses)} ORDER BY t", params
-        ).fetchall()
+        rows = self._query(f"SELECT change_json FROM changes WHERE {' AND '.join(clauses)} ORDER BY t", params)
         return [Change.model_validate_json(r["change_json"]) for r in rows]
 
     # -- backtests ------------------------------------------------------------------
@@ -451,15 +463,11 @@ class Db:
             self._conn.commit()
 
     def get_backtest(self, app_id: str, backtest_id: str) -> Backtest | None:
-        row = self._conn.execute(
-            "SELECT backtest_json FROM backtests WHERE app_id = ? AND id = ?", (app_id, backtest_id)
-        ).fetchone()
+        row = self._query_one("SELECT backtest_json FROM backtests WHERE app_id = ? AND id = ?", (app_id, backtest_id))
         return Backtest.model_validate_json(row["backtest_json"]) if row else None
 
     def list_backtests(self, app_id: str) -> list[Backtest]:
-        rows = self._conn.execute(
-            "SELECT backtest_json FROM backtests WHERE app_id = ? ORDER BY t", (app_id,)
-        ).fetchall()
+        rows = self._query("SELECT backtest_json FROM backtests WHERE app_id = ? ORDER BY t", (app_id,))
         return [Backtest.model_validate_json(r["backtest_json"]) for r in rows]
 
     # -- keys -----------------------------------------------------------------------
@@ -476,10 +484,10 @@ class Db:
             self._conn.commit()
         return keys
 
-    def check_ingest_key(self, app_id: str, key: str) -> bool:
-        row = self._conn.execute("SELECT ingest_key FROM keys WHERE app_id = ?", (app_id,)).fetchone()
-        return row is not None and secrets.compare_digest(row["ingest_key"], key)
+    def check_ingest_key(self, app_id: str, key: Any) -> bool:
+        row = self._query_one("SELECT ingest_key FROM keys WHERE app_id = ?", (app_id,))
+        return row is not None and _key_matches(row["ingest_key"], key)
 
-    def check_authority_key(self, app_id: str, key: str) -> bool:
-        row = self._conn.execute("SELECT authority_key FROM keys WHERE app_id = ?", (app_id,)).fetchone()
-        return row is not None and secrets.compare_digest(row["authority_key"], key)
+    def check_authority_key(self, app_id: str, key: Any) -> bool:
+        row = self._query_one("SELECT authority_key FROM keys WHERE app_id = ?", (app_id,))
+        return row is not None and _key_matches(row["authority_key"], key)
