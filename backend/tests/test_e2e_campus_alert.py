@@ -177,3 +177,17 @@ def test_police_override_shows_up_and_clears(run):
     assert _score_near(run, 152, lat, lon) == 1.0
     assert _score_near(run, 200, lat, lon) == 1.0
     assert _score_near(run, 204, lat, lon) < 1.0
+
+
+def test_spoof_checks_separate_the_sim_spoofers(run):
+    """The spec's plausibility for 'panic' (people on foot) flags exactly the scripted spoofers."""
+    from app.engine.trust import SpoofParams, suspicious_users
+
+    p = run["platform"]
+    pl = p.runtime.spec.inputs[0].plausibility
+    assert pl is not None and pl.max_speed_mps == 12
+    params = SpoofParams(max_speed_mps=pl.max_speed_mps)  # flag toggles map in once #45 lands
+    events = p.engine.source.events(p.app_id, "panic", T0 - 1, T0 + ca.DURATION)
+    flagged = {s.user_id for s in suspicious_users(events, params) if s.flags}
+    spoofers = set(run["scenario"].truth["spoof_users"])
+    assert flagged == spoofers
