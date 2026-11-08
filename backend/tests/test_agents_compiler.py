@@ -116,10 +116,36 @@ def test_a_run_that_never_finalizes_returns_none():
 def test_cache_miss_for_different_inputs_even_with_the_same_intent():
     cache = CompilerCache()
     assert cache.get(INTENT, INPUTS) is None
-    spec = AppSpec.model_validate(
-        {"app_id": "x", "intent": INTENT, "grid": GRID, "status": "pending_confirmation"}
-    )
+    spec = AppSpec.model_validate({"app_id": "x", "intent": INTENT, "grid": GRID, "status": "pending_confirmation"})
     cache.put(INTENT, INPUTS, spec)
     assert cache.get(INTENT, INPUTS) == spec
     other_inputs = [{**INPUTS[0], "meaning": "a different meaning"}]
     assert cache.get(INTENT, other_inputs) is None
+
+
+def test_live_recorded_compile_meets_the_137_bar():
+    """Replay of a live Nemotron run (#137) on Campus Alert's raw inputs after the prompt and
+    validate_spec fixes: crowd input flexible, authority fixed points locked, a destination label
+    with routing on, authority_confirmation first, in at most 6 model calls."""
+    import json
+    from pathlib import Path
+
+    spec_json = json.load(open(Path(__file__).parents[2] / "specs" / "campus-alert.json"))
+    inputs = [
+        {k: i[k] for k in ("id", "kind", "shape", "meaning") if k in i}
+        | ({"fields": i["fields"]} if i.get("fields") else {})
+        for i in spec_json["inputs"]
+    ]
+    ctx = _ctx("campus-alert")
+    router = _router("compiler_campus_alert_v2")
+    spec = _run(ctx, router, cache=CompilerCache(), intent=spec_json["intent"], grid=spec_json["grid"], inputs=inputs)
+    assert spec is not None and spec.status == "pending_confirmation"
+    tiers = {i.id: i.tier for i in spec.inputs}
+    assert tiers["panic"] == "flexible"
+    assert tiers["room_button"] == tiers["police_marker"] == "locked"
+    labels = spec.outputs.poi_labels
+    assert labels.mode == "on" and any(lab.destination for lab in labels.label_set)
+    assert spec.routing.enabled
+    assert min(spec.verification, key=lambda v: v.priority).method == "authority_confirmation"
+    assert next(i for i in spec.inputs if i.id == "panic").plausibility is not None
+    assert len(router._provider("nvidia").client.calls) <= 6

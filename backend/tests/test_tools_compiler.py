@@ -468,3 +468,83 @@ def test_finalize_app_rejects_an_already_active_app(ctx):
     ctx.db.upsert_app(active, t=2.0)
     r = _call(ctx, "finalize_app", {"spec": _good_spec_dict()})
     assert r["ok"] is False and "already active" in r["error"]
+
+
+# -- #137: routing destinations, label set, authority-first verification -----------------
+
+
+def _spec_with(**extra):
+    base = {
+        **_draft().model_dump(mode="json"),
+        "inputs": [
+            {
+                "id": "pings",
+                "kind": "push",
+                "shape": "point",
+                "tier": "flexible",
+                "meaning": "a ping",
+                "operators": [{"op": "density", "weight": 1.0}],
+                "plausibility": {"max_speed_mps": 12},
+            }
+        ],
+    }
+    base.update(extra)
+    return base
+
+
+def test_validate_spec_rejects_routing_without_any_destination(ctx):
+    r = _call(ctx, "validate_spec", {"spec": _spec_with(routing={"enabled": True})})
+    assert r["result"]["valid"] is False
+    assert any("nothing can be a destination" in e for e in r["result"]["errors"])
+    with_label = _spec_with(
+        routing={"enabled": True},
+        outputs={"poi_labels": {"mode": "on", "label_set": [{"label": "exit", "destination": True}]}},
+    )
+    assert _call(ctx, "validate_spec", {"spec": with_label})["result"]["valid"] is True
+    with_point = _spec_with(
+        routing={"enabled": True, "destination_points": [{"lat": 0.001, "lon": 0.001, "label": "gate"}]}
+    )
+    assert _call(ctx, "validate_spec", {"spec": with_point})["result"]["valid"] is True
+    assert _call(ctx, "validate_spec", {"spec": _spec_with(routing={"enabled": False})})["result"]["valid"] is True
+
+
+def test_validate_spec_warns_on_labels_on_with_an_empty_set(ctx):
+    r = _call(ctx, "validate_spec", {"spec": _spec_with(outputs={"poi_labels": {"mode": "on"}})})
+    assert r["result"]["valid"] is True
+    assert any("label_set is empty" in w for w in r["result"]["warnings"])
+    auto = _call(ctx, "validate_spec", {"spec": _spec_with(outputs={"poi_labels": {"mode": "auto"}})})
+    assert not any("label_set" in w for w in auto["result"]["warnings"])
+
+
+def test_validate_spec_warns_unless_authority_confirmation_leads_with_locked_inputs(ctx):
+    locked = {
+        "id": "marker",
+        "kind": "push",
+        "shape": "fixed_point",
+        "tier": "locked",
+        "meaning": "an authority marker",
+        "operators": [{"op": "override", "weight": 1.0}],
+    }
+    spec = _spec_with()
+    spec["inputs"].append(locked)
+    wrong = {
+        **spec,
+        "verification": [
+            {"method": "cross_input_agreement", "priority": 1},
+            {"method": "authority_confirmation", "priority": 2},
+        ],
+    }
+    r = _call(ctx, "validate_spec", {"spec": wrong})
+    assert any("authority_confirmation should be verification priority 1" in w for w in r["result"]["warnings"])
+    right = {**spec, "verification": [{"method": "authority_confirmation", "priority": 1}]}
+    assert not any("priority 1" in w for w in _call(ctx, "validate_spec", {"spec": right})["result"]["warnings"])
+    # no locked inputs: no opinion on the order
+    plain = _spec_with(verification=[{"method": "cross_input_agreement", "priority": 1}])
+    assert not any("priority 1" in w for w in _call(ctx, "validate_spec", {"spec": plain})["result"]["warnings"])
+
+
+def test_compiler_prompt_is_domain_neutral():
+    from app.agents import compiler
+
+    words = ("people", "person", "bird", "police", "wind", "weather", "news", "campus", "threat")
+    assert not any(w in compiler.SYSTEM_PROMPT.lower() for w in words)

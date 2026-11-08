@@ -118,6 +118,19 @@ def _spec_warnings(spec: AppSpec) -> list[str]:
                 f"input {inp.id!r} is flexible and {inp.shape}-shaped but has no plausibility; "
                 "the platform's neutral defaults (no speed limit, no shape checks) will apply"
             )
+    labels = spec.outputs.poi_labels
+    if labels.mode == "on" and not labels.label_set:
+        warnings.append(
+            "poi_labels.mode is 'on' but label_set is empty, so the POI Labeler can never label anything; "
+            "propose labels for the places the intent names (or use mode 'auto' / 'off')"
+        )
+    if any(i.tier == "locked" for i in spec.inputs):
+        order = [v.method for v in sorted(spec.verification, key=lambda v: v.priority)]
+        if not order or order[0] != "authority_confirmation":
+            warnings.append(
+                "the spec has authority (locked) inputs, so authority_confirmation should be "
+                f"verification priority 1 (current order: {order or 'none'})"
+            )
     return warnings
 
 
@@ -146,6 +159,14 @@ def _spec_errors(spec: AppSpec) -> list[str]:
                 registry.parse_params(op.op, op.params())
             except Exception as e:  # noqa: BLE001 - reported to the agent, not raised
                 errors.append(f"input {inp.id!r}: operator {op.op!r} params invalid: {e}")
+    routing = spec.routing
+    if routing.enabled:
+        has_dest_label = any(lab.destination for lab in spec.outputs.poi_labels.label_set)
+        if not has_dest_label and not routing.destination_points:
+            errors.append(
+                "routing is enabled but nothing can be a destination: add a label with destination=true "
+                "(and keep poi_labels on) or routing.destination_points, or set routing.enabled false"
+            )
     public_ids = {ol.id for ol in spec.outputs.layers if ol.visibility == "public"}
     if "score" in public_ids:
         private_weighted = [lid for lid in _weighted_layer_ids(spec) if lid not in public_ids]
