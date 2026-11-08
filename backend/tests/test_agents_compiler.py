@@ -157,7 +157,10 @@ def test_live_recorded_compile_meets_the_137_bar():
     assert len(router._provider("nvidia").client.calls) <= 6
 
 
-DEV_POINTS = [{"lat": 0.004, "lon": 0.006, "label": "Gym (staff)"}, {"lat": 0.009, "lon": 0.001, "label": "Lot C"}]
+DEV_POINTS = [
+    {"lat": 32.7790, "lon": -96.7600, "label": "Gym (staff)"},
+    {"lat": 32.7805, "lon": -96.7615, "label": "Lot C"},
+]  # inside the fixture spec's area (#266)
 
 
 def test_dev_destination_points_are_copied_verbatim_fresh_and_from_cache():

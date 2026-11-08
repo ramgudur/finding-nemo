@@ -22,6 +22,7 @@ from app.api import ingest as ingest_api
 from app.api import instructions as instructions_api
 from app.api import labels as labels_api
 from app.api import outputs as outputs_api
+from app.api import public as public_api
 from app.api import scout as scout_api
 from app.api import simulate as simulate_api
 from app.api import trace as trace_api
@@ -150,6 +151,7 @@ def create_app(
     fastapi_app.include_router(outputs_api.router)
     fastapi_app.include_router(ws_api.router)
     fastapi_app.include_router(instructions_api.router)  # public end-user instructions
+    fastapi_app.include_router(public_api.router)  # public app info for the end-user page (#266)
     fastapi_app.include_router(trace_api.router)  # authority-only console reads + dev pin
     fastapi_app.include_router(scout_api.router)  # dev-requested Scout runs (authority only)
     fastapi_app.include_router(labels_api.router)  # authority-only label proposals (accept/dismiss)

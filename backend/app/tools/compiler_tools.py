@@ -15,6 +15,7 @@ connectors are config, not code (rule 10): `create_connector` only stores and va
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from typing import Any
 
 import httpx
@@ -27,9 +28,11 @@ from app.connectors.fields import declare_input
 from app.core.models import (
     SLUG,
     AppSpec,
+    BBox,
     Change,
     ConnectorConfig,
     ConnectorType,
+    DestinationPoint,
     InputField,
     InputKind,
     InputShape,
@@ -167,8 +170,18 @@ def _weighted_layer_ids(spec: AppSpec) -> list[str]:
     ]
 
 
+def destination_point_errors(bbox: BBox, points: Iterable[DestinationPoint]) -> list[str]:
+    """One error per destination point outside the app's area (bbox edges count as inside, #266)."""
+    return [
+        f"destination_points[{i}] ({p.label!r}) is outside the app's area"
+        for i, p in enumerate(points)
+        if not (bbox.min_lat <= p.lat <= bbox.max_lat and bbox.min_lon <= p.lon <= bbox.max_lon)
+    ]
+
+
 def _spec_errors(spec: AppSpec) -> list[str]:
     errors: list[str] = []
+    errors.extend(destination_point_errors(spec.grid.bbox, spec.routing.destination_points))
     if spec.status == "active":
         errors.append("a proposed spec cannot set status to 'active' directly; only dev confirmation can")
     for inp in spec.inputs:

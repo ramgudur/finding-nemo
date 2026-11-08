@@ -13,6 +13,14 @@
   cell is inside the grid and below both the impassable score and the hotspot threshold.
 - One Dijkstra search from the start; the first destination cell settled is the lowest-cost
   reachable one. Nothing reachable -> no route (the caller sends ``routing.fallback_text``).
+- Nearest safe cell (#266): when the caller is not already clear of danger and no destination is
+  reachable within a reasonable distance, the route goes to the lowest-cost *safe* cell instead.
+  A safe cell scores below the destination threshold and is at least ``SAFE_CLEAR_CELLS`` cells
+  (Chebyshev, so it scales with ``cell_m``) from any cell at or above the hotspot threshold.
+  "Reasonable" is relative to the danger itself, not a fixed length: a destination route is too
+  far when it is more than ``FAR_FACTOR`` times as long as the route to the nearest safe cell
+  *and* longer than ``FAR_MIN_CELLS`` cells. The nearest safe distance grows with the size of the
+  hotspot the caller is in, so the rule follows hotspot geometry and the spec's ``cell_m``.
 
 Text is built by code from the route only: direction, distance, destination label, the direction
 of the highest-score area to avoid. It names nothing the grid doesn't know (no floors, rooms or
@@ -39,6 +47,13 @@ _NEIGHBOURS = [(-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0)] + [
 _COMPASS = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"]
 HEADING_LOOKAHEAD_CELLS = 4  # the first direction is read this far along the route
 AVOID_RADIUS_CELLS = 20  # only areas this close to the caller are worth naming
+SAFE_CLEAR_CELLS = 3  # a nearest-safe target is at least this many cells from any hotspot-level cell
+FAR_FACTOR = 3.0  # a destination this many times farther than the nearest safe cell is "too far"...
+FAR_MIN_CELLS = 100  # ...but only when it is also longer than this many cells (e.g. 500 m at 5 m cells, 5 km at 50 m)
+SAFE_LABEL = "a safer area"  # the destination label of a nearest-safe route (code-built, names nothing)
+# Text for the people who read instructions: walking pace (m/s) and the length past which driving is suggested.
+WALK_MPS = 1.3
+DRIVE_SUGGEST_M = 8000.0
 
 
 @dataclass(frozen=True)
@@ -111,8 +126,6 @@ def plan_route(
     score = np.nan_to_num(np.asarray(score, dtype=float), nan=1.0)
     if score.shape != grid.shape:
         raise ValueError(f"score shape {score.shape} != grid {grid.shape}")
-    h, w = grid.shape
-    blocked = score >= impassable_score
     dest_max = impassable_score if destination_max_score is None else destination_max_score
 
     sr, sc, inside = grid.cell_of(start[0], start[1])
@@ -135,6 +148,31 @@ def plan_route(
     if not targets:
         return RouteOutcome(None, "no usable destination", skipped)
 
+    found = _search(grid, score, s, set(targets), alpha=alpha, impassable_score=impassable_score)
+    if found is None:
+        return RouteOutcome(None, "no destination is reachable without crossing a blocked area", skipped)
+    end, cost, prev, region = found
+    route = _build_route(grid, start, end, targets[end][0], prev, cost, s, region)
+    return RouteOutcome(route, "ok", skipped)
+
+
+def _search(
+    grid: Grid,
+    score: np.ndarray,
+    s: tuple[int, int],
+    targets: set[tuple[int, int]] | np.ndarray,
+    *,
+    alpha: float,
+    impassable_score: float,
+) -> tuple[tuple[int, int], float, np.ndarray, np.ndarray] | None:
+    """Dijkstra from cell ``s`` to the first settled target (a set of cells or a boolean mask).
+
+    Returns ``(end cell, cost, prev, escape region)``, or None when no target is reachable.
+    """
+    h, w = grid.shape
+    blocked = score >= impassable_score
+    mask = targets if isinstance(targets, np.ndarray) else None
+    cells = targets if mask is None else set()
     # Inside the start's blocked region its cells are passable; from anywhere else they're blocked.
     # A region cell can only be entered from another region cell, so a route that has left the
     # region never comes back in, and no other blocked cell is ever passable.
@@ -150,9 +188,8 @@ def plan_route(
         d0, r, c = heapq.heappop(heap)
         if d0 > dist[r, c]:
             continue
-        if (r, c) in targets:
-            route = _build_route(grid, start, (r, c), targets[(r, c)][0], prev, d0, s, region)
-            return RouteOutcome(route, "ok", skipped)
+        if (mask is not None and bool(mask[r, c])) or (r, c) in cells:
+            return (r, c), d0, prev, region
         blk = blocked_inside if region[r, c] else blocked
         for dr, dc, mult in _NEIGHBOURS:
             rr, cc = r + dr, c + dc
@@ -165,7 +202,64 @@ def plan_route(
                 dist[rr, cc] = nd
                 prev[rr, cc] = (r, c)
                 heapq.heappush(heap, (nd, rr, cc))
-    return RouteOutcome(None, "no destination is reachable without crossing a blocked area", skipped)
+    return None
+
+
+def safe_mask(
+    score: np.ndarray, *, safe_max_score: float, hot_score: float, clear_cells: int = SAFE_CLEAR_CELLS
+) -> np.ndarray:
+    """Boolean ``[H, W]``: cells below ``safe_max_score`` and at least ``clear_cells`` cells
+    (Chebyshev) from every cell at or above ``hot_score``."""
+    score = np.nan_to_num(np.asarray(score, dtype=float), nan=1.0)
+    hot = score >= hot_score
+    near = hot.copy()
+    k = max(0, int(clear_cells) - 1)  # a cell within k cells of a hot cell is still near it
+    if k and hot.any():
+        h, w = hot.shape
+        pad = np.pad(hot, k)
+        for dr in range(2 * k + 1):
+            for dc in range(2 * k + 1):
+                near |= pad[dr : dr + h, dc : dc + w]
+    return (score < safe_max_score) & ~near
+
+
+def plan_nearest_safe(
+    grid: Grid,
+    score: np.ndarray,
+    start: tuple[float, float],
+    *,
+    alpha: float,
+    impassable_score: float,
+    safe_max_score: float,
+    hot_score: float,
+    clear_cells: int = SAFE_CLEAR_CELLS,
+) -> RouteOutcome:
+    """Lowest-cost route from ``start`` to a safe cell (``safe_mask``), ending at that cell's centre
+    and labelled ``SAFE_LABEL``. No route, with reason "already safe", when the caller's cell is safe."""
+    score = np.nan_to_num(np.asarray(score, dtype=float), nan=1.0)
+    if score.shape != grid.shape:
+        raise ValueError(f"score shape {score.shape} != grid {grid.shape}")
+    sr, sc, inside = grid.cell_of(start[0], start[1])
+    if not bool(inside):
+        return RouteOutcome(None, "start is outside the grid")
+    s = (int(sr), int(sc))
+    mask = safe_mask(score, safe_max_score=safe_max_score, hot_score=hot_score, clear_cells=clear_cells)
+    if mask[s]:
+        return RouteOutcome(None, "already safe")
+    if not mask.any():
+        return RouteOutcome(None, "no safe area on the grid")
+    found = _search(grid, score, s, mask, alpha=alpha, impassable_score=impassable_score)
+    if found is None:
+        return RouteOutcome(None, "no safe area is reachable without crossing a blocked area")
+    end, cost, prev, region = found
+    lat, lon = grid.cell_center(end[0], end[1])
+    dest = DestinationPoint(lat=float(lat), lon=float(lon), label=SAFE_LABEL)
+    return RouteOutcome(_build_route(grid, start, end, dest, prev, cost, s, region), "ok")
+
+
+def too_far(route: Route, safe: Route, cell_m: float) -> bool:
+    """A destination route is unreasonably long next to just getting clear of the danger."""
+    return route.distance_m > max(FAR_FACTOR * safe.distance_m, FAR_MIN_CELLS * cell_m)
 
 
 def _build_route(
@@ -226,6 +320,32 @@ def avoid_direction(grid: Grid, score: np.ndarray, start: tuple[float, float], m
     return compass(float(c - c0), float(r - r0))
 
 
+def walk_minutes(distance_m: float) -> int:
+    """Minutes on foot at ``WALK_MPS`` (at least 1 for any non-zero distance)."""
+    if distance_m <= 0:
+        return 0
+    return max(1, int(round(distance_m / WALK_MPS / 60.0)))
+
+
+def _travel(distance_m: float) -> str:
+    text = f" (about {walk_minutes(distance_m)} min on foot"
+    if distance_m > DRIVE_SUGGEST_M:
+        text += "; consider driving"
+    return text + ")"
+
+
+def nearest_safe_text(route: Route, grid: Grid, *, leave: bool = False) -> str:
+    """Code-built text for a nearest-safe route: overall direction and distance, out of the area."""
+    pts = route.points
+    x, y = grid.to_xy([pts[0][0], pts[-1][0]], [pts[0][1], pts[-1][1]])
+    heading = compass(float(x[1] - x[0]), float(y[1] - y[0]))
+    dist = _round_distance(route.distance_m)
+    travel = _travel(route.distance_m)
+    if leave or route.escape_cells > 0:
+        return f"Leave this area now: move about {dist} m {heading}, out of the high-risk area{travel}."
+    return f"Move about {dist} m {heading}, out of the high-risk area{travel}."
+
+
 def instruction_text(route: Route, grid: Grid, avoid: str | None, *, leave: bool = False) -> str:
     """Code-built instruction: direction, distance, destination label, area to avoid.
 
@@ -239,10 +359,11 @@ def instruction_text(route: Route, grid: Grid, avoid: str | None, *, leave: bool
     i = min(len(pts) - 1, HEADING_LOOKAHEAD_CELLS)
     heading = compass(float(x[i] - x[0]), float(y[i] - y[0]))
     dist = _round_distance(route.distance_m)
+    travel = _travel(route.distance_m)
     if leave or route.escape_cells > 0:
-        text = f"Leave this area now: head {heading} and continue about {dist} m to {route.destination.label}."
+        text = f"Leave this area now: head {heading} and continue about {dist} m to {route.destination.label}{travel}."
     else:
-        text = f"Head {heading} and continue about {dist} m to {route.destination.label}."
+        text = f"Head {heading} and continue about {dist} m to {route.destination.label}{travel}."
     if avoid:
         text += f" Avoid the area to the {avoid}."
     return text
