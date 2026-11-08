@@ -15,7 +15,7 @@ A developer names an app, describes its intent in plain English and declares its
 The platform:
 1. Turns each input into a grid layer with a deterministic **operator**.
 2. Combines the layers into a live score map, hotspots and **POI labels**.
-3. Gives end users safe-route **instructions**.
+3. Optionally gives end users route **instructions** (toward destinations, away from high scores).
 4. Serves all of it over REST and WebSocket.
 
 NVIDIA Nemotron runs four agents on top of that deterministic core:
@@ -112,7 +112,7 @@ backend/
     tools/                  registry.py (JSON schemas), guards.py, scoring_tools.py, poi_tools.py,
                             connector_tools.py, geo_tools.py (Nominatim, Overpass, Open-Meteo),
                             search_tools.py (Tavily), message_guard.py
-    connectors/             engine.py (runs configs), rss.py, json_api.py, open_meteo.py
+    connectors/             engine.py (runs configs), rss.py, json_api.py, presets/ (ready-made json_api configs, e.g. open_meteo)
   tests/                    plus tests/fixtures/ (recorded LLM and HTTP responses)
 frontend/                   React + Vite + TypeScript; Leaflet
   src/pages/                Builder.tsx (compile → review tiers → confirm), AppPage.tsx, EndUser.tsx
@@ -182,10 +182,12 @@ Ingest keys and authority keys are generated per app at activation and stored in
   - `visibility` (default `authority`)
   - `meaning` (the dev's words, verbatim)
   - `fields[]`: `{name, type: number|integer|string|boolean, required, description}`
-  - `connector?`: `{type: rss|json_api|open_meteo, url?, poll_s, config{}}`. Push inputs may not have one.
+  - `connector?`: `{type: rss|json_api, preset?, url?, poll_s, config{}}`. Push inputs may not have one. `preset` names a ready-made `json_api` config (e.g. `open_meteo`); connector types stay generic.
+  - `plausibility?` (tracks/points): `{max_speed_mps?, jitter_m?, flag_constant_speed?, flag_straight_line?}`. The spoof checks read these per input; the Compiler proposes them from `meaning` (a bird moves differently from a person). Omitted values use the defaults in `engine/trust.py`.
   - `operators[]`: `{op, weight, noise_floor?, layer_id?, ...params}`. `layer_id` defaults to `<input_id>.<op>`; `OperatorConfig.params()` returns what `registry.run` takes.
 - `verification[]`: `{method, priority}`. Priority 1 is highest; methods and priorities are unique.
 - `outputs.layers[]`: `{id, visibility}`. `id` is a layer id or `score`. Visibility defaults to `authority` everywhere.
+- `outputs.hotspot_threshold`: score at or above which connected cells form a hotspot (default 0.5).
 - All datetimes are timezone-aware and normalized to UTC (`UtcDatetime`).
 - `outputs.poi_labels`: `{mode: auto|on|off, label_set: [{label, sensitive, destination}], min_confidence}`. A `sensitive` label is authority-only. A `destination` label is a routing target and must not also be `sensitive`.
 - `routing`: `{enabled, destination_points[{lat, lon, label}], impassable_score, alpha, fallback_text (≤ 360 chars), rephrase: false}`
@@ -232,7 +234,7 @@ Ingest keys and authority keys are generated per app at activation and stored in
 
 | Operator | For | Computes |
 |---|---|---|
-| `flow_source` | tracks | Divergence over a ~20 s window as the heat layer. **Point estimate:** weighted least-squares intersection of back-extended movement lines, with robust reweighting. Reports `source` (people leaving) vs `sink` (converging). Needs tracks, not single taps. Reference tests: ~13–29 m median error in a 300 m area with 40+ phones. |
+| `flow_source` | tracks | Divergence over a ~20 s window as the heat layer. **Point estimate:** weighted least-squares intersection of back-extended movement lines, with robust reweighting. Reports `source` (entities moving away) vs `sink` (converging). Needs tracks, not single taps. Reference tests: ~13–29 m median error in a 300 m area with 40+ phones. |
 | `density` | point events | Smoothed density with half-life decay, trust weights and duplicate removal. |
 | `dwell` | tracks | Stop detection (individual within R meters for ≥ T, both from the spec) → stationary clusters. |
 | `field` | gridded or station data | Sampled onto the grid. Optionally reads a **vector field** from two of the input's fields (magnitude + direction, with a spec-set direction convention `from`/`to`) and carries another layer along it (advection, optional diffusion). Domain-neutral: wind, water current or crowd drift are all just vector fields chosen by the spec; no names or conventions in the operator are specific to one domain. |
@@ -267,11 +269,12 @@ Ingest keys and authority keys are generated per app at activation and stored in
 **Spoof features** (`engine/trust.py`, exposed via the `get_suspicious_users` tool):
 - Flag:
   - exact-duplicate coordinates across different accounts
-  - impossible speed (> ~12 m/s on foot)
+  - impossible speed (above the input's `plausibility.max_speed_mps`, after subtracting `jitter_m`)
   - bursts of new user IDs
-  - identical speeds or perfectly straight tracks
+  - identical speeds or perfectly straight tracks, only where the input's `plausibility` says that is unnatural
   - shared device or IP, if provided
-- **Never** flag users just for being close together.
+- **Never** flag sources just for being close together. Real clusters are real signal.
+- **Generality rule:** nothing in `backend/` assumes what the entities are (people, animals, vehicles, sensors). Operator names, params, defaults and the descriptions the Compiler reads stay domain-neutral; domain knowledge enters only through the spec.
 
 The engine reads time only from `core/clock.py`. Use fixed seeds in tests.
 
@@ -288,7 +291,7 @@ The engine reads time only from `core/clock.py`. Use fixed seeds in tests.
 | Compiler | COMPILER (Super, reasoning on) | app creation | 8 | `list_operators`, `validate_spec`, `create_input`, `create_connector`, `test_connector`, `request_scout`, `finalize_app` | spec in `pending_confirmation` |
 | Scout | SCOUT (Super) for planning; EXTRACT (Lightning, reasoning off) for per-article extraction | **on request only** | 8 | `web_search`, `fetch_url`, `probe_feed`, `create_connector`, `test_connector`, `set_source_reliability`, `geocode` | connectors (they keep polling on their own) |
 | Critic | CRITIC (Super, reasoning on) | on triggers (authority input, new hotspot, verification drop), plus at most every 60 s | 5 | `get_map_summary`, `get_layer_stats`, `get_verification_report`, `get_suspicious_users`, `run_backtest`, `run_backtest_batch`, `apply_changes`, `set_user_trust`, `annotate` | gated weight and trust changes |
-| POI Labeler | POI (Lightning, low effort) | every ~60 s, or when a candidate persists 3+ ticks | 6 | `get_poi_candidates`, `find_candidates`, `osm_features_near`, `weather_at`, `get_layer_stats_at`, `get_time_pattern`, `create_poi`, `update_poi`, `retire_poi` | POIs (from candidates only) |
+| POI Labeler | POI (Lightning, low effort) | every ~60 s, or when a candidate persists 3+ ticks | 6 | `get_poi_candidates`, `find_candidates`, `osm_features_near`, `input_values_at`, `get_layer_stats_at`, `get_time_pattern`, `create_poi`, `update_poi`, `retire_poi` | POIs (from candidates only) |
 
 - **Compiler:**
   - Picks operators from each input's `meaning`: the same GPS input becomes `density` or `flow_source` depending on what the dev says a ping means.
@@ -424,3 +427,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-07:** Kida seat b files and takes `trust.py` spoof features (step 3) next, then the batch backtest (step 5).
 - **2026-11-07:** Trust increases need a passing backtest; `set_user_trust` only lowers. Stiff weight changes pass only when `authority_confirmation` is the deciding method. Storing tested candidates in `Backtest` is declined for now (after a restart the Critic re-runs the backtest). (PR #39)
 - **2026-11-07:** The `field` operator is a neutral vector field, not wind: params like `vector_speed_field` / `vector_dir_field` / `vector_dir_convention` (`from` | `to`) replace the `wind_*` names, and docs say "along the vector field", not "downwind". Wind is one use, set by the spec. Rule: operators never name a domain (wind, birds, police); the spec does.
+- **2026-11-07:** Generalization pass ("one size fits all"): spoof limits move into `inputs[].plausibility` (Compiler proposes them); operator descriptions read by the Compiler become domain-neutral; `outputs.hotspot_threshold` replaces the fixed 0.5; POI tool `weather_at` becomes `input_values_at`; `open_meteo` becomes a `json_api` preset, not a connector type. Contract changes: `plausibility`, `hotspot_threshold`, `connector.preset`.
