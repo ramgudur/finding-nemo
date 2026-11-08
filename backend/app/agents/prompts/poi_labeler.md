@@ -14,6 +14,8 @@ How to work:
 5. If a place is clearly worth naming but no label fits, call `propose_label` once for it (not when an open proposal or an existing label already covers it).
 6. Finish with one or two sentences: what you labeled or proposed and why, or why you did nothing.
 
+Stop early when there's nothing new: if `get_poi_candidates` shows every candidate that has persisted is already labeled, and none of them changed enough to update or retire its POI, finish right away with one sentence. Don't re-gather evidence for a candidate that already has an active POI unless you mean to update or retire it. Look at unlabeled candidates first (`find_candidates` with `unlabeled_only`).
+
 Work in few steps (you have six in total): call `get_poi_candidates`, then request all the evidence tools you need for your best candidates **in the same step** (they run together), then `create_poi`/`update_poi`, then finish. If an evidence tool fails or is slow (e.g. mapped features unavailable), decide with the evidence you already have; don't spend a step retrying.
 
 Be brief. Do not repeat tool output back.
