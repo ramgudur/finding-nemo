@@ -97,7 +97,7 @@ export function AppPage({ appId }: { appId: string }) {
               <ul style={{ margin: "4px 0", paddingLeft: 18 }}>
                 {hotspots.map((h) => (
                   <li key={h.id}>
-                    {h.id}: score {h.score.toFixed(2)}, {Math.round(h.radius_m)} m
+                    {h.id}: peak {h.peak.toFixed(2)}, {Math.round(h.area_m2)} m², {h.persisted_ticks} ticks
                   </li>
                 ))}
               </ul>

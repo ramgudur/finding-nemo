@@ -27,14 +27,23 @@ export interface MapResponse {
   layers: Record<string, CellCollection>;
 }
 
+/** Matches engine/tick.Hotspot (proposed by Kida A for models.py). */
 export interface Hotspot {
   id: string;
   lat: number;
   lon: number;
-  radius_m: number;
-  score: number;
-  contributing_layers?: string[];
+  peak: number;
+  mean: number;
+  area_m2: number;
+  n_cells: number;
+  persisted_ticks: number;
+  contributing_layers: string[];
   visibility?: Visibility;
+}
+
+/** Radius of a circle with the hotspot's area, for drawing. */
+export function hotspotRadiusM(h: Hotspot): number {
+  return Math.sqrt(h.area_m2 / Math.PI);
 }
 
 export interface HotspotsResponse {

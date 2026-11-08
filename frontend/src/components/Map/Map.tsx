@@ -1,6 +1,6 @@
 import L from "leaflet";
 import { useEffect, useRef } from "react";
-import { cellValue, type CellCollection, type GeoJsonBBox, type Hotspot } from "../../api/outputs";
+import { cellValue, hotspotRadiusM, type CellCollection, type GeoJsonBBox, type Hotspot } from "../../api/outputs";
 import { bboxToBounds, heatStyle, toLatLng } from "./geo";
 
 interface Props {
@@ -55,8 +55,8 @@ export function Map({ bbox, layers, visible, hotspots }: Props) {
       }).addTo(group);
     }
     for (const h of hotspots) {
-      L.circle(toLatLng(h.lat, h.lon), { radius: h.radius_m, color: "#7a00cc", weight: 2, fill: false })
-        .bindTooltip(`${h.id}: score ${h.score.toFixed(2)}`)
+      L.circle(toLatLng(h.lat, h.lon), { radius: hotspotRadiusM(h), color: "#7a00cc", weight: 2, fill: false })
+        .bindTooltip(`${h.id}: peak ${h.peak.toFixed(2)}`)
         .addTo(group);
     }
   }, [layers, visible, hotspots]);
