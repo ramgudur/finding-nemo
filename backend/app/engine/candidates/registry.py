@@ -12,7 +12,9 @@ A hotspot candidate is dropped when a candidate from an operator already covers 
 `CandidateTracker` gives candidates stable ids across ticks: a draft within
 `max(MATCH_CELLS · cell_m, previous radius)` of an unused candidate from the same generator (and,
 for generators with `track_by_layers`, the same layers) from the previous tick keeps that id and
-increments `persisted_ticks`.
+increments `persisted_ticks`. A candidate missing for up to `GRACE_TICKS` ticks (e.g. a hotspot
+candidate briefly covered by an operator candidate) stays dormant, so it comes back with its id
+and persistence instead of restarting at 0.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from .flow_endpoints import flow_endpoints
 from .persistent_hotspots import persistent_hotspots
 
 MATCH_CELLS = 3.0  # scales with cell_m
+GRACE_TICKS = 2  # a candidate missing this many ticks may still come back with its id
 HOTSPOTS = "@hotspots"  # reads_op of generators that read the tick's hotspots, not an operator
 
 
@@ -135,20 +138,22 @@ class CandidateTracker:
 
     def __init__(self) -> None:
         self._prev: list[Candidate] = []
+        self._dormant: dict[str, tuple[Candidate, int]] = {}  # id -> (candidate, ticks missing)
         self._next = 0
 
     def update(self, drafts: list[CandidateDraft], grid: GridLike) -> list[Candidate]:
         used: set[str] = set()
         out: list[Candidate] = []
+        pool = self._prev + [c for c, _ in self._dormant.values()]
         prev_xy = {}
-        for c in self._prev:
+        for c in pool:
             px, py = grid.to_xy(np.array([c.lat]), np.array([c.lon]))
             prev_xy[c.id] = (float(px[0]), float(py[0]))
         for d in drafts:
             x, y = (float(v[0]) for v in grid.to_xy(np.array([d.lat]), np.array([d.lon])))
             key = _track_key(d.source, d.contributing_layers)
             best_d, best = np.inf, None
-            for c in self._prev:
+            for c in pool:
                 if c.id in used or _track_key(c.source, c.contributing_layers) != key:
                     continue
                 px, py = prev_xy[c.id]
@@ -173,5 +178,13 @@ class CandidateTracker:
                     persisted_ticks=persisted,
                 )
             )
+        dormant = {}
+        for c in self._prev:
+            if c.id not in used:
+                dormant[c.id] = (c, 1)
+        for cid, (c, missing) in self._dormant.items():
+            if cid not in used and missing < GRACE_TICKS:
+                dormant[cid] = (c, missing + 1)
+        self._dormant = dormant
         self._prev = out
         return out

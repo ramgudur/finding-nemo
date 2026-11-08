@@ -77,4 +77,4 @@ def event_points(
     idx = np.flatnonzero(m)
     idx = idx[np.argsort(-w[idx], kind="stable")][:MAX_DOC_EXTRAS]
     docs = [{"lat": float(ev.lat[i]), "lon": float(ev.lon[i]), "w": float(w[i])} for i in idx]
-    return OperatorResult(layer=layer, extras={"n_docs": int(m.sum()), "docs": docs})
+    return OperatorResult(layer=layer, extras={"n_docs": int(m.sum()), "docs": docs, "sigma_m": params.sigma_m})

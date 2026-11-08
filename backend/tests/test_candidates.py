@@ -271,3 +271,88 @@ def test_tick_gives_candidates_to_an_app_without_tracks():
     assert GRID.dist_m({"lat": hot1.lat, "lon": hot1.lon}, (150.0, 350.0)) < 40.0
     doc = next(c for c in r1.candidates if c.source == "event_clusters")
     assert doc.contributing_layers == ["docs.event_points"]
+
+
+# -- #199: join distance follows the documents' location spread; flicker keeps persistence ------
+
+
+def _ll5(g, x, y):
+    lat, lon = g.to_latlon(np.array([x]), np.array([y]))
+    return float(lat[0]), float(lon[0])
+
+
+def test_event_clusters_join_and_radius_follow_sigma_m():
+    from app.engine.candidates.event_clusters import event_clusters
+
+    g = LocalGrid(cell_m=5.0, h=100, w=100)
+    docs = [{"lat": la, "lon": lo, "w": 1.0} for la, lo in (_ll5(g, 200, 200), _ll5(g, 240, 200))]
+    # without a spread: 3 cells (15 m) apart is too far -> two clusters (the old behaviour)
+    assert len(event_clusters("n.event_points", {"docs": docs}, g)) == 2
+    # with the operator's sigma_m (75 m): one place
+    (c,) = event_clusters("n.event_points", {"docs": docs, "sigma_m": 75.0}, g)
+    assert c.stats["n_docs"] == 2 and c.radius_m >= 75.0
+    (single,) = event_clusters("n.event_points", {"docs": docs[:1], "sigma_m": 75.0}, g)
+    assert single.radius_m == 75.0
+
+
+def test_event_clusters_join_the_nearest_cluster():
+    from app.engine.candidates.event_clusters import event_clusters
+
+    g = LocalGrid(cell_m=5.0, h=100, w=100)
+    # two heavy seeds 20 m apart, then a light doc 3 m from the second seed (17 m from the first)
+    rows = [(100, 100, 5.0), (120, 100, 4.0), (117, 100, 1.0)]
+    docs = [{"lat": la, "lon": lo, "w": w} for (x, y, w) in rows for la, lo in [_ll5(g, x, y)]]
+    out = event_clusters("n.event_points", {"docs": docs, "sigma_m": 18.0}, g)
+    by_n = sorted(c.stats["n_docs"] for c in out)
+    assert by_n == [1.0, 2.0]
+    two = next(c for c in out if c.stats["n_docs"] == 2)
+    assert _dist(g, two, (118.6, 100)) < 3.0  # joined the nearer (second) seed
+
+
+def _dist(g, c, xy):
+    x, y = g.to_xy(np.array([c.lat]), np.array([c.lon]))
+    return float(np.hypot(x[0] - xy[0], y[0] - xy[1]))
+
+
+def test_event_points_reports_sigma_m():
+    from synthetic import FixedClock, events_from_xy
+
+    from app.engine.operators.event_points import EventPointsParams, event_points
+
+    ev = events_from_xy(GRID, [("src", 10.0, 250.0, 250.0, 1.0, "d1")], ("confidence", "doc_id"))
+    r = event_points(ev, EventPointsParams(sigma_m=40.0), None, FixedClock(10.0), GRID)
+    assert r.extras["sigma_m"] == 40.0
+
+
+class _Hot:
+    def __init__(self, lat, lon):
+        self.lat, self.lon, self.radius_m = lat, lon, 30.0
+        self.score, self.mean, self.area_m2, self.n_cells = 0.9, 0.7, 2800.0, 112
+        self.contributing_layers = ["a"]
+
+
+def test_hotspot_candidate_survives_a_brief_overlap_with_its_id_and_persistence():
+    g = LocalGrid(cell_m=5.0, h=100, w=100)
+    tr = registry.CandidateTracker()
+    lat, lon = _ll5(g, 250, 250)
+    hs = [_Hot(lat, lon)]
+    dwell = {"clusters": [{"lat": lat, "lon": lon, "radius_m": 10, "n_users": 3, "mean_dwell_s": 200, "weight": 3}]}
+    ids = []
+    for with_dwell in (False, False, True, False, False):
+        drafts, _ = registry.generate({"d.dwell": dwell} if with_dwell else {}, {"d.dwell": "dwell"}, g, hotspots=hs)
+        ids.append([(c.id, c.persisted_ticks) for c in tr.update(drafts, g) if c.source == "persistent_hotspots"])
+    assert ids[0] == [("c1", 0)] and ids[1] == [("c1", 1)]
+    assert ids[2] == []  # covered by the dwell candidate this tick
+    assert ids[3] == [("c1", 2)] and ids[4] == [("c1", 3)]  # back with its id; persistence continues
+
+
+def test_candidate_gone_longer_than_grace_gets_a_new_id():
+    g = LocalGrid(cell_m=5.0, h=100, w=100)
+    tr = registry.CandidateTracker()
+    lat, lon = _ll5(g, 250, 250)
+    d = CandidateDraft(lat, lon, 20.0, "dwell_clusters", {}, ["x.dwell"])
+    (first,) = tr.update([d], g)
+    for _ in range(registry.GRACE_TICKS + 1):
+        assert tr.update([], g) == []
+    (again,) = tr.update([d], g)
+    assert again.id != first.id and again.persisted_ticks == 0
