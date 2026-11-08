@@ -97,7 +97,7 @@ def test_schemas_per_agent():
     assert {"run_backtest", "apply_changes", "set_user_trust"} <= critic
     assert "pin_weight" not in critic
     assert all(t["function"]["parameters"]["type"] == "object" for t in registry.tool_schemas("critic"))
-    assert registry.tool_schemas("scout") == []
+    assert {t["function"]["name"] for t in registry.tool_schemas("scout")} == {"annotate"}
 
 
 def test_weight_change_flow_holds_flexible_sum_and_writes_changes(env, scripted):
