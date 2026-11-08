@@ -1,0 +1,86 @@
+{
+  "app_id": "flyway",
+  "intent": "Find the places tagged birds use along their flyway: where they land, linger and gather, and how wind may carry their movement, and name those places from map evidence.",
+  "status": "draft",
+  "grid": {
+    "cell_m": 50,
+    "bbox": {
+      "min_lat": 32.807034,
+      "min_lon": -96.743877,
+      "max_lat": 32.842966,
+      "max_lon": -96.701123
+    }
+  },
+  "inputs": [
+    {
+      "id": "tags",
+      "kind": "push",
+      "shape": "track",
+      "tier": "flexible",
+      "visibility": "authority",
+      "meaning": "GPS tags on birds report a position about every minute. Birds land and linger at places they use (water, roosts, feeding grounds), then fly between them fast and in fairly straight lines.",
+      "fields": [
+        { "name": "tag_id", "type": "string", "required": false, "description": "Hardware tag identifier." }
+      ],
+      "operators": [
+        { "op": "dwell", "weight": 0.7, "radius_m": 60, "min_dwell_s": 600, "window_s": 3600, "half_life_s": 1800, "sigma_m": 60, "cluster_m": 80 },
+        { "op": "density", "weight": 0.3, "half_life_s": 1800, "sigma_m": 60 }
+      ],
+      "plausibility": { "max_speed_mps": 30, "jitter_m": 40, "flag_constant_speed": false, "flag_straight_line": false }
+    },
+    {
+      "id": "wind",
+      "kind": "pull",
+      "shape": "field",
+      "tier": "stiff",
+      "visibility": "public",
+      "meaning": "Surface wind over the area: speed and the direction it comes from. Wind may carry where birds drift.",
+      "fields": [
+        { "name": "wind_speed_10m", "type": "number", "required": true, "description": "m/s" },
+        { "name": "wind_direction_10m", "type": "number", "required": true, "description": "compass degrees the wind comes from" }
+      ],
+      "connector": {
+        "type": "json_api",
+        "preset": "open_meteo",
+        "poll_s": 900,
+        "config": { "latitude": 32.825, "longitude": -96.7225 }
+      },
+      "operators": [
+        {
+          "op": "field",
+          "weight": 0.0,
+          "value_field": "wind_speed_10m",
+          "vector_speed_field": "wind_speed_10m",
+          "vector_dir_field": "wind_direction_10m",
+          "vector_dir_convention": "from",
+          "shift_layer": "tags.density",
+          "shift_horizon_s": 1800
+        }
+      ]
+    }
+  ],
+  "verification": [
+    { "method": "predictive_check", "priority": 1 },
+    { "method": "cross_input_agreement", "priority": 2 }
+  ],
+  "outputs": {
+    "layers": [
+      { "id": "score", "visibility": "authority" },
+      { "id": "tags.dwell", "visibility": "authority" },
+      { "id": "tags.density", "visibility": "authority" },
+      { "id": "wind.field", "visibility": "public" }
+    ],
+    "poi_labels": {
+      "mode": "auto",
+      "min_confidence": 0.6,
+      "label_set": [
+        { "label": "watering hole" },
+        { "label": "roost" },
+        { "label": "feeding ground" },
+        { "label": "stopover" }
+      ]
+    },
+    "hotspot_threshold": 0.5
+  },
+  "routing": { "enabled": false }
+}
