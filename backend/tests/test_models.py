@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from app.core.models import AppSpec, Event, Instruction, PoiLabel
+from app.core.models import AppSpec, BBox, Event, Instruction, PoiLabel
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -75,6 +75,11 @@ def test_bbox_must_be_ordered():
     bad = _spec(grid={"cell_m": 10, "bbox": {"min_lat": 1.0, "min_lon": 0.0, "max_lat": 0.5, "max_lon": 1.0}})
     with pytest.raises(ValidationError, match="bbox"):
         AppSpec.model_validate(bad)
+
+
+def test_bbox_as_geojson_order():
+    b = BBox(min_lat=32.0, min_lon=-97.0, max_lat=33.0, max_lon=-96.0)
+    assert b.as_geojson() == (-97.0, 32.0, -96.0, 33.0)
 
 
 def test_event_keeps_input_fields_as_extras():

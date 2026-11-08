@@ -54,6 +54,10 @@ class BBox(Model):
             raise ValueError("bbox min must be below max")
         return self
 
+    def as_geojson(self) -> tuple[Lon, Lat, Lon, Lat]:
+        """(min_lon, min_lat, max_lon, max_lat): the order `engine/grid.Grid(bbox=...)` takes."""
+        return (self.min_lon, self.min_lat, self.max_lon, self.max_lat)
+
 
 class GridSpec(Model):
     cell_m: float = Field(gt=0)
