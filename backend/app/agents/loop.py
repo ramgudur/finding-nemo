@@ -20,6 +20,7 @@ validated output, a failed/gave-up run, or -- when the provider's rate budget is
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable
@@ -83,7 +84,10 @@ async def _run_tool_calls(
             result: dict[str, Any] = {"ok": False, "error": f"invalid JSON arguments: {e}"}
             args = {}
         else:
-            result = call_tool(ctx, tc.function.name, args)
+            # In a worker thread: tools may block on network (Overpass, geocoding, fetch_url,
+            # test_connector) or CPU (batch backtests); on the event loop they would freeze every
+            # request, WebSocket stream and tick schedule meanwhile. The Db is thread-safe (RLock).
+            result = await asyncio.to_thread(call_tool, ctx, tc.function.name, args)
         if on_tool_result is not None:
             on_tool_result(tc.function.name, args, result)
         summary = str(result.get("result") if result.get("ok") else result.get("error"))[:200]
