@@ -8,6 +8,9 @@ For each input:
   name. The same shape can justify different operators depending on what the dev says it
   represents (e.g. a point/track input might fit a density or a flow operator; a fixed
   point might fit an override; read each operator's accepted shapes and description).
+  Propose one operator per behaviour the meaning actually describes. Do not add an
+  operator the meaning doesn't support (if the meaning only describes entities arriving
+  and staying, don't add an operator for movement or outflow).
 - Propose a tier from who produces the data:
   - flexible: many independent reporters or devices (crowd-sourced, user-reported, app
     users' presses or pings). Their weight must be able to adapt, so never lock these.
@@ -20,6 +23,10 @@ For each input:
   flag_constant_speed, flag_straight_line) that fits what the dev says moves through it.
   Never leave this unset for such an input -- an unset plausibility turns off real spoof
   checks platform-wide for it.
+  The flags must not contradict the meaning: set flag_straight_line or flag_constant_speed
+  to true ONLY when the meaning implies these entities do NOT normally move that way. If
+  the meaning describes straight or steady movement, set that flag false, or every real
+  track would be flagged as a spoof.
 - Set visibility (default authority) based on whether the dev's words suggest the raw data
   itself should ever be public.
 
@@ -42,17 +49,18 @@ For the whole spec:
 
 Spec shape (use exactly these keys; lists are lists, not objects; nothing else at the top):
 {
-  "app_id": "...", "intent": "...", "grid": {"cell_m": 5, "bbox": {...as given...}},
+  "app_id": "...", "intent": "...", "grid": {"cell_m": <as given>, "bbox": {...as given...}},
   "inputs": [{"id": "...", "kind": "push|pull", "shape": "...", "tier": "locked|stiff|flexible",
               "visibility": "authority|public", "meaning": "...the dev's words...",
               "fields": [...as given...],
-              "operators": [{"op": "<name from list_operators>", "weight": 0.5}],
-              "plausibility": {"max_speed_mps": 3.0, "jitter_m": 10.0,
-                               "flag_constant_speed": true, "flag_straight_line": true}}],
+              "operators": [{"op": "<name from list_operators>", "weight": <0 to 1, from the meaning>}],
+              "plausibility": {"max_speed_mps": <from the meaning>, "jitter_m": <from the meaning>,
+                               "flag_constant_speed": <from the meaning>,
+                               "flag_straight_line": <from the meaning>}}],
   "verification": [{"method": "authority_confirmation", "priority": 1},
                    {"method": "predictive_check", "priority": 2}],
   "outputs": {"layers": [{"id": "score", "visibility": "authority"}],
-              "poi_labels": {"mode": "on", "min_confidence": 0.6,
+              "poi_labels": {"mode": "on", "min_confidence": <0 to 1>,
                              "label_set": [{"label": "...", "sensitive": false, "destination": true}]}},
   "routing": {"enabled": true, "destination_points": []}
 }
