@@ -52,7 +52,9 @@ class WeightSlot:
 
     ``tier`` and ``flexible_total``-relevant values are fixed at creation. ``history``
     is ``[(t, weight), ...]`` of applied values (any order), used for the stiff
-    one-hour window; it may be empty.
+    one-hour window; it may be empty. ``created_weight`` is the weight set at creation
+    (the confirmed spec's value): the stiff window measures from it until an applied
+    change is a full window old, since ``history`` only holds values after changes.
     """
 
     layer_id: str
@@ -60,6 +62,7 @@ class WeightSlot:
     weight: float
     pinned: bool = False
     history: Sequence[tuple[float, float]] = field(default_factory=tuple)
+    created_weight: float | None = None
 
 
 @dataclass
@@ -92,13 +95,17 @@ def flexible_total(slots: Iterable[WeightSlot]) -> float:
 def stiff_reference(slot: WeightSlot, now: float, window_s: float = STIFF_WINDOW_S) -> float:
     """Weight as of ``now - window_s``: the latest history entry at or before that time.
 
-    Falls back to the earliest known value (or the current weight) when history
-    doesn't reach back a full window, so a new stiff weight can't drift faster.
+    When history doesn't reach back a full window, the weight then was the one set at
+    creation (``created_weight``), so the window measures from it: 0.50 -> 0.54 -> 0.58
+    inside one hour is +16%, not two small steps. Without a ``created_weight`` it falls
+    back to the earliest known value (or the current weight).
     """
     cutoff = now - window_s
     before = [(t, w) for t, w in slot.history if t <= cutoff]
     if before:
         return float(max(before, key=lambda p: p[0])[1])
+    if slot.created_weight is not None:
+        return float(slot.created_weight)
     if slot.history:
         return float(min(slot.history, key=lambda p: p[0])[1])
     return float(slot.weight)
