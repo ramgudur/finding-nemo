@@ -224,6 +224,12 @@ Ingest keys and authority keys are generated per app at activation and stored in
 - `POST /v1/apps/{app}/scout`, body `ScoutRequest {input_id, request (1..500 chars)}`, returns `202 ScoutJobAccepted {job_id, app_id, input_id}`. 409 if the app isn't active; 422 for a push input. The request text goes only to the authority trace.
 - The POI Labeler proposes labels with the `propose_label` tool (at most 5 open per app). `why` is agent text and is authority-only.
 
+**Webhook (push, another service's JSON):** `POST /v1/apps/{app}/webhooks/{input}`
+- Auth: the ingest key, as `X-Ingest-Key` or `?key=` (a query-string key can end up in the sender's logs).
+- The input needs `webhook: WebhookMapping {items_path, lat, lon, ts?, ts_format: iso|epoch_s|epoch_ms, user_id?, fields{name: path}}`. Paths are dotted, with list indices; data only (rule 10); push inputs only. It's set from `CompileInput.webhook` and copied verbatim, writing a Change with kind `webhook`.
+- Each item is validated exactly like `/events`. The raw body is never stored. Limits: 1 MB and 500 items.
+- Returns `202 WebhookReceipt {received, accepted, rejected: [{index, reason}] (first 20)}`. Errors: 401, 404, 403 not active, 409 not push or no mapping, 413, 422.
+
 **Event (push):** `POST /v1/apps/{app}/inputs/{input}/events`
 - Header `X-Ingest-Key`; body `{user_id?, lat, lon, ts, ...input fields}`.
 - Validated against the input's `fields`. Rejected unless the app is `active`.
@@ -233,7 +239,7 @@ Ingest keys and authority keys are generated per app at activation and stored in
 - **POI:** `{id, candidate_id, lat, lon, radius_m, label, confidence, evidence[], visibility, status, created_at, updated_at}`
 - **Backtest:** `{id, kind: single|batch, candidates_tested, candidates_valid, train_scores, holdout_scores, passed, device: cpu|gpu, elapsed_ms, t}`
 - **TraceEntry:** `{t, app_id, agent, model, saw, hypothesis, tested, result, action, why, tool_calls[], skipped_reason?}`
-- **Change:** `{id, app_id, kind: weight|trust|poi|connector|spec_edit|spec_confirm, target, before, after, reason, backtest_id?, actor: agent|dev, reverts?, t}`
+- **Change:** `{id, app_id, kind: weight|trust|poi|connector|webhook|spec_edit|spec_confirm, target, before, after, reason, backtest_id?, actor: agent|dev, reverts?, t}`
 - **Instruction:** `{text, destination{lat, lon, label}, route[[lat, lon]], distance_m, computed_at, guard{passed, checks[]}}`
 - **Hotspot:** `{id, lat, lon, radius_m, score, mean, area_m2, n_cells, persisted_ticks, contributing_layers[], visibility}`. `score` is the peak cell score; `radius_m = sqrt(area_m2 / π)`. The tick produces it; `/hotspots` and the Critic/POI tools read it.
 - **MapResponse** (`GET /map?format=geojson`): `{app_id, t, cell_m, bbox: [min_lon, min_lat, max_lon, max_lat], layers: {<layer_id> | "score": FeatureCollection}}`. One Polygon feature per cell with `properties: {value, row, col}` (a single `value` field). Cells with `value < 0.01` are omitted to keep the payload small. Without the authority key, only `public` layers are included.
@@ -256,7 +262,7 @@ Ingest keys and authority keys are generated per app at activation and stored in
 | `GET /v1/apps/{app}/trace` | authority only |
 | `WS /v1/apps/{app}/stream` | filtered by key |
 | `POST /v1/apps/{app}/instruction` | public |
-| `/v1/apps/{app}/webhooks` | stub returning 501 |
+| `POST /v1/apps/{app}/webhooks/{input}` | ingest key |
 | `GET /v1/debug/...` | `DEMO_MODE=1` only |
 
 `POST /v1/apps/{app}/instruction` takes body `{lat, lon}` (the caller's own position). The server never looks up a position by user ID, so the endpoint can't be used to find anyone else.
@@ -363,7 +369,6 @@ The engine reads time only from `core/clock.py`. Use fixed seeds in tests.
 ## Scope
 
 - **Stubbed:**
-  - webhooks (501)
   - HTML connector (the config type is rejected)
   - Scout periodic re-evaluation (off; connectors still poll)
 - **Not building now** (pitch as future/production paths only):
