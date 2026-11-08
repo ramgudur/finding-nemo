@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -35,6 +36,8 @@ from app.tools.registry import call_tool, tool_schemas
 log = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+OnToolResult = Callable[[str, dict[str, Any], dict[str, Any]], None]
 
 _REPAIR_SYSTEM = (
     "The following JSON must validate against the given JSON Schema but does not. "
@@ -64,7 +67,11 @@ def _assistant_message(message: Any) -> dict[str, Any]:
 
 
 async def _run_tool_calls(
-    ctx: ToolContext, agent: AgentName, model_id: str, tool_calls: list[Any]
+    ctx: ToolContext,
+    agent: AgentName,
+    model_id: str,
+    tool_calls: list[Any],
+    on_tool_result: OnToolResult | None,
 ) -> list[dict[str, Any]]:
     """Executes each call, appends a `TraceEntry`, and returns the `tool` messages to feed back."""
     trace_calls: list[ToolCall] = []
@@ -77,6 +84,8 @@ async def _run_tool_calls(
             args = {}
         else:
             result = call_tool(ctx, tc.function.name, args)
+        if on_tool_result is not None:
+            on_tool_result(tc.function.name, args, result)
         summary = str(result.get("result") if result.get("ok") else result.get("error"))[:200]
         trace_calls.append(
             ToolCall(name=tc.function.name, args=args, ok=result.get("ok", False), result_summary=summary)
@@ -119,12 +128,15 @@ async def run_agent(
     llm: LlmRouter | None = None,
     max_iterations: int = 8,
     enable_thinking: bool = True,
+    on_tool_result: OnToolResult | None = None,
 ) -> T | str | None:
     """Run one tool-calling episode for `agent`.
 
     Returns the agent's final text (`output_model=None`, the default) or the validated
     `output_model` instance, or `None` on a skipped, rate-limited, or ultimately invalid
-    run (always traced either way)."""
+    run (always traced either way). `on_tool_result(name, args, result)` fires for every
+    executed tool call -- a caller that needs more than the trace's truncated summary
+    (e.g. the Critic reading real backtest deltas) hooks in there."""
     llm = llm or LlmRouter()
     model = llm.settings.agent_model(model_field)
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}, {"role": "user", "content": task}]
@@ -159,7 +171,7 @@ async def run_agent(
             _trace(ctx, agent, model=model.model_id, action="output", result=content[:500], why="validated")
             return result
 
-        messages.extend(await _run_tool_calls(ctx, agent, model.model_id, tool_calls))
+        messages.extend(await _run_tool_calls(ctx, agent, model.model_id, tool_calls, on_tool_result))
 
     _trace(ctx, agent, model=model.model_id, action="gave up", why=f"exceeded {max_iterations} iterations")
     return None

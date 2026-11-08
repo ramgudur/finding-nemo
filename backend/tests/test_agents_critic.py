@@ -8,6 +8,8 @@ from app.agents import critic as critic_mod
 from app.agents.critic import (
     CriticScheduler,
     _AppTriggerState,
+    _backtest_deltas,
+    _flywheel_line,
     hotspot_trigger,
     override_trigger,
     run_critic,
@@ -195,6 +197,96 @@ def test_verification_drop_trigger_handles_a_rejected_tool_call(monkeypatch):
     st = _AppTriggerState(last_run_at=0.0)
     monkeypatch.setattr(critic_mod, "call_tool", lambda *_a: {"ok": False, "error": "not enough ticks cached yet"})
     assert verification_drop_trigger(ctx, st) is None
+
+
+# -- flywheel deltas (real values from the backtest tool's own result, not the trace) ---
+
+
+def test_backtest_deltas_from_run_backtest_result():
+    result = {
+        "ok": True,
+        "result": {
+            "deciding_method": "predictive_check",
+            "baseline_train": {"predictive_check": 0.5},
+            "baseline_holdout": {"predictive_check": 0.4},
+            "candidate_train": {"predictive_check": 0.6},
+            "candidate_holdout": {"predictive_check": 0.55},
+        },
+    }
+    search_spec, train_delta, holdout_delta = _backtest_deltas("run_backtest", {}, result)
+    assert search_spec is None
+    assert train_delta == pytest.approx(0.1)
+    assert holdout_delta == pytest.approx(0.15)
+
+
+def test_backtest_deltas_from_run_backtest_batch_result():
+    args = {"layers": {"panic.density": [0.1, 0.9]}, "samples": 64}
+    result = {
+        "ok": True,
+        "result": {
+            "baseline_holdout": {"predictive_check": 0.4, "cross_input_agreement": 0.3},
+            "best_holdout": {"predictive_check": 0.5, "cross_input_agreement": 0.3},
+        },
+    }
+    search_spec, train_delta, holdout_delta = _backtest_deltas("run_backtest_batch", args, result)
+    assert search_spec == args
+    assert train_delta is None  # no baseline train score is exposed for the batch path
+    assert holdout_delta == pytest.approx(0.1)
+
+
+def test_backtest_deltas_ignores_a_rejected_call():
+    result = {"ok": False, "error": "rejected: cold start"}
+    assert _backtest_deltas("run_backtest", {}, result) == (None, None, None)
+
+
+def test_flywheel_line_reports_real_deltas_from_backtest_calls():
+    ctx, _ = _ticked_ctx()
+    backtest_calls = [
+        (
+            "run_backtest",
+            {},
+            {
+                "ok": True,
+                "result": {
+                    "deciding_method": "predictive_check",
+                    "baseline_train": {"predictive_check": 0.5},
+                    "baseline_holdout": {"predictive_check": 0.4},
+                    "candidate_train": {"predictive_check": 0.6},
+                    "candidate_holdout": {"predictive_check": 0.55},
+                },
+            },
+        )
+    ]
+    line = _flywheel_line(ctx, "scheduled check", ctx.now(), "done", backtest_calls)
+    assert line["best_train_delta"] == pytest.approx(0.1)
+    assert line["best_holdout_delta"] == pytest.approx(0.15)
+    assert line["search_spec"] is None
+
+
+# -- trigger cooldown -------------------------------------------------------------------
+
+
+def test_cooldown_bounds_a_hotspot_that_changes_id_every_poll(monkeypatch):
+    ctx, engine = _ticked_ctx()
+    calls = []
+
+    async def fake_run_critic(ctx, trigger, llm=None):
+        calls.append(trigger)
+        return None
+
+    monkeypatch.setattr(critic_mod, "run_critic", fake_run_critic)
+    monkeypatch.setattr(critic_mod, "TRIGGER_COOLDOWN_S", 5.0)
+    monkeypatch.setattr(critic_mod, "MIN_INTERVAL_S", 10_000.0)  # isolate the cooldown from the scheduled fallback
+    scheduler = CriticScheduler(ctx.db, engine)
+
+    for i in range(21):  # one poll per second, 0..20s: a brand new hotspot id every time
+        engine.clock.set(T0 + i)
+        engine.apps["test-app"].last.hotspots = [_hotspot(f"h{i}")]
+        asyncio.run(scheduler.check_once())
+
+    # a 5 s cooldown over 21 s of constant triggering fires at t=0, 5, 10, 15, 20: 5 times, not 21
+    assert len(calls) == 5
+    assert all(c.startswith("a new hotspot appeared") for c in calls)
 
 
 # -- scheduler --------------------------------------------------------------------------
