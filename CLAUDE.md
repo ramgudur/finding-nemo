@@ -156,13 +156,13 @@ OPENROUTER_API_KEY=
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 
 # per-agent models, format "<provider>::<model-id>". Verify exact IDs on first run; log them at startup.
-COMPILER_MODEL=nvidia::nvidia/nemotron-3-super-120b-a12b
-CRITIC_MODEL=nvidia::nvidia/nemotron-3-super-120b-a12b
-SCOUT_MODEL=nvidia::nvidia/nemotron-3-super-120b-a12b
-EXTRACT_MODEL=openrouter::nvidia/nemotron-3.5-lightning:free
-POI_MODEL=openrouter::nvidia/nemotron-3.5-lightning:free
-REPAIR_MODEL=openrouter::nvidia/nemotron-3.5-lightning:free
-SAFETY_MODEL=openrouter::nvidia/nemotron-3.5-content-safety:free   # used only if instruction rephrasing is on
+COMPILER_MODEL=nvidia::nvidia/nemotron-3.5-super-vl-120b-a12b
+CRITIC_MODEL=nvidia::nvidia/nemotron-3.5-super-vl-120b-a12b
+SCOUT_MODEL=nvidia::nvidia/nemotron-3.5-super-vl-120b-a12b
+EXTRACT_MODEL=nvidia::nvidia/nemotron-3.5-lightning-30b-a3b
+POI_MODEL=nvidia::nvidia/nemotron-3.5-lightning-30b-a3b
+REPAIR_MODEL=nvidia::nvidia/nemotron-3.5-lightning-30b-a3b
+SAFETY_MODEL=nvidia::nvidia/llama-3.1-nemotron-safety-guard-8b-v3   # used only if instruction rephrasing is on
 
 NVIDIA_RPM=35              # free tier is ~40 RPM, shared across all models
 OPENROUTER_RPM=18          # free models: 20 RPM; daily cap of 50 unless the account has bought >= $10 of credits ever
@@ -448,3 +448,4 @@ Only the lead (`@ramgudur`) edits this section. Newest last. If a board thread d
 - **2026-11-08:** `specs/campus-alert.json`: `local_news` declares optional `doc_id` (string) and `confidence` (number) fields, so RSS connector events pass ingest field validation (found by Navmi in #112). Connector polling stamps time from `core/clock.py`, not wall time; the Compiler cache-hit path goes through `finalize_app` (never overwrites an active app) and writes a TraceEntry.
 - **2026-11-08:** Allen is back. He owns `frontend/`, `sim/`, `specs/`, fixtures, `api/debug.py`, `api/trace.py` and the end-user path: #107 (`api/instructions.py` + `EndUser.tsx`) and #108 (step-7 live path), moved from the lead's machine, which goes back to routing and review only. #86 (CuPy check) moves from seat b to seat a, so seat b can finish #102 and #106.
 - **2026-11-08:** GPU fact for the demo: only Ram's laptop has an NVIDIA GPU (RTX 3050 6GB, CUDA 12.5); Kida A, Kida B and Allen are CPU-only. CuPy is optional and never in `requirements.txt`; on a GPU box install `pip install "cupy-cuda12x[ctk]"` (plain `cupy-cuda12x` fails without CUDA headers). The batch backtest reports `device` honestly, so a live "on GPU" moment needs the demo backend running on Ram's laptop; anywhere else the demo says CPU. #86 (Ram) verifies CPU/GPU equivalence and records timings for the pitch.
+- **2026-11-08:** Nemotron runs on build.nvidia.com (NVIDIA API catalog) with the lead's key; Brev and OpenRouter are optional. Live check on that account: `nemotron-3-super-120b-a12b`, `nemotron-nano-3-30b-a3b` and `nemotron-3.5-content-safety` are listed but return 404 (not enabled for the account). Working: `nemotron-3.5-super-vl-120b-a12b` (Compiler/Critic/Scout: tool calls, `enable_thinking` honored), `nemotron-3.5-lightning-30b-a3b` (Extract/POI/Repair: tools, `low_effort`, JSON mode), `llama-3.1-nemotron-safety-guard-8b-v3` (Safety; it flagged a plain route instruction as "unsafe", so tune its prompt before rephrasing goes live). All agents now use the `nvidia` provider, so there is no OpenRouter daily cap. Defaults updated in `config.py`, `.env.example` and the Environment section.
