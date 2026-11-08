@@ -5,7 +5,9 @@ import json
 
 import openai
 import pytest
+from fake_llm import _PLACEHOLDER as PLACEHOLDER
 from fake_llm import (
+    SPECS,
     ExpectationFailed,
     FakeAsyncOpenAI,
     FakeOpenAI,
@@ -46,6 +48,18 @@ def test_every_script_is_well_formed(name):
             assert tc["name"] and ("arguments" in tc or "arguments_raw" in tc)
 
 
+def _resolve_for_schema_check(v):
+    """A ``${spec:name}`` placeholder resolves to the real spec dict (we know it statically,
+    unlike a ``${tool_result:...}`` placeholder, which needs a live conversation); anything
+    else just becomes a type-agnostic marker string."""
+    if isinstance(v, str) and (m := PLACEHOLDER.match(v)):
+        kind, ref = m.groups()
+        if kind == "spec":
+            return json.loads((SPECS / f"{ref}.json").read_text(encoding="utf-8"))
+        return "placeholder"
+    return v
+
+
 @pytest.mark.parametrize("name", scripts())
 def test_registered_tool_calls_validate_against_the_real_arg_models(name):
     """Recordings must not drift from tools/registry.py. Tools not registered yet are checked once they are."""
@@ -54,10 +68,7 @@ def test_registered_tool_calls_validate_against_the_real_arg_models(name):
             tool = registry.TOOLS.get(tc["name"])
             if tool is None or "arguments_raw" in tc:
                 continue
-            args = {
-                k: ("placeholder" if isinstance(v, str) and v.startswith("${") else v)
-                for k, v in tc["arguments"].items()
-            }
+            args = {k: _resolve_for_schema_check(v) for k, v in tc["arguments"].items()}
             try:
                 tool.args.model_validate(args)
             except ValidationError as e:
