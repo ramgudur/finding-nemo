@@ -19,6 +19,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.agents import budget
 from app.agents.llm import LlmRouter
 from app.agents.loop import run_agent
 from app.core.db import Db
@@ -32,6 +33,7 @@ MIN_INTERVAL_S = 60.0
 TRIGGER_COOLDOWN_S = 15.0
 PERSIST_TRIGGER_TICKS = 3
 MAX_ITERATIONS = 6
+AGENT = "poi"  # model field and budget key
 
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "poi_labeler.md").read_text(encoding="utf-8")
 
@@ -97,6 +99,7 @@ class _AppState:
     last_run_at: float
     last_triggered_at: float = float("-inf")
     triggered_candidates: set[str] = field(default_factory=set)
+    pending_trigger: str | None = None  # a trigger deferred because the rate budget was low
 
 
 def persist_trigger(state: _AppState, result: TickResult, labeled: set[str]) -> str | None:
@@ -122,6 +125,7 @@ class PoiLabelerScheduler:
         self.llm = llm or LlmRouter()
         self.poll_s = poll_s
         self._state: dict[str, _AppState] = {}
+        self._running: set[tuple[str, str]] = set()  # (app_id, agent) runs in flight
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
 
@@ -133,17 +137,36 @@ class PoiLabelerScheduler:
             return
         st = self._state.setdefault(app_id, _AppState(last_run_at=now))
         triggered = persist_trigger(st, result, self._labeled(app_id))
-        reason = None
-        if triggered is not None and now - st.last_triggered_at >= TRIGGER_COOLDOWN_S:
-            reason = triggered
-            st.last_triggered_at = now
-        elif now - st.last_run_at >= MIN_INTERVAL_S:
-            reason = "scheduled check"
+        reason, priority = None, None
+        if st.pending_trigger is not None and now - st.last_triggered_at >= TRIGGER_COOLDOWN_S:
+            reason, priority = st.pending_trigger, "triggered"  # a trigger deferred for budget
+        elif triggered is not None and now - st.last_triggered_at >= TRIGGER_COOLDOWN_S:
+            reason, priority = triggered, "triggered"
+        elif now - st.last_run_at >= budget.scaled_interval(
+            MIN_INTERVAL_S, len(self.engine.apps), AGENT, self.llm.rpm(AGENT)
+        ):
+            reason, priority = "scheduled check", "scheduled"
         if reason is None:
             return
+        if (app_id, AGENT) in self._running:
+            return  # never more than one in-flight run per app and agent
+        if not self.llm.admit(AGENT, budget.EST_CALLS[AGENT], priority):
+            # defer, don't skip: keep a trigger for the next poll; a scheduled check just waits
+            if priority == "triggered":
+                st.pending_trigger = reason
+            return
+        st.pending_trigger = None
+        if priority == "triggered":
+            st.last_triggered_at = now
         st.last_run_at = now
-        ctx = ToolContext(app_id=app_id, db=self.db, engine=self.engine, agent="poi_labeler", clock=self.engine.clock)
-        await run_poi_labeler(ctx, reason, self.llm)
+        self._running.add((app_id, AGENT))
+        try:
+            ctx = ToolContext(
+                app_id=app_id, db=self.db, engine=self.engine, agent="poi_labeler", clock=self.engine.clock
+            )
+            await run_poi_labeler(ctx, reason, self.llm)
+        finally:
+            self._running.discard((app_id, AGENT))
 
     async def check_once(self) -> None:
         now = self.engine.clock.now()

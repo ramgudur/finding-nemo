@@ -17,12 +17,14 @@ import asyncio
 import logging
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
+from app.agents.budget import HEADROOM, Priority
 from app.core.config import AgentField, Settings, get_settings
 
 log = logging.getLogger(__name__)
@@ -39,18 +41,33 @@ class RateLimited(Exception):
 @dataclass
 class _TokenBucket:
     rpm: float
+    clock: Callable[[], float] | None = None  # injectable for a fake clock; None = time.monotonic at call time
     tokens: float = field(init=False)
     updated_at: float = field(init=False)
 
     def __post_init__(self) -> None:
         self.tokens = max(1.0, self.rpm)
-        self.updated_at = time.monotonic()
+        self.updated_at = self._now()
+
+    def _now(self) -> float:
+        return self.clock() if self.clock is not None else time.monotonic()
+
+    @property
+    def capacity(self) -> float:
+        return max(1.0, self.rpm)
+
+    def _refill(self) -> None:
+        now = self._now()
+        self.tokens = min(self.capacity, self.tokens + (now - self.updated_at) * (self.rpm / 60.0))
+        self.updated_at = now
+
+    def available(self) -> float:
+        """Tokens available right now (refilled, not taken)."""
+        self._refill()
+        return self.tokens
 
     def try_take(self) -> bool:
-        capacity = max(1.0, self.rpm)
-        now = time.monotonic()
-        self.tokens = min(capacity, self.tokens + (now - self.updated_at) * (self.rpm / 60.0))
-        self.updated_at = now
+        self._refill()
         if self.tokens >= 1.0:
             self.tokens -= 1.0
             return True
@@ -72,10 +89,16 @@ class LlmRouter:
     real `openai` exceptions, exercising the retry path exactly as with the live API.
     """
 
-    def __init__(self, settings: Settings | None = None, clients: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        clients: dict[str, Any] | None = None,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
         self.settings = settings or get_settings()
         self._injected = dict(clients or {})
         self._providers: dict[str, _Provider] = {}
+        self._clock = clock
 
     def _provider(self, name: str) -> _Provider:
         if name not in self._providers:
@@ -84,8 +107,21 @@ class LlmRouter:
                 base_url = getattr(self.settings, f"{name}_base_url", None)
                 api_key = getattr(self.settings, f"{name}_api_key", "") or "unset"
                 client = AsyncOpenAI(base_url=base_url, api_key=api_key)
-            self._providers[name] = _Provider(client=client, bucket=_TokenBucket(self.settings.rpm(name)))
+            self._providers[name] = _Provider(
+                client=client, bucket=_TokenBucket(self.settings.rpm(name), clock=self._clock)
+            )
         return self._providers[name]
+
+    def rpm(self, agent: AgentField) -> float:
+        """The RPM of the provider serving `agent`."""
+        return float(self.settings.rpm(self.settings.agent_model(agent).provider))
+
+    def admit(self, agent: AgentField, est_calls: int, priority: Priority) -> bool:
+        """True if `agent`'s provider can cover a whole run of `est_calls` calls now while leaving
+        `budget.HEADROOM[priority]` of its capacity for higher-priority work. Takes nothing:
+        each call still takes its own token (#221)."""
+        bucket = self._provider(self.settings.agent_model(agent).provider).bucket
+        return bucket.available() >= est_calls + HEADROOM[priority] * bucket.capacity
 
     def log_startup_models(self, agents: list[AgentField]) -> None:
         """Log each agent's resolved (provider, model_id) once at startup. Never logs a key."""

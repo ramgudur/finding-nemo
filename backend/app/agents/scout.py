@@ -24,6 +24,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from app.agents import budget
 from app.agents.llm import LlmRouter, RateLimited
 from app.agents.loop import _repair, run_agent
 from app.core.db import Db
@@ -201,6 +202,10 @@ class ScoutRunner:
     async def check_once(self) -> None:
         for app_id in list(self.engine.apps):
             for req in pending_requests(self.db, app_id):
+                # #221: a request is a triggered run; without budget it stays pending (no handled
+                # marker is written) and runs on a later poll
+                if not self.llm.admit("scout", budget.EST_CALLS["scout"], "triggered"):
+                    return
                 ctx = ToolContext(app_id=app_id, db=self.db, engine=self.engine, agent="scout", clock=self.engine.clock)
                 try:
                     await run_scout(ctx, req.saw, request_instructions(req), self.llm)

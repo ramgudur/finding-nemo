@@ -345,7 +345,14 @@ def test_scheduler_falls_back_to_a_scheduled_check_after_min_interval(monkeypatc
     asyncio.run(scheduler.check_once())
     assert calls == []  # same hotspot, under the interval: nothing yet
 
-    engine.clock.set(T0 + 11.0)
+    # #221: the interval is MIN_INTERVAL_S stretched to the critic's share of the rate budget
+    from app.agents import budget
+
+    interval = budget.scaled_interval(10.0, 1, "critic", scheduler.llm.rpm("critic"))
+    engine.clock.set(T0 + interval - 1.0)
+    asyncio.run(scheduler.check_once())
+    assert calls == []
+    engine.clock.set(T0 + interval + 1.0)
     asyncio.run(scheduler.check_once())
     assert calls == ["scheduled check"]
 
